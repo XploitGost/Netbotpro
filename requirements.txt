@@ -1,0 +1,14 @@
+requests
+aiosqlite
+scapy
+psutil
+numpy
+scikit-learn
+pandas
+openpyxl
+fpdf2
+fastapi
+uvicorn
+python-multipart
+websockets
+wsproto

@@ -1,0 +1,12 @@
+[2m7:00:37 PM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)
+[2m7:00:43 PM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)
+[2m7:00:49 PM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)
+[2m7:00:55 PM[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1595:16)

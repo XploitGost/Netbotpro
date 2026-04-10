@@ -1,0 +1,62 @@
+import { buildAuthHeaders } from "./useLocalAuth";
+
+const API_BASE = "/api";
+
+async function readResponsePayload(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const text = await res.text();
+    return text ? { detail: text } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function useApiClient(localToken) {
+  async function request(path, options = {}) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: buildAuthHeaders(localToken, options.headers || {}),
+    });
+    const data = await readResponsePayload(res);
+    if (!res.ok) {
+      throw new Error(data?.detail || `Request failed for ${path} (${res.status})`);
+    }
+    return data ?? {};
+  }
+
+  return {
+    apiBase: API_BASE,
+    getDashboard: () => request("/dashboard"),
+    getSettings: () => request("/settings"),
+    getInterfaces: () => request("/interfaces"),
+    putSettings: (payload) => request("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    startSniffer: (payload) => request("/sniffer/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    stopSniffer: () => request("/sniffer/stop", { method: "POST" }),
+    resetSession: () => request("/session/reset", { method: "POST" }),
+    getPackets: (params) => request(`/packets?${new URLSearchParams(params).toString()}`),
+    getPacketDetail: (id) => request(`/packets/${encodeURIComponent(id)}`),
+    getAlerts: (params) => request(`/alerts?${new URLSearchParams(params).toString()}`),
+    getAlertDetail: (id) => request(`/alerts/${encodeURIComponent(id)}`),
+    getReports: () => request("/reports"),
+    runTraceroute: (payload) => request("/traceroute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    exportSession: (payload) => request("/exports/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    analyzePcap: async (file) => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/analyze-pcap`, { method: "POST", headers: buildAuthHeaders(localToken), body: form });
+      const data = await readResponsePayload(res);
+      if (!res.ok) {
+        throw new Error(data?.detail || `Offline analysis failed (${res.status})`);
+      }
+      return data ?? {};
+    },
+  };
+}

@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import logging
+import threading
+from datetime import datetime
+from typing import Any
+
+from backend.app.bootstrap import ensure_project_root_on_path
+from backend.app.services.event_bus import EventBus
+from backend.app.services.settings_service import get_settings_snapshot
+from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
+from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
+from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
+from backend.app.services.sniffer_persistence import SnifferPersistence
+
+ensure_project_root_on_path()
+
+from core.core_sniffer import NetSniffer  # noqa: E402
+from core.netbotpro_sniffer_core import describe_capture_interface  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+class SnifferService:
+    def __init__(self, event_bus: EventBus) -> None:
+        self._lock = threading.Lock()
+        self._event_bus = event_bus
+        self._engine: NetSniffer | None = None
+        self._iface: str | None = None
+        self._packet_seq = 0
+        self._alert_seq = 0
+        self._state = SnifferDashboardState()
+        self._detection_pipeline = SnifferDetectionPipeline(settings_provider=get_settings_snapshot)
+        self._persistence = SnifferPersistence()
+        self._publisher = SnifferEventPublisher(event_bus)
+
+    def _on_packet(self, meta: dict[str, Any]) -> None:
+        packet = dict(meta)
+        packet.setdefault("ts", datetime.utcnow().isoformat() + "Z")
+        packet.setdefault("id", self._next_packet_id())
+        try:
+            alerts = self._detection_pipeline.analyze(packet)
+        except Exception:
+            logger.exception("Packet analysis pipeline crashed")
+            alerts = []
+        alerts = self._assign_alert_ids(packet, alerts)
+
+        self._state.add_packet(packet)
+        self._state.add_alerts(alerts)
+        self._persistence.persist(packet, alerts)
+        self._publisher.publish_packet(packet)
+        self._publisher.publish_alerts(alerts)
+
+    def start(self, iface: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            if self._engine is not None:
+                already_running = True
+            else:
+                already_running = False
+                self._engine = NetSniffer(self._on_packet)
+                self._engine.start(iface=iface)
+                actual_iface = self._engine.selected_iface() or iface or "default"
+                self._iface = describe_capture_interface(actual_iface) or str(actual_iface)
+        if already_running:
+            return self.get_state()
+        state = self.get_state()
+        self._publisher.publish_state("sniffer:started", state)
+        return state
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            engine = self._engine
+            self._engine = None
+        if engine is not None:
+            engine.stop()
+        state = self.get_state()
+        self._publisher.publish_state("sniffer:stopped", state)
+        return state
+
+    def close(self) -> None:
+        self.stop()
+        self._persistence.close()
+
+    def get_state(self) -> dict[str, Any]:
+        with self._lock:
+            running = self._engine is not None
+            iface = self._iface
+        state = self._state.state(running=running, iface=iface)
+        state["observability"] = self.observability()
+        return state
+
+    def recent_packets(self) -> list[dict[str, Any]]:
+        return self._state.recent_packets()
+
+    def recent_alerts(self) -> list[dict[str, Any]]:
+        return self._state.recent_alerts()
+
+    def dashboard(self) -> dict[str, Any]:
+        with self._lock:
+            running = self._engine is not None
+            iface = self._iface
+        dashboard = self._state.dashboard(running=running, iface=iface)
+        dashboard["observability"] = self.observability()
+        return dashboard
+
+    def reset_session(self) -> dict[str, Any]:
+        with self._lock:
+            running = self._engine is not None
+            iface = self._iface
+        self._state.reset()
+        state = self._state.state(running=running, iface=iface)
+        state["observability"] = self.observability()
+        self._publisher.publish_state("sniffer:reset", state)
+        return state
+
+    def persistence_stats(self) -> dict[str, int | float]:
+        return self._persistence.stats()
+
+    def auto_block_stats(self) -> dict[str, int | float]:
+        return self._detection_pipeline.stats()
+
+    def observability(self) -> dict[str, Any]:
+        return {
+            "event_bus": self._event_bus.stats(),
+            "persistence": self.persistence_stats(),
+            "auto_block": self.auto_block_stats(),
+        }
+
+    def _next_packet_id(self) -> str:
+        with self._lock:
+            self._packet_seq += 1
+            return f"mem-pkt-{self._packet_seq}"
+
+    def _assign_alert_ids(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for alert in alerts:
+            row = dict(alert)
+            with self._lock:
+                self._alert_seq += 1
+                row.setdefault("id", f"mem-alert-{self._alert_seq}")
+            row.setdefault("packet_id", packet.get("id"))
+            normalized.append(row)
+        return normalized
