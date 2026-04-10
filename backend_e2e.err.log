@@ -1,5 +1,0 @@
-INFO:     Started server process [2176]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-2026-04-09 18:59:38,694 INFO netbotpro.api request method=GET path=/api/status status=200 duration_ms=2.20 client=127.0.0.1
