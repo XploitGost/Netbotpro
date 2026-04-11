@@ -4,7 +4,9 @@ import json
 import os
 from typing import Dict, Any
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DEFAULT_BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+BASE_DIR = os.environ.get("NETBOT_CONFIG_DIR", DEFAULT_BASE_DIR)
+os.makedirs(BASE_DIR, exist_ok=True)
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
 # مقادیر پیش‌فرض برای تنظیمات

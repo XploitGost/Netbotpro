@@ -12,20 +12,19 @@ from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
+from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
 
 ensure_project_root_on_path()
-
-from core.core_sniffer import NetSniffer  # noqa: E402
-from core.netbotpro_sniffer_core import describe_capture_interface  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 class SnifferService:
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, event_bus: EventBus, capture_provider: CaptureProvider | None = None) -> None:
         self._lock = threading.Lock()
         self._event_bus = event_bus
-        self._engine: NetSniffer | None = None
+        self._capture_provider = capture_provider or SystemCaptureProvider()
+        self._engine: CaptureSession | None = None
         self._iface: str | None = None
         self._packet_seq = 0
         self._alert_seq = 0
@@ -57,10 +56,10 @@ class SnifferService:
                 already_running = True
             else:
                 already_running = False
-                self._engine = NetSniffer(self._on_packet)
+                self._engine = self._capture_provider.create_session(self._on_packet)
                 self._engine.start(iface=iface)
                 actual_iface = self._engine.selected_iface() or iface or "default"
-                self._iface = describe_capture_interface(actual_iface) or str(actual_iface)
+                self._iface = self._capture_provider.describe_interface(actual_iface) or str(actual_iface)
         if already_running:
             return self.get_state()
         state = self.get_state()
@@ -125,6 +124,14 @@ class SnifferService:
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }
+
+    def capture_interfaces(self) -> dict[str, Any]:
+        payload = self._capture_provider.list_interfaces()
+        payload["preflight"] = self.capture_preflight()
+        return payload
+
+    def capture_preflight(self) -> dict[str, Any]:
+        return self._capture_provider.preflight().to_dict()
 
     def _next_packet_id(self) -> str:
         with self._lock:

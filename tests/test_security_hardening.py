@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from backend.app.security import check_local_token, ensure_within_directory, is_allowed_websocket_origin
+from backend.app.security import allowed_origins, check_local_token, ensure_within_directory, is_allowed_websocket_origin
 from backend.app.services.report_service import ReportService
 
 
@@ -38,6 +38,11 @@ class SecurityHardeningTests(unittest.TestCase):
         self.assertTrue(is_allowed_websocket_origin("http://127.0.0.1:5173"))
         self.assertTrue(is_allowed_websocket_origin("http://localhost:5173/"))
         self.assertFalse(is_allowed_websocket_origin("https://evil.example"))
+
+    def test_allowed_origins_can_enable_desktop_runtime(self):
+        with patch.dict(os.environ, {"NETBOT_ALLOWED_ORIGINS": "http://127.0.0.1:5173, null, file://"}, clear=False):
+            self.assertIn("null", allowed_origins())
+            self.assertTrue(is_allowed_websocket_origin("null"))
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.schemas import DashboardResponse, PacketItem, AlertItem, PaginatedAlertsResponse, PaginatedPacketsResponse, SettingsPayload, StatusResponse
 from backend.app.security import (
+    allowed_origins,
     check_local_token,
     ensure_within_directory,
     enforce_rate_limit,
@@ -31,16 +32,17 @@ from backend.app.services.report_service import ReportService
 from backend.app.services.settings_service import get_settings, update_settings
 from backend.app.services.sniffer_service import SnifferService
 from backend.app.services.traceroute_service import TracerouteService
+from core.capture import SystemCaptureProvider
 
 project_root = ensure_project_root_on_path()
 
 from core.firewall_tools import block_ip  # noqa: E402
 from log_manager import LOG_DIR  # noqa: E402
 from core.offline_analyzer import analyze_pcap_file  # noqa: E402
-from core.netbotpro_sniffer_core import list_capture_interfaces  # noqa: E402
 
 event_bus = EventBus()
-sniffer_service = SnifferService(event_bus)
+capture_provider = SystemCaptureProvider()
+sniffer_service = SnifferService(event_bus, capture_provider=capture_provider)
 traceroute_service = TracerouteService()
 export_service = ExportService()
 history_service = HistoryService(sniffer_service)
@@ -75,7 +77,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=allowed_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -120,6 +122,7 @@ def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
         "sniffer": sniffer_service.get_state(),
         "observability": _observability_snapshot(),
         "local_token_required": is_local_token_enabled(),
+        "capture_preflight": sniffer_service.capture_preflight(),
     }
 
 
@@ -130,7 +133,7 @@ def api_get_settings(_: None = Depends(require_loopback)) -> dict[str, Any]:
 
 @app.get("/api/interfaces")
 def api_interfaces(_: None = Depends(require_loopback)) -> dict[str, Any]:
-    return list_capture_interfaces()
+    return sniffer_service.capture_interfaces()
 
 
 @app.put("/api/settings", response_model=SettingsPayload)

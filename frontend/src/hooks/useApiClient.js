@@ -1,6 +1,5 @@
 import { buildAuthHeaders } from "./useLocalAuth";
-
-const API_BASE = "/api";
+import { getApiBase } from "../lib/runtimeConfig";
 
 async function readResponsePayload(res) {
   const contentType = res.headers.get("content-type") || "";
@@ -20,8 +19,10 @@ async function readResponsePayload(res) {
 }
 
 export function useApiClient(localToken) {
+  const apiBase = getApiBase();
+
   async function request(path, options = {}) {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${apiBase}${path}`, {
       ...options,
       headers: buildAuthHeaders(localToken, options.headers || {}),
     });
@@ -33,7 +34,7 @@ export function useApiClient(localToken) {
   }
 
   return {
-    apiBase: API_BASE,
+    apiBase,
     getDashboard: () => request("/dashboard"),
     getSettings: () => request("/settings"),
     getInterfaces: () => request("/interfaces"),
@@ -51,7 +52,7 @@ export function useApiClient(localToken) {
     analyzePcap: async (file) => {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`${API_BASE}/analyze-pcap`, { method: "POST", headers: buildAuthHeaders(localToken), body: form });
+      const res = await fetch(`${apiBase}/analyze-pcap`, { method: "POST", headers: buildAuthHeaders(localToken), body: form });
       const data = await readResponsePayload(res);
       if (!res.ok) {
         throw new Error(data?.detail || `Offline analysis failed (${res.status})`);

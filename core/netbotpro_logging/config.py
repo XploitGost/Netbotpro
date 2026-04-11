@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB_PATH = str(BASE_DIR / "netbot.db")
+DATA_DIR = Path(os.environ.get("NETBOT_DATA_DIR", str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = os.environ.get("NETBOT_DB_PATH", str(DATA_DIR / "netbot.db"))
 SQLITE_BUSY_TIMEOUT_MS = 5_000
 
 try:
@@ -15,7 +17,7 @@ except Exception:
     FPDF = None  # type: ignore
 
 _env_log_dir = os.environ.get("NETBOT_LOG_DIR")
-_local_log_dir = BASE_DIR / "logs"
+_local_log_dir = DATA_DIR / "logs"
 _user_log_dir = Path(os.path.expanduser("~")) / ".netbotpro" / "logs"
 
 LOG_DIR = Path(_env_log_dir or _local_log_dir)

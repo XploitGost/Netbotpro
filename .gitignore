@@ -12,13 +12,18 @@ venv/
 
 node_modules/
 frontend/node_modules/
+desktop/node_modules/
 frontend/dist/
+desktop/dist/
+desktop/out/
 build/
 dist/
 
+packaging/runtime/backend/
 .runtime-cache/
 .codex_tmp_stage2/
 logs/
+
 *.db
 *.sqlite
 *.sqlite3
@@ -31,9 +36,13 @@ logs/
 *.save
 *.old
 *.log
-.runtime-cache/
-__pycache__/
-*.pyc
+
+*.exe
+*.app
+*.AppImage
+*.deb
+*.rpm
+*.dmg
 
 .DS_Store
 Thumbs.db

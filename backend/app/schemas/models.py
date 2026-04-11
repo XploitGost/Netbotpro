@@ -86,6 +86,7 @@ class StatusResponse(BaseModel):
     project_root: str
     sniffer: ServiceState
     local_token_required: bool
+    capture_preflight: dict[str, Any] = Field(default_factory=dict)
     observability: dict[str, Any] = Field(default_factory=dict)
 
 

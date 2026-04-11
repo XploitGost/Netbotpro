@@ -14,6 +14,25 @@ from fastapi import HTTPException, Request
 _HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
 _RATE_LIMITS: dict[tuple[str, str], list[float]] = {}
 _RATE_LOCK = threading.Lock()
+_DEFAULT_ALLOWED_ORIGINS = ("http://127.0.0.1:5173", "http://localhost:5173")
+
+
+def _normalize_origin(origin: str) -> str:
+    text = str(origin or "").strip().lower()
+    if text in {"file://", "file:", "null"}:
+        return "null" if text == "null" else "file://"
+    return text.rstrip("/")
+
+
+def allowed_origins() -> list[str]:
+    raw = os.environ.get("NETBOT_ALLOWED_ORIGINS", "").strip()
+    items = [item.strip() for item in raw.split(",") if item.strip()] if raw else list(_DEFAULT_ALLOWED_ORIGINS)
+    normalized: list[str] = []
+    for item in items:
+        value = _normalize_origin(item)
+        if value and value not in normalized:
+            normalized.append(value)
+    return normalized
 
 
 def require_loopback(request: Request) -> None:
@@ -100,5 +119,4 @@ def ensure_within_directory(base_dir: str, candidate: str) -> str:
 def is_allowed_websocket_origin(origin: str | None) -> bool:
     if not origin:
         return True
-    normalized = str(origin).strip().lower().rstrip("/")
-    return normalized in {"http://127.0.0.1:5173", "http://localhost:5173"}
+    return _normalize_origin(str(origin)) in set(allowed_origins())

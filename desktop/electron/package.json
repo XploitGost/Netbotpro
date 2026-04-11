@@ -1,0 +1,80 @@
+{
+  "name": "netbotpro-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "build:frontend": "npm --prefix ../../frontend run build",
+    "dist:dir": "npm run build:frontend && electron-builder --dir",
+    "dist": "npm run build:frontend && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.netbotpro.desktop",
+    "productName": "Netbotpro",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../frontend/dist",
+        "to": "frontend"
+      },
+      {
+        "from": "../../backend",
+        "to": "python-src/backend"
+      },
+      {
+        "from": "../../core",
+        "to": "python-src/core"
+      },
+      {
+        "from": "../../config",
+        "to": "python-src/config"
+      },
+      {
+        "from": "../../log_manager.py",
+        "to": "python-src/log_manager.py"
+      },
+      {
+        "from": "../../requirements.txt",
+        "to": "python-src/requirements.txt"
+      },
+      {
+        "from": "../../packaging/runtime",
+        "to": "runtime"
+      }
+    ],
+    "artifactName": "Netbotpro-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
+  }
+}
