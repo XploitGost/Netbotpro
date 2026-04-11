@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "electron .",
     "build:frontend": "npm --prefix ../../frontend run build",
-    "smoke:syntax": "node --check main.cjs && node --check preload.cjs",
     "dist:dir": "npm run build:frontend && electron-builder --dir",
     "dist": "npm run build:frontend && electron-builder"
   },

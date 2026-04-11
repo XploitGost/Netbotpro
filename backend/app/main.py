@@ -34,7 +34,7 @@ from backend.app.services.sniffer_service import SnifferService
 from backend.app.services.traceroute_service import TracerouteService
 from core.capture import SystemCaptureProvider
 
-ensure_project_root_on_path()
+project_root = ensure_project_root_on_path()
 
 from core.firewall_tools import block_ip  # noqa: E402
 from log_manager import LOG_DIR  # noqa: E402
@@ -118,6 +118,7 @@ async def log_requests(request: Request, call_next):
 def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
     return {
         "ok": True,
+        "project_root": str(project_root),
         "sniffer": sniffer_service.get_state(),
         "observability": _observability_snapshot(),
         "local_token_required": is_local_token_enabled(),

@@ -21,9 +21,6 @@ dist/
 
 packaging/runtime/backend/
 .runtime-cache/
-.tmp-config/
-.tmp-data/
-.tmp-logs/
 .codex_tmp_stage2/
 logs/
 

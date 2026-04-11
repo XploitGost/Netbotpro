@@ -1,5 +1,5 @@
-Stage the packaged backend runtime here before running Electron release builds.
+Drop packaged backend executables here before running Electron release builds.
 
-Expected staged layout:
-- `backend/netbotpro-backend.exe` plus companion runtime files on Windows
-- `backend/netbotpro-backend` plus companion runtime files on Linux/macOS
+Expected names:
+- `backend/netbotpro-backend.exe` on Windows
+- `backend/netbotpro-backend` on Linux/macOS

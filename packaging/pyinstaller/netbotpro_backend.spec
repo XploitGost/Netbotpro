@@ -3,8 +3,6 @@
 from pathlib import Path
 
 project_root = Path.cwd()
-desktop_entry = project_root / "backend" / "app" / "desktop_entry.py"
-config_dir = project_root / "config"
 
 hiddenimports = [
     "backend.app.desktop_entry",
@@ -16,11 +14,11 @@ hiddenimports = [
 ]
 
 a = Analysis(
-    [str(desktop_entry)],
+    ["backend/app/desktop_entry.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        (str(config_dir), "config"),
+        ("config", "config"),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],
