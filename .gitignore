@@ -30,6 +30,10 @@ logs/
 *.bak
 *.save
 *.old
+*.log
+.runtime-cache/
+__pycache__/
+*.pyc
 
 .DS_Store
 Thumbs.db

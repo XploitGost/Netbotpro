@@ -11,7 +11,7 @@ from log_manager import LOG_DIR  # noqa: E402
 
 class ReportService:
     def list_reports(self) -> list[dict[str, str | int]]:
-        root = Path(LOG_DIR)
+        root = Path(LOG_DIR).resolve()
         if not root.exists():
             return []
         items: list[dict[str, str | int]] = []
@@ -22,7 +22,7 @@ class ReportService:
             items.append(
                 {
                     "name": path.name,
-                    "path": str(path.resolve()),
+                    "path": path.name,
                     "size": int(stat.st_size),
                     "modified": str(int(stat.st_mtime)),
                 }

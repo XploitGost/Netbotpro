@@ -65,6 +65,15 @@ class SnifferPersistence:
             "summary": packet.get("summary"),
             "is_alert": bool(alerts),
             "remote_ip": packet.get("remote_ip"),
+            "app_protocol": packet.get("app_protocol"),
+            "app_category": packet.get("app_category"),
+            "app_confidence": packet.get("app_confidence"),
+            "l7": packet.get("l7"),
+            "dns_qname": packet.get("dns_qname"),
+            "http_host": packet.get("http_host"),
+            "http_path": packet.get("http_path"),
+            "sni": packet.get("tls_sni") or packet.get("sni"),
+            "tls_version": packet.get("tls_version"),
         }
         alert_rows = [
             {
@@ -83,6 +92,13 @@ class SnifferPersistence:
                 "incident_score": alert.get("incident_score"),
                 "packet_id": alert.get("packet_id"),
                 "remote_ip": alert.get("remote_ip") or packet.get("remote_ip"),
+                "app_protocol": alert.get("app_protocol") or packet.get("app_protocol"),
+                "app_category": alert.get("app_category") or packet.get("app_category"),
+                "app_confidence": alert.get("app_confidence") or packet.get("app_confidence"),
+                "dns_qname": alert.get("dns_qname") or packet.get("dns_qname"),
+                "http_host": alert.get("http_host") or packet.get("http_host"),
+                "http_path": alert.get("http_path") or packet.get("http_path"),
+                "sni": alert.get("sni") or packet.get("tls_sni") or packet.get("sni"),
             }
             for alert in alerts
         ]

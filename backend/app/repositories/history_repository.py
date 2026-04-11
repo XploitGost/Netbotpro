@@ -177,6 +177,12 @@ class MemoryHistoryRepository(BaseHistoryRepository):
                         str(row.get("org") or ""),
                         str(row.get("country") or row.get("country_code") or ""),
                         str(row.get("remote_ip") or ""),
+                        str(row.get("app_protocol") or ""),
+                        str(row.get("l7") or ""),
+                        str(row.get("dns_qname") or ""),
+                        str(row.get("http_host") or ""),
+                        str(row.get("http_path") or ""),
+                        str(row.get("sni") or ""),
                     ]
                 ).lower()
                 if query.text.lower() not in hay:
@@ -210,6 +216,11 @@ class MemoryHistoryRepository(BaseHistoryRepository):
                         str(row.get("detail") or ""),
                         str(row.get("attack_type") or ""),
                         str(row.get("remote_ip") or ""),
+                        str(row.get("app_protocol") or ""),
+                        str(row.get("dns_qname") or ""),
+                        str(row.get("http_host") or ""),
+                        str(row.get("http_path") or ""),
+                        str(row.get("sni") or ""),
                     ]
                 ).lower()
                 if query.text.lower() not in hay:
@@ -265,7 +276,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             cur.execute(f"SELECT COUNT(*) FROM packets{where}", params)
             total = int(cur.fetchone()[0])
             cur.execute(
-                "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip "
+                "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip, app_protocol, app_category, app_confidence, l7, dns_qname, http_host, http_path, sni, tls_version "
                 f"FROM packets{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                 [*params, query.limit, query.offset],
             )
@@ -288,7 +299,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             cur.execute(f"SELECT COUNT(*) FROM alerts{where}", params)
             total = int(cur.fetchone()[0])
             cur.execute(
-                "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip "
+                "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip, app_protocol, app_category, app_confidence, dns_qname, http_host, http_path, sni "
                 f"FROM alerts{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                 [*params, query.limit, query.offset],
             )
@@ -306,7 +317,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
                 total = int(await self._fetch_scalar_async(conn, f"SELECT COUNT(*) FROM packets{where}", params))
                 rows = await self._fetch_rows_async(
                     conn,
-                    "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip "
+                    "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip, app_protocol, app_category, app_confidence, l7, dns_qname, http_host, http_path, sni, tls_version "
                     f"FROM packets{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                     [*params, query.limit, query.offset],
                 )
@@ -327,7 +338,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
                 total = int(await self._fetch_scalar_async(conn, f"SELECT COUNT(*) FROM alerts{where}", params))
                 rows = await self._fetch_rows_async(
                     conn,
-                    "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip "
+                    "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip, app_protocol, app_category, app_confidence, dns_qname, http_host, http_path, sni "
                     f"FROM alerts{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                     [*params, query.limit, query.offset],
                 )
@@ -353,7 +364,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip "
+                "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip, app_protocol, app_category, app_confidence, l7, dns_qname, http_host, http_path, sni, tls_version "
                 "FROM packets WHERE id = ?",
                 (pid,),
             )
@@ -373,7 +384,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             async with aiosqlite.connect(self._db_path) as conn:
                 row = await self._fetch_row_async(
                     conn,
-                    "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip "
+                    "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip, app_protocol, app_category, app_confidence, l7, dns_qname, http_host, http_path, sni, tls_version "
                     "FROM packets WHERE id = ?",
                     (pid,),
                 )
@@ -393,7 +404,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip "
+                "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip, app_protocol, app_category, app_confidence, dns_qname, http_host, http_path, sni "
                 "FROM alerts WHERE id = ?",
                 (aid,),
             )
@@ -413,7 +424,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             async with aiosqlite.connect(self._db_path) as conn:
                 row = await self._fetch_row_async(
                     conn,
-                    "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip "
+                    "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip, app_protocol, app_category, app_confidence, dns_qname, http_host, http_path, sni "
                     "FROM alerts WHERE id = ?",
                     (aid,),
                 )
@@ -435,8 +446,8 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             clauses.append("proto LIKE ?")
             params.append(f"%{query.proto}%")
         if query.text:
-            clauses.append("(summary LIKE ? OR org LIKE ? OR country LIKE ? OR remote_ip LIKE ?)")
-            params.extend([f"%{query.text}%"] * 4)
+            clauses.append("(summary LIKE ? OR org LIKE ? OR country LIKE ? OR remote_ip LIKE ? OR app_protocol LIKE ? OR l7 LIKE ? OR dns_qname LIKE ? OR http_host LIKE ? OR http_path LIKE ? OR sni LIKE ?)")
+            params.extend([f"%{query.text}%"] * 10)
         if query.only_alerts:
             clauses.append("is_alert = 1")
         if query.only_remote:
@@ -460,8 +471,8 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             clauses.append("proto LIKE ?")
             params.append(f"%{query.proto}%")
         if query.text:
-            clauses.append("(detail LIKE ? OR attack_type LIKE ? OR remote_ip LIKE ?)")
-            params.extend([f"%{query.text}%"] * 3)
+            clauses.append("(detail LIKE ? OR attack_type LIKE ? OR remote_ip LIKE ? OR app_protocol LIKE ? OR dns_qname LIKE ? OR http_host LIKE ? OR http_path LIKE ? OR sni LIKE ?)")
+            params.extend([f"%{query.text}%"] * 8)
         if query.min_score:
             try:
                 clauses.append("score >= ?")
@@ -513,6 +524,15 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             "summary": row[10],
             "is_alert": bool(row[11]),
             "remote_ip": row[12],
+            "app_protocol": row[13],
+            "app_category": row[14],
+            "app_confidence": row[15],
+            "l7": row[16],
+            "dns_qname": row[17],
+            "http_host": row[18],
+            "http_path": row[19],
+            "sni": row[20],
+            "tls_version": row[21],
         }
 
     @staticmethod
@@ -534,4 +554,11 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             "incident_score": row[13],
             "packet_id": row[14],
             "remote_ip": row[15],
+            "app_protocol": row[16],
+            "app_category": row[17],
+            "app_confidence": row[18],
+            "dns_qname": row[19],
+            "http_host": row[20],
+            "http_path": row[21],
+            "sni": row[22],
         }

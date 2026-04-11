@@ -33,6 +33,15 @@ _CONN: sqlite3.Connection | None = None
 
 _PACKET_SCHEMA_UPDATES = {
     "remote_ip": "ALTER TABLE packets ADD COLUMN remote_ip TEXT",
+    "app_protocol": "ALTER TABLE packets ADD COLUMN app_protocol TEXT",
+    "app_category": "ALTER TABLE packets ADD COLUMN app_category TEXT",
+    "app_confidence": "ALTER TABLE packets ADD COLUMN app_confidence TEXT",
+    "l7": "ALTER TABLE packets ADD COLUMN l7 TEXT",
+    "dns_qname": "ALTER TABLE packets ADD COLUMN dns_qname TEXT",
+    "http_host": "ALTER TABLE packets ADD COLUMN http_host TEXT",
+    "http_path": "ALTER TABLE packets ADD COLUMN http_path TEXT",
+    "sni": "ALTER TABLE packets ADD COLUMN sni TEXT",
+    "tls_version": "ALTER TABLE packets ADD COLUMN tls_version TEXT",
 }
 
 _ALERT_SCHEMA_UPDATES = {
@@ -44,6 +53,13 @@ _ALERT_SCHEMA_UPDATES = {
     "incident_score": "ALTER TABLE alerts ADD COLUMN incident_score REAL",
     "packet_id": "ALTER TABLE alerts ADD COLUMN packet_id TEXT",
     "remote_ip": "ALTER TABLE alerts ADD COLUMN remote_ip TEXT",
+    "app_protocol": "ALTER TABLE alerts ADD COLUMN app_protocol TEXT",
+    "app_category": "ALTER TABLE alerts ADD COLUMN app_category TEXT",
+    "app_confidence": "ALTER TABLE alerts ADD COLUMN app_confidence TEXT",
+    "dns_qname": "ALTER TABLE alerts ADD COLUMN dns_qname TEXT",
+    "http_host": "ALTER TABLE alerts ADD COLUMN http_host TEXT",
+    "http_path": "ALTER TABLE alerts ADD COLUMN http_path TEXT",
+    "sni": "ALTER TABLE alerts ADD COLUMN sni TEXT",
 }
 
 
@@ -97,7 +113,16 @@ def get_conn() -> sqlite3.Connection | None:
                 org TEXT,
                 summary TEXT,
                 is_alert INTEGER DEFAULT 0,
-                remote_ip TEXT
+                remote_ip TEXT,
+                app_protocol TEXT,
+                app_category TEXT,
+                app_confidence TEXT,
+                l7 TEXT,
+                dns_qname TEXT,
+                http_host TEXT,
+                http_path TEXT,
+                sni TEXT,
+                tls_version TEXT
             )
             """
         )
@@ -119,7 +144,14 @@ def get_conn() -> sqlite3.Connection | None:
                 incident_count INTEGER,
                 incident_score REAL,
                 packet_id TEXT,
-                remote_ip TEXT
+                remote_ip TEXT,
+                app_protocol TEXT,
+                app_category TEXT,
+                app_confidence TEXT,
+                dns_qname TEXT,
+                http_host TEXT,
+                http_path TEXT,
+                sni TEXT
             )
             """
         )
@@ -127,12 +159,14 @@ def get_conn() -> sqlite3.Connection | None:
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_src ON packets(src)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_dst ON packets(dst)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_proto ON packets(proto)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_app_protocol ON packets(app_protocol)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_remote_ip ON packets(remote_ip)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_is_alert ON packets(is_alert)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_src ON alerts(src)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_dst ON alerts(dst)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_proto ON alerts(proto)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_app_protocol ON alerts(app_protocol)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_attack_type ON alerts(attack_type)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_score ON alerts(score)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_remote_ip ON alerts(remote_ip)")

@@ -107,6 +107,11 @@ export function AlertsPanel({
                       <span className={`severity-pill severity-${String(alert.severity || "info").toLowerCase()}`}>
                         {alert.attack_type || "-"}
                       </span>
+                      {alert.app_protocol ? (
+                        <div className="table-subline">
+                          <span className="side-pill side-flow">{alert.app_protocol}</span>
+                        </div>
+                      ) : null}
                     </td>
                     <td>{Number(alert.score || 0).toFixed(3)}</td>
                   </tr>

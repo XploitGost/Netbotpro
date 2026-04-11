@@ -118,6 +118,11 @@ export function PacketsPanel({
                     <td><span className="side-pill side-flow">{flow.label}</span></td>
                     <td>
                       <span className={`protocol-pill ${packet.is_alert ? "protocol-pill-alert" : ""}`}>{packet.proto || "-"}</span>
+                      {packet.app_protocol ? (
+                        <div className="table-subline">
+                          <span className="side-pill side-flow">{packet.app_protocol}</span>
+                        </div>
+                      ) : null}
                     </td>
                   </tr>
                 );

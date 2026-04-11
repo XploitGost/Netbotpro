@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 import ipaddress
 import re
@@ -33,7 +34,8 @@ def check_local_token(provided: str) -> bool:
     expected = _expected_local_token()
     if not expected:
         return True
-    return (provided or "").strip() == expected
+    actual = (provided or "").strip()
+    return hmac.compare_digest(actual, expected)
 
 
 def require_local_token(request: Request) -> None:
@@ -79,6 +81,7 @@ def validate_traceroute_target(value: str) -> str:
 def validate_export_name(value: str, suffix: str) -> str:
     raw = (value or "").strip() or "netbot_export"
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-") or "netbot_export"
+    safe = safe[:96].rstrip("._-") or "netbot_export"
     if not safe.endswith(suffix):
         safe = f"{safe}{suffix}"
     return safe
@@ -87,6 +90,15 @@ def validate_export_name(value: str, suffix: str) -> str:
 def ensure_within_directory(base_dir: str, candidate: str) -> str:
     base = Path(base_dir).resolve()
     target = (base / candidate).resolve()
-    if not str(target).startswith(str(base)):
+    try:
+        target.relative_to(base)
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail="Unsafe export path")
     return str(target)
+
+
+def is_allowed_websocket_origin(origin: str | None) -> bool:
+    if not origin:
+        return True
+    normalized = str(origin).strip().lower().rstrip("/")
+    return normalized in {"http://127.0.0.1:5173", "http://localhost:5173"}

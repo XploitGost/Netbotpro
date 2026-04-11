@@ -28,6 +28,9 @@ class PacketItem(BaseModel):
     dport: int | None = None
     length: int | None = None
     summary: str | None = None
+    app_protocol: str | None = None
+    app_category: str | None = None
+    l7: str | None = None
 
 
 class AlertItem(BaseModel):
@@ -41,6 +44,8 @@ class AlertItem(BaseModel):
     attack_type: str | None = None
     score: float | None = None
     detail: str | None = None
+    app_protocol: str | None = None
+    app_category: str | None = None
 
 
 class PaginatedPacketsResponse(BaseModel):

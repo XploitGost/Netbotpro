@@ -10,14 +10,14 @@ from backend.app.repositories.history_repository import AlertListQuery, MemoryHi
 class _FakeSnifferService:
     def recent_packets(self):
         return [
-            {"id": "mem-pkt-2", "src": "10.0.0.2", "dst": "8.8.8.8", "proto": "UDP", "summary": "two", "remote_ip": "8.8.8.8"},
-            {"id": "mem-pkt-1", "src": "10.0.0.1", "dst": "1.1.1.1", "proto": "TCP", "summary": "one", "remote_ip": "1.1.1.1"},
+            {"id": "mem-pkt-2", "src": "10.0.0.2", "dst": "8.8.8.8", "proto": "UDP", "summary": "two", "remote_ip": "8.8.8.8", "app_protocol": "DNS", "dns_qname": "api.example.com"},
+            {"id": "mem-pkt-1", "src": "10.0.0.1", "dst": "1.1.1.1", "proto": "TCP", "summary": "one", "remote_ip": "1.1.1.1", "app_protocol": "HTTPS", "sni": "example.com"},
         ]
 
     def recent_alerts(self):
         return [
-            {"id": "mem-alert-2", "src": "8.8.8.8", "dst": "10.0.0.2", "attack_type": "Burst", "score": 1.0, "detail": "two", "remote_ip": "8.8.8.8"},
-            {"id": "mem-alert-1", "src": "1.1.1.1", "dst": "10.0.0.1", "attack_type": "Scan", "score": 0.5, "detail": "one", "remote_ip": "1.1.1.1"},
+            {"id": "mem-alert-2", "src": "8.8.8.8", "dst": "10.0.0.2", "attack_type": "Burst", "score": 1.0, "detail": "two", "remote_ip": "8.8.8.8", "app_protocol": "DNS"},
+            {"id": "mem-alert-1", "src": "1.1.1.1", "dst": "10.0.0.1", "attack_type": "Scan", "score": 0.5, "detail": "one", "remote_ip": "1.1.1.1", "app_protocol": "HTTPS"},
         ]
 
 
@@ -68,7 +68,16 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
                         org TEXT,
                         summary TEXT,
                         is_alert INTEGER DEFAULT 0,
-                        remote_ip TEXT
+                        remote_ip TEXT,
+                        app_protocol TEXT,
+                        app_category TEXT,
+                        app_confidence TEXT,
+                        l7 TEXT,
+                        dns_qname TEXT,
+                        http_host TEXT,
+                        http_path TEXT,
+                        sni TEXT,
+                        tls_version TEXT
                     )
                     """
                 )
@@ -90,7 +99,14 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
                         incident_count INTEGER,
                         incident_score REAL,
                         packet_id TEXT,
-                        remote_ip TEXT
+                        remote_ip TEXT,
+                        app_protocol TEXT,
+                        app_category TEXT,
+                        app_confidence TEXT,
+                        dns_qname TEXT,
+                        http_host TEXT,
+                        http_path TEXT,
+                        sni TEXT
                     )
                     """
                 )
@@ -99,9 +115,11 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
                     INSERT INTO alerts (
                         ts, src, dst, proto, attack_type, score, detail,
                         severity, engine, score_raw, incident_id,
-                        incident_count, incident_score, packet_id, remote_ip
+                        incident_count, incident_score, packet_id, remote_ip,
+                        app_protocol, app_category, app_confidence, dns_qname,
+                        http_host, http_path, sni
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "10:00:00",
@@ -119,6 +137,13 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
                         0.88,
                         "mem-pkt-4",
                         "8.8.8.8",
+                        "HTTPS",
+                        "web",
+                        "high",
+                        None,
+                        "example.com",
+                        "/admin",
+                        "example.com",
                     ),
                 )
                 conn.commit()
@@ -132,8 +157,10 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             self.assertEqual(alerts["items"][0]["severity"], "HIGH")
             self.assertEqual(alerts["items"][0]["engine"], "RULE")
             self.assertEqual(alerts["items"][0]["incident_id"], "inc-9")
+            self.assertEqual(alerts["items"][0]["app_protocol"], "HTTPS")
             self.assertEqual(detail["packet_id"], "mem-pkt-4")
             self.assertEqual(detail["remote_ip"], "8.8.8.8")
+            self.assertEqual(detail["http_host"], "example.com")
 
     def test_async_wrapper_matches_sync_result(self):
         with tempfile.TemporaryDirectory() as td:
@@ -155,7 +182,16 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
                         org TEXT,
                         summary TEXT,
                         is_alert INTEGER DEFAULT 0,
-                        remote_ip TEXT
+                        remote_ip TEXT,
+                        app_protocol TEXT,
+                        app_category TEXT,
+                        app_confidence TEXT,
+                        l7 TEXT,
+                        dns_qname TEXT,
+                        http_host TEXT,
+                        http_path TEXT,
+                        sni TEXT,
+                        tls_version TEXT
                     )
                     """
                 )
@@ -163,11 +199,13 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
                     """
                     INSERT INTO packets (
                         ts, src, dst, proto, sport, dport, length,
-                        country, org, summary, is_alert, remote_ip
+                        country, org, summary, is_alert, remote_ip,
+                        app_protocol, app_category, app_confidence, l7,
+                        dns_qname, http_host, http_path, sni, tls_version
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ("10:00:00", "10.0.0.1", "8.8.8.8", "TCP", 1234, 80, 60, "US", "Example", "hello", 1, "8.8.8.8"),
+                    ("10:00:00", "10.0.0.1", "8.8.8.8", "TCP", 1234, 80, 60, "US", "Example", "hello", 1, "8.8.8.8", "HTTP", "web", "high", "HTTP GET /", None, "example.com", "/", None, None),
                 )
                 conn.commit()
             finally:

@@ -16,7 +16,9 @@ from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.schemas import DashboardResponse, PacketItem, AlertItem, PaginatedAlertsResponse, PaginatedPacketsResponse, SettingsPayload, StatusResponse
 from backend.app.security import (
     check_local_token,
+    ensure_within_directory,
     enforce_rate_limit,
+    is_allowed_websocket_origin,
     is_local_token_enabled,
     require_local_token,
     require_loopback,
@@ -324,10 +326,7 @@ def api_export_session(
 
 @app.get("/api/exports/download")
 def api_export_download(path: str, _: None = Depends(require_loopback)) -> FileResponse:
-    file_path = Path(path).resolve()
-    logs_dir = Path(LOG_DIR).resolve()
-    if not str(file_path).startswith(str(logs_dir)):
-        raise HTTPException(status_code=400, detail="Unsafe export path")
+    file_path = Path(ensure_within_directory(str(LOG_DIR), path))
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Export not found")
     return FileResponse(file_path)
@@ -351,22 +350,33 @@ async def api_analyze_pcap(
     suffix = (Path(file.filename or "capture.pcap").suffix or ".pcap").lower()
     if suffix not in ALLOWED_PCAP_SUFFIXES:
         raise HTTPException(status_code=400, detail="Unsupported PCAP file type")
-    content = await file.read()
-    if len(content) > MAX_PCAP_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="PCAP file is too large")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(content)
-        temp_path = tmp.name
     try:
+        total_bytes = 0
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            temp_path = tmp.name
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_PCAP_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="PCAP file is too large")
+                tmp.write(chunk)
         return analyze_pcap_file(temp_path)
     finally:
-        Path(temp_path).unlink(missing_ok=True)
+        await file.close()
+        temp_path_value = locals().get("temp_path")
+        if temp_path_value:
+            Path(temp_path_value).unlink(missing_ok=True)
 
 
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket) -> None:
     client_host = websocket.client.host if websocket.client else ""
     if client_host not in {"127.0.0.1", "::1", "localhost"}:
+        await websocket.close(code=1008)
+        return
+    if not is_allowed_websocket_origin(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return
     token = websocket.query_params.get("token", "")

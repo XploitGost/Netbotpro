@@ -23,6 +23,7 @@ class SnifferPersistenceTests(unittest.TestCase):
         self.assertEqual(len(packet_rows), 2)
         self.assertEqual(len(alert_rows), 1)
         self.assertEqual(packet_rows[1]["remote_ip"], None)
+        self.assertEqual(packet_rows[1]["app_protocol"], None)
         self.assertEqual(alert_rows[0]["engine"], None)
         stats = persistence.stats()
         self.assertEqual(stats["flush_batches"], 1)
@@ -47,6 +48,12 @@ class SnifferPersistenceTests(unittest.TestCase):
                         "incident_count": 3,
                         "incident_score": 0.8,
                         "packet_id": "mem-pkt-9",
+                        "app_protocol": "HTTPS",
+                        "app_category": "web",
+                        "dns_qname": None,
+                        "http_host": "example.com",
+                        "http_path": "/admin",
+                        "sni": "example.com",
                     }
                 ],
             )
@@ -61,6 +68,9 @@ class SnifferPersistenceTests(unittest.TestCase):
         self.assertEqual(alert_rows[0]["incident_id"], "inc-1")
         self.assertEqual(alert_rows[0]["packet_id"], "mem-pkt-9")
         self.assertEqual(alert_rows[0]["remote_ip"], "8.8.8.8")
+        self.assertEqual(alert_rows[0]["app_protocol"], "HTTPS")
+        self.assertEqual(alert_rows[0]["http_host"], "example.com")
+        self.assertEqual(alert_rows[0]["sni"], "example.com")
 
     @patch("backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True)
     @patch("backend.app.services.sniffer_persistence.insert_batch")

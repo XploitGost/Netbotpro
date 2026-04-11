@@ -13,7 +13,7 @@ export function AccordionPanel({ eyebrow, title, subtitle, badge, defaultOpen = 
         </div>
         <div className="accordion-meta">
           {badge ? <span className="panel-badge">{badge}</span> : null}
-          <span className="accordion-chevron">{open ? "−" : "+"}</span>
+          <span className="accordion-chevron">{open ? "-" : "+"}</span>
         </div>
       </button>
       {open ? <div className="accordion-body">{children}</div> : null}

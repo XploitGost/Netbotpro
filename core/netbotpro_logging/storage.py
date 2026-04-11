@@ -20,9 +20,11 @@ def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> None:
         """
         INSERT INTO packets (
             ts, src, dst, proto, sport, dport, length,
-            country, org, summary, is_alert, remote_ip
+            country, org, summary, is_alert, remote_ip,
+            app_protocol, app_category, app_confidence, l7,
+            dns_qname, http_host, http_path, sni, tls_version
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -38,6 +40,15 @@ def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> None:
                 row.get("summary"),
                 1 if row.get("is_alert") else 0,
                 row.get("remote_ip"),
+                row.get("app_protocol"),
+                row.get("app_category"),
+                row.get("app_confidence"),
+                row.get("l7"),
+                row.get("dns_qname"),
+                row.get("http_host"),
+                row.get("http_path"),
+                row.get("sni"),
+                row.get("tls_version"),
             )
             for row in rows
         ],
@@ -52,9 +63,11 @@ def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> None:
         INSERT INTO alerts (
             ts, src, dst, proto, attack_type, score, detail,
             severity, engine, score_raw, incident_id,
-            incident_count, incident_score, packet_id, remote_ip
+            incident_count, incident_score, packet_id, remote_ip,
+            app_protocol, app_category, app_confidence, dns_qname,
+            http_host, http_path, sni
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -73,6 +86,13 @@ def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> None:
                 row.get("incident_score"),
                 row.get("packet_id"),
                 row.get("remote_ip"),
+                row.get("app_protocol"),
+                row.get("app_category"),
+                row.get("app_confidence"),
+                row.get("dns_qname"),
+                row.get("http_host"),
+                row.get("http_path"),
+                row.get("sni"),
             )
             for row in rows
         ],
