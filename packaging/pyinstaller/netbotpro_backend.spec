@@ -2,7 +2,29 @@
 
 from pathlib import Path
 
-project_root = Path.cwd()
+project_root = None
+candidate_roots = [Path.cwd()]
+
+spec_path = globals().get("SPECPATH")
+if spec_path:
+    candidate_roots.append(Path(spec_path))
+if "__file__" in globals():
+    candidate_roots.append(Path(__file__).resolve().parent)
+
+for candidate in candidate_roots:
+    candidate = candidate.resolve()
+    for root in (candidate, *candidate.parents):
+        if (root / "backend" / "app" / "desktop_entry.py").exists():
+            project_root = root
+            break
+    if project_root is not None:
+        break
+
+if project_root is None:
+    raise SystemExit("Could not locate the Netbotpro project root for PyInstaller")
+
+desktop_entry = project_root / "backend" / "app" / "desktop_entry.py"
+config_dir = project_root / "config"
 
 hiddenimports = [
     "backend.app.desktop_entry",
@@ -14,17 +36,17 @@ hiddenimports = [
 ]
 
 a = Analysis(
-    ["backend/app/desktop_entry.py"],
+    [str(desktop_entry)],
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        ("config", "config"),
+        (str(config_dir), "config"),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["_tkinter", "numpy", "scipy", "setuptools", "sklearn", "tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

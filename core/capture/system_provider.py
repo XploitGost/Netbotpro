@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import importlib
 import logging
 import os
 import platform
@@ -145,7 +146,8 @@ class SystemCaptureProvider(CaptureProvider):
     @staticmethod
     def _default_scapy_checker() -> tuple[bool, str]:
         try:
-            import scapy.all  # type: ignore  # noqa: F401
+            importlib.import_module("scapy.interfaces")
+            importlib.import_module("scapy.sendrecv")
         except Exception as exc:
             return False, f"Scapy runtime is unavailable: {exc.__class__.__name__}"
         return True, "Scapy runtime is available."

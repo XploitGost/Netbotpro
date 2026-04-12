@@ -25,7 +25,10 @@ class NetSniffer:
         sniff_poll_seconds: float = 1.0,
         iface_resolver: Callable[[], str | None] | None = None,
     ) -> None:
-        from scapy.all import DNS, DNSQR, Ether, ICMP, IP, TCP, UDP, sniff  # type: ignore
+        from scapy.layers.dns import DNS, DNSQR  # type: ignore
+        from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
+        from scapy.layers.l2 import Ether  # type: ignore
+        from scapy.sendrecv import sniff  # type: ignore
 
         self.packet_callback = packet_callback
         self.enable_geoip = enable_geoip

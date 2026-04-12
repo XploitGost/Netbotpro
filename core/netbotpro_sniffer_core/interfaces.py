@@ -48,7 +48,7 @@ def _friendly_label(name: str, description: str, ip_addr: str | None) -> str:
 
 def _scapy_interfaces() -> list[dict[str, Any]]:
     try:
-        from scapy.all import IFACES  # type: ignore
+        from scapy.interfaces import IFACES  # type: ignore
     except Exception:
         logger.debug("scapy interface enumeration unavailable", exc_info=True)
         return []
@@ -113,7 +113,8 @@ def recommended_interface_name() -> str | None:
                 return str(item["value"])
 
     try:
-        from scapy.all import conf, get_working_if  # type: ignore
+        from scapy.config import conf  # type: ignore
+        from scapy.interfaces import get_working_if  # type: ignore
 
         working = get_working_if()
         resolved = resolve_capture_interface(_iface_value_from_obj(working))

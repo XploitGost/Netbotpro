@@ -34,11 +34,10 @@ from backend.app.services.sniffer_service import SnifferService
 from backend.app.services.traceroute_service import TracerouteService
 from core.capture import SystemCaptureProvider
 
-project_root = ensure_project_root_on_path()
+ensure_project_root_on_path()
 
 from core.firewall_tools import block_ip  # noqa: E402
 from log_manager import LOG_DIR  # noqa: E402
-from core.offline_analyzer import analyze_pcap_file  # noqa: E402
 
 event_bus = EventBus()
 capture_provider = SystemCaptureProvider()
@@ -61,6 +60,15 @@ def _observability_snapshot() -> dict[str, Any]:
         "persistence": sniffer_service.persistence_stats(),
         "auto_block": sniffer_service.auto_block_stats(),
     }
+
+
+def _load_pcap_analyzer():
+    try:
+        from core.offline_analyzer import analyze_pcap_file
+    except Exception as exc:
+        logger.exception("offline_analysis_unavailable")
+        raise HTTPException(status_code=503, detail="Offline PCAP analysis is unavailable in this runtime") from exc
+    return analyze_pcap_file
 
 
 @asynccontextmanager
@@ -118,7 +126,6 @@ async def log_requests(request: Request, call_next):
 def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
     return {
         "ok": True,
-        "project_root": str(project_root),
         "sniffer": sniffer_service.get_state(),
         "observability": _observability_snapshot(),
         "local_token_required": is_local_token_enabled(),
@@ -365,7 +372,7 @@ async def api_analyze_pcap(
                 if total_bytes > MAX_PCAP_UPLOAD_BYTES:
                     raise HTTPException(status_code=413, detail="PCAP file is too large")
                 tmp.write(chunk)
-        return analyze_pcap_file(temp_path)
+        return _load_pcap_analyzer()(temp_path)
     finally:
         await file.close()
         temp_path_value = locals().get("temp_path")

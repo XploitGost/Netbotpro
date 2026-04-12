@@ -4,7 +4,10 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any
 
-from scapy.all import DNS, DNSQR, Ether, ICMP, IP, TCP, UDP, rdpcap  # type: ignore
+from scapy.layers.dns import DNS, DNSQR  # type: ignore
+from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
+from scapy.layers.l2 import Ether  # type: ignore
+from scapy.utils import rdpcap  # type: ignore
 
 from backend.app.bootstrap import ensure_project_root_on_path
 

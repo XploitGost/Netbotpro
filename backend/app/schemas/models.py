@@ -83,7 +83,6 @@ class DashboardResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     ok: bool
-    project_root: str
     sniffer: ServiceState
     local_token_required: bool
     capture_preflight: dict[str, Any] = Field(default_factory=dict)
