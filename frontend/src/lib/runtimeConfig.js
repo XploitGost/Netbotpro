@@ -3,6 +3,10 @@ function desktopRuntime() {
   return window.netbotproDesktop || null;
 }
 
+export function getDesktopRuntime() {
+  return desktopRuntime();
+}
+
 export function getApiBase() {
   const runtime = desktopRuntime();
   if (runtime?.apiBase) return String(runtime.apiBase);
@@ -13,6 +17,18 @@ export function getWsBase() {
   const runtime = desktopRuntime();
   if (runtime?.wsBase) return String(runtime.wsBase);
   return "";
+}
+
+export function getManagedLocalToken() {
+  const runtime = desktopRuntime();
+  if (!runtime?.managedLocalToken || !runtime?.localToken) {
+    return "";
+  }
+  return String(runtime.localToken);
+}
+
+export function isManagedLocalToken() {
+  return Boolean(getManagedLocalToken());
 }
 
 export function buildWsEventsUrl(localToken) {

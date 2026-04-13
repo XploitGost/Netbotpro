@@ -27,6 +27,13 @@ The shell maps desktop runtime state into the Electron user-data directory:
   - `packaging/linux/build.sh`
   - `packaging/macos/build.sh`
 
+### Windows toolchain
+
+- Preferred Node runtime for local Windows packaging: Node 22 x64
+- `packaging/windows/build.ps1` will automatically use `NETBOT_NODE_HOME` when set
+- It also auto-detects a portable Node toolchain in `.tools/node-v22.22.2-win-x64/`
+- Preferred Python runtime for backend packaging: Python 3.12 via `.venv-pack312` or `py -3.12`
+
 ## Release strategy
 
 - Windows first

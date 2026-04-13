@@ -1,4 +1,5 @@
-const { app, BrowserWindow, Menu, dialog } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -10,6 +11,7 @@ const BACKEND_BASE_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
 let mainWindow = null;
 let backendProcess = null;
 let shuttingDown = false;
+let desktopLocalToken = "";
 
 function isPackagedApp() {
   return app.isPackaged;
@@ -57,12 +59,78 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function managedLocalToken() {
+  const configured = String(process.env.NETBOT_LOCAL_TOKEN || "").trim();
+  if (configured) {
+    desktopLocalToken = configured;
+    return desktopLocalToken;
+  }
+  if (!desktopLocalToken) {
+    desktopLocalToken = crypto.randomBytes(32).toString("hex");
+  }
+  return desktopLocalToken;
+}
+
 function runtimeConfig() {
   return {
     apiBase: `${BACKEND_BASE_URL}/api`,
     wsBase: `ws://${BACKEND_HOST}:${BACKEND_PORT}/ws`,
     platform: process.platform,
+    localToken: managedLocalToken(),
+    managedLocalToken: true,
   };
+}
+
+function parseDesktopUrl(target) {
+  try {
+    return new URL(target);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isAllowedDesktopUrl(target) {
+  const parsed = parseDesktopUrl(target);
+  if (!parsed) {
+    return false;
+  }
+  if (parsed.protocol === "file:") {
+    return true;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return false;
+  }
+  return ["127.0.0.1", "localhost"].includes(parsed.hostname);
+}
+
+function openExternalIfSafe(target) {
+  const parsed = parseDesktopUrl(target);
+  if (parsed && ["http:", "https:"].includes(parsed.protocol)) {
+    void shell.openExternal(target);
+  }
+}
+
+function hardenWindow(window) {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedDesktopUrl(url)) {
+      return { action: "allow" };
+    }
+    openExternalIfSafe(url);
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event, url) => {
+    if (isAllowedDesktopUrl(url)) {
+      return;
+    }
+    event.preventDefault();
+    openExternalIfSafe(url);
+  });
+}
+
+function registerRuntimeBridge() {
+  ipcMain.on("netbotpro:get-runtime-config", (event) => {
+    event.returnValue = runtimeConfig();
+  });
 }
 
 function resolveBackendLaunch(paths) {
@@ -104,6 +172,7 @@ function backendEnv(paths) {
     ...process.env,
     NETBOT_PORT: String(BACKEND_PORT),
     NETBOT_HOST: BACKEND_HOST,
+    NETBOT_LOCAL_TOKEN: managedLocalToken(),
     NETBOT_CONFIG_DIR: paths.configDir,
     NETBOT_DATA_DIR: paths.dataDir,
     NETBOT_LOG_DIR: paths.logDir,
@@ -174,13 +243,19 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
+      sandbox: true,
       nodeIntegration: false,
-      additionalArguments: [`--netbotpro-runtime=${encodeURIComponent(JSON.stringify(runtimeConfig()))}`],
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
+  hardenWindow(mainWindow);
 
   const devUrl = process.env.NETBOT_DESKTOP_DEV_SERVER_URL;
   if (!isPackagedApp() && devUrl) {
+    if (!isAllowedDesktopUrl(devUrl)) {
+      throw new Error("NETBOT_DESKTOP_DEV_SERVER_URL must point to a loopback URL");
+    }
     await mainWindow.loadURL(devUrl);
   } else {
     await mainWindow.loadFile(path.join(isPackagedApp() ? process.resourcesPath : repoRoot(), isPackagedApp() ? "frontend" : path.join("frontend", "dist"), "app.html"));
@@ -219,6 +294,7 @@ async function bootstrap() {
     return;
   }
   setupAppLifecycle();
+  registerRuntimeBridge();
   await app.whenReady();
   await createWindow();
 }

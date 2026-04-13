@@ -7,6 +7,7 @@ export function HeroPanel({
   observability,
   localToken,
   localTokenRequired,
+  managedLocalToken,
   onTokenChange,
   onStartSniffer,
   onStopSniffer,
@@ -37,7 +38,7 @@ export function HeroPanel({
       <div className="hero-side">
         <div className={`status-badge status-${connectionState}`}>{connectionLabel}</div>
         <p className="muted">{statusMessage}</p>
-        {localTokenRequired ? (
+        {localTokenRequired && !managedLocalToken ? (
           <div className="stack">
             <input
               type="password"
@@ -47,6 +48,9 @@ export function HeroPanel({
             />
             <p className="muted">Sensitive actions require the local token from `NETBOT_LOCAL_TOKEN`.</p>
           </div>
+        ) : null}
+        {localTokenRequired && managedLocalToken ? (
+          <p className="muted">Sensitive actions are secured with a desktop-managed local token.</p>
         ) : null}
         <div className="hero-actions">
           <button className="primary" onClick={onStartSniffer}>Start Sniffer</button>

@@ -129,7 +129,7 @@ function buildHistoryCacheKey(query, offset) {
 }
 
 export function useDashboardController() {
-  const { localToken, setLocalToken } = useLocalAuth();
+  const { localToken, setLocalToken, managedLocalToken } = useLocalAuth();
   const api = useApiClient(localToken);
   const [activePage, setActivePage] = useState("monitor");
   const [dashboard, setDashboard] = useState(null);
@@ -665,6 +665,7 @@ export function useDashboardController() {
     observability,
     error,
     localTokenRequired,
+    managedLocalToken,
     liveFollow,
     setLiveFollow,
     focusedTarget,

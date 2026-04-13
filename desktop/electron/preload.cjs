@@ -1,15 +1,11 @@
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 function readRuntimeConfig() {
-  const arg = process.argv.find((item) => item.startsWith("--netbotpro-runtime="));
-  if (!arg) {
-    return {};
-  }
   try {
-    return JSON.parse(decodeURIComponent(arg.slice("--netbotpro-runtime=".length)));
+    return ipcRenderer.sendSync("netbotpro:get-runtime-config") || {};
   } catch (_error) {
     return {};
   }
 }
 
-contextBridge.exposeInMainWorld("netbotproDesktop", readRuntimeConfig());
+contextBridge.exposeInMainWorld("netbotproDesktop", Object.freeze(readRuntimeConfig()));

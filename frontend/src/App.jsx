@@ -61,6 +61,7 @@ function App() {
     observability,
     error,
     localTokenRequired,
+    managedLocalToken,
     liveFollow,
     setLiveFollow,
     focusedTarget,
@@ -238,6 +239,7 @@ function App() {
         observability={observability}
         localToken={localToken}
         localTokenRequired={localTokenRequired}
+        managedLocalToken={managedLocalToken}
         onTokenChange={setLocalToken}
         onStartSniffer={startSniffer}
         onStopSniffer={stopSniffer}

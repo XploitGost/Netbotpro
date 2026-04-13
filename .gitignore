@@ -21,6 +21,14 @@ dist/
 
 packaging/runtime/backend/
 .runtime-cache/
+.tools/
+.packaged-debug*/
+.smoke-debug*/
+.source-debug*/
+.venv-build312/
+.venv-pack312/
+desktop/electron/npm-install*.log
+desktop/electron/npm-install*.pid
 .codex_tmp_stage2/
 logs/
 
