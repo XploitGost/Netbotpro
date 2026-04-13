@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import ctypes
 import importlib
+import json
 import logging
 import os
 import platform
+from pathlib import Path
+import subprocess
+import sys
+import threading
+import time
 from typing import Any, Callable
 
 from core.core_sniffer import NetSniffer
@@ -27,6 +33,10 @@ from .contracts import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_CAPTURE_SYSTEMS = {"windows", "linux", "darwin"}
+CAPTURE_CALL_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_CALL_TIMEOUT_SEC", "3.0"))
+INTERFACE_DISCOVERY_TIMEOUT_SEC = float(os.environ.get("NETBOT_INTERFACE_DISCOVERY_TIMEOUT_SEC", "2.5"))
+INTERFACE_DISCOVERY_ARG = "--capture-discovery-json"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class DefaultPrivilegeChecker:
@@ -68,39 +78,192 @@ class SystemCaptureProvider(CaptureProvider):
         os_name_getter: Callable[[], str] | None = None,
         scapy_checker: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
-        self._session_factory = session_factory or (lambda packet_callback: NetSniffer(packet_callback))
+        self._session_factory = session_factory or self._default_session_factory
         self._interfaces_func = interfaces_func or list_capture_interfaces
         self._describe_func = describe_func or describe_capture_interface
         self._resolve_func = resolve_func or resolve_capture_interface
         self._privilege_checker = privilege_checker or DefaultPrivilegeChecker()
         self._os_name_getter = os_name_getter or (lambda: platform.system().lower())
         self._scapy_checker = scapy_checker or self._default_scapy_checker
+        self._last_interfaces_payload: dict[str, Any] | None = None
+        self._last_interfaces_timeout_at = 0.0
+        self._use_subprocess_interface_discovery = interfaces_func is None
+
+    @staticmethod
+    def _call_with_timeout(callback: Callable[..., Any], *args: Any, fallback: Any, operation: str) -> Any:
+        result: dict[str, Any] = {"value": fallback}
+        error: dict[str, BaseException] = {}
+
+        def runner() -> None:
+            try:
+                result["value"] = callback(*args)
+            except BaseException as exc:  # pragma: no cover - defensive path
+                error["exc"] = exc
+
+        worker = threading.Thread(target=runner, name=f"netbotpro-{operation}", daemon=True)
+        worker.start()
+        worker.join(CAPTURE_CALL_TIMEOUT_SEC)
+        if worker.is_alive():
+            logger.warning("capture provider operation timed out: %s", operation)
+            return fallback
+        if "exc" in error:
+            raise error["exc"]
+        return result["value"]
 
     def create_session(self, packet_callback: PacketCallback) -> CaptureSession:
         return self._session_factory(packet_callback)
 
-    def list_interfaces(self) -> dict[str, Any]:
-        raw = self._interfaces_func()
+    def _default_session_factory(self, packet_callback: PacketCallback) -> CaptureSession:
+        return NetSniffer(
+            packet_callback,
+            iface_resolver=self._recommended_interface_for_runtime,
+            candidate_resolver=self.resolve_interface,
+        )
+
+    @staticmethod
+    def _normalize_interfaces_payload(
+        raw: dict[str, Any],
+        *,
+        degraded: bool,
+        source: str,
+        reason: str | None,
+    ) -> dict[str, Any]:
         items = [CaptureInterface.from_raw(item).to_dict() for item in raw.get("items", [])]
         return {
             "recommended": raw.get("recommended"),
             "recommended_label": raw.get("recommended_label"),
             "items": items,
+            "degraded": degraded,
+            "source": source,
+            "reason": reason,
         }
 
+    def _fallback_interfaces_payload(self, reason: str) -> dict[str, Any]:
+        cached = self._last_interfaces_payload
+        if cached is not None:
+            payload = dict(cached)
+            payload["degraded"] = True
+            payload["source"] = "cache"
+            payload["reason"] = reason
+            return payload
+        return {
+            "recommended": None,
+            "recommended_label": None,
+            "items": [],
+            "degraded": True,
+            "source": "fallback",
+            "reason": reason,
+        }
+
+    def _interface_discovery_command(self) -> list[str]:
+        if getattr(sys, "frozen", False):
+            return [sys.executable, INTERFACE_DISCOVERY_ARG]
+        return [sys.executable, "-m", "backend.app.desktop_entry", INTERFACE_DISCOVERY_ARG]
+
+    def _run_interface_discovery_subprocess(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "capture_output": True,
+            "text": True,
+            "timeout": INTERFACE_DISCOVERY_TIMEOUT_SEC,
+            "check": False,
+        }
+        if not getattr(sys, "frozen", False):
+            kwargs["cwd"] = str(PROJECT_ROOT)
+        completed = subprocess.run(self._interface_discovery_command(), **kwargs)
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+            raise RuntimeError(f"interface discovery child failed: {detail}")
+        try:
+            return json.loads((completed.stdout or "").strip() or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("interface discovery child returned invalid JSON") from exc
+
+    def _known_interface_items(self) -> list[dict[str, Any]]:
+        payload = self._last_interfaces_payload or self.list_interfaces()
+        return list(payload.get("items", []))
+
+    def _recommended_interface_for_runtime(self) -> str | None:
+        payload = self.list_interfaces()
+        recommended = str(payload.get("recommended") or "").strip()
+        return recommended or None
+
+    @staticmethod
+    def _scapy_status_from_interfaces_payload(interfaces: dict[str, Any]) -> tuple[bool, str]:
+        if interfaces.get("degraded"):
+            reason = str(interfaces.get("reason") or "interface_discovery_unavailable").replace("_", " ")
+            return False, f"Interface discovery is degraded: {reason}."
+        return True, "Capture discovery child responded successfully."
+
+    def list_interfaces(self) -> dict[str, Any]:
+        try:
+            if self._use_subprocess_interface_discovery:
+                raw = self._run_interface_discovery_subprocess()
+            else:
+                fallback = self._last_interfaces_payload or {"recommended": None, "recommended_label": None, "items": []}
+                raw = self._call_with_timeout(self._interfaces_func, fallback=fallback, operation="list-interfaces")
+                if raw is fallback:
+                    self._last_interfaces_timeout_at = time.monotonic()
+                    return self._fallback_interfaces_payload("interface_discovery_timeout")
+        except subprocess.TimeoutExpired:
+            logger.warning("capture provider interface discovery timed out after %.2fs", INTERFACE_DISCOVERY_TIMEOUT_SEC)
+            self._last_interfaces_timeout_at = time.monotonic()
+            return self._fallback_interfaces_payload("interface_discovery_timeout")
+        except Exception:
+            logger.warning("capture provider interface discovery failed", exc_info=True)
+            return self._fallback_interfaces_payload("interface_discovery_failed")
+
+        payload = self._normalize_interfaces_payload(raw, degraded=False, source="live", reason=None)
+        self._last_interfaces_payload = payload
+        return payload
+
     def describe_interface(self, candidate: str | None) -> str | None:
+        resolved = self.resolve_interface(candidate) or str(candidate or "").strip() or None
+        if not resolved:
+            return None
+        for item in self._known_interface_items():
+            if item.get("value") == resolved:
+                return str(item.get("name") or resolved)
+        if self._use_subprocess_interface_discovery:
+            return resolved
         return self._describe_func(candidate)
 
     def resolve_interface(self, candidate: str | None) -> str | None:
+        text = str(candidate or "").strip()
+        if not text or text in {"iface=default", "default"}:
+            return None
+
+        for item in self._known_interface_items():
+            aliases = {
+                item.get("value"),
+                item.get("name"),
+                item.get("network_name"),
+                item.get("label"),
+            }
+            if text in {alias for alias in aliases if alias}:
+                return str(item["value"])
+
+        if self._use_subprocess_interface_discovery:
+            return text
         return self._resolve_func(candidate)
 
     def preflight(self) -> CapturePreflightReport:
         os_name = str(self._os_name_getter() or "").strip().lower() or "unknown"
         supported = os_name in SUPPORTED_CAPTURE_SYSTEMS
-        scapy_ok, scapy_detail = self._scapy_checker()
         interfaces = self.list_interfaces()
+        if self._use_subprocess_interface_discovery:
+            scapy_ok, scapy_detail = self._scapy_status_from_interfaces_payload(interfaces)
+        else:
+            scapy_ok, scapy_detail = self._call_with_timeout(
+                self._scapy_checker,
+                fallback=(False, "Scapy runtime check timed out."),
+                operation="scapy-check",
+            )
         interface_count = len(interfaces.get("items", []))
-        privileged = self._privilege_checker.is_elevated()
+        privileged = self._call_with_timeout(
+            self._privilege_checker.is_elevated,
+            fallback=False,
+            operation="privilege-check",
+        )
 
         checks = (
             CapturePreflightCheck(

@@ -24,6 +24,7 @@ class NetSniffer:
         sniff_func: Callable[..., Any] | None = None,
         sniff_poll_seconds: float = 1.0,
         iface_resolver: Callable[[], str | None] | None = None,
+        candidate_resolver: Callable[[str | None], str | None] | None = None,
     ) -> None:
         from scapy.layers.dns import DNS, DNSQR  # type: ignore
         from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
@@ -35,6 +36,7 @@ class NetSniffer:
         self.enable_mac_vendor = enable_mac_vendor
         self._sniff_func = sniff_func or sniff
         self._iface_resolver = iface_resolver or self._default_iface_resolver
+        self._candidate_resolver = candidate_resolver or resolve_capture_interface
         self._poll_seconds = max(0.2, float(sniff_poll_seconds))
         self._layers = PacketLayers(
             Ether=Ether,
@@ -139,7 +141,7 @@ class NetSniffer:
                 return resolved
             return None
         candidate = str(iface).strip()
-        resolved = resolve_capture_interface(candidate)
+        resolved = self._candidate_resolver(candidate)
         if resolved:
             return resolved
         logger.warning("invalid capture interface requested: %s; falling back to recommended", candidate)

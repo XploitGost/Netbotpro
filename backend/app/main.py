@@ -122,14 +122,13 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-@app.get("/api/status", response_model=StatusResponse)
+@app.get("/api/status")
 def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
     return {
         "ok": True,
         "sniffer": sniffer_service.get_state(),
         "observability": _observability_snapshot(),
         "local_token_required": is_local_token_enabled(),
-        "capture_preflight": sniffer_service.capture_preflight(),
     }
 
 

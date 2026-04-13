@@ -43,9 +43,12 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
             self.assertEqual(found_binary, binary)
             self.assertIn(support, support_files)
 
-            packaged_backend_smoke.validate_status_payload({"ok": True, "sniffer": {}, "capture_preflight": {}})
+            packaged_backend_smoke.validate_status_payload({"ok": True, "sniffer": {}})
+            packaged_backend_smoke.validate_interfaces_payload({"items": [], "degraded": True, "source": "fallback", "reason": "interface_discovery_timeout"})
             with self.assertRaises(AssertionError):
                 packaged_backend_smoke.validate_status_payload({"ok": True, "project_root": "C:/secret"})
+            with self.assertRaises(AssertionError):
+                packaged_backend_smoke.validate_interfaces_payload({"items": [], "degraded": True, "source": "fallback"})
 
 
 if __name__ == "__main__":

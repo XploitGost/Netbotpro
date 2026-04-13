@@ -1,6 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+from PyInstaller.building import build_main as _build_main
+
+
+_original_find_binary_dependencies = _build_main.find_binary_dependencies
+
+
+def _find_binary_dependencies_without_package_imports(binaries, import_packages, symlink_suppression_patterns):
+    # Windows package import scanning can hang indefinitely in our desktop build environment.
+    # Netbotpro does not rely on package-side DLL path registration during boot, so skip that
+    # pre-import phase and let PyInstaller resolve binary dependencies from the standard paths.
+    return _original_find_binary_dependencies(binaries, [], symlink_suppression_patterns)
+
+
+_build_main.find_binary_dependencies = _find_binary_dependencies_without_package_imports
 
 project_root = None
 candidate_roots = [Path.cwd()]

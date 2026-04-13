@@ -40,8 +40,8 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def _request_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=2) as response:
+def _request_json(url: str, timeout_sec: float = 2.0) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -58,6 +58,16 @@ def _wait_for_http(url: str, timeout_sec: float = 20.0) -> dict:
 def validate_status_payload(payload: dict) -> None:
     if "project_root" in payload:
         raise AssertionError("Status payload must not expose project_root")
+
+def validate_interfaces_payload(payload: dict) -> None:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise AssertionError("Interfaces payload must contain an items list")
+    if payload.get("degraded"):
+        if not payload.get("source"):
+            raise AssertionError("Degraded interfaces payload must include a source")
+        if not payload.get("reason"):
+            raise AssertionError("Degraded interfaces payload must include a reason")
 
 
 def run_smoke(runtime_dir: Path = PACKAGED_BACKEND_DIR, timeout_sec: float = 20.0) -> None:
@@ -88,7 +98,8 @@ def run_smoke(runtime_dir: Path = PACKAGED_BACKEND_DIR, timeout_sec: float = 20.
         try:
             status_payload = _wait_for_http(f"http://127.0.0.1:{port}/api/status", timeout_sec=timeout_sec)
             validate_status_payload(status_payload)
-            _request_json(f"http://127.0.0.1:{port}/api/interfaces")
+            interfaces_payload = _request_json(f"http://127.0.0.1:{port}/api/interfaces", timeout_sec=max(timeout_sec, 6.0))
+            validate_interfaces_payload(interfaces_payload)
         finally:
             process.terminate()
             try:
