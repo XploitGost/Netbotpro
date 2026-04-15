@@ -33,8 +33,116 @@ function Resolve-BuildNodeHome {
     return $null
 }
 
+function Resolve-ArchiveTool {
+    $candidates = @()
+
+    try {
+        $sevenZa = Get-Command 7za.exe -ErrorAction Stop
+        if ($sevenZa.Source) {
+            return $sevenZa.Source
+        }
+    } catch {
+    }
+
+    try {
+        $sevenZ = Get-Command 7z.exe -ErrorAction Stop
+        if ($sevenZ.Source) {
+            return $sevenZ.Source
+        }
+    } catch {
+    }
+
+    $candidates += "C:\Program Files\7-Zip\7za.exe"
+    $candidates += "C:\Program Files\7-Zip\7z.exe"
+    $candidates += "C:\Program Files\Autodesk\AdODIS\V1\Setup\7za.exe"
+    $candidates += "C:\Program Files\Autodesk\AdODIS\V1\Setup\7z.exe"
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Ensure-ArchiveToolInPath {
+    param(
+        [string]$ToolPath
+    )
+
+    if (-not $ToolPath) {
+        return
+    }
+
+    $toolDir = Split-Path -Parent $ToolPath
+    $toolName = Split-Path -Leaf $ToolPath
+    $shimDir = Join-Path $RepoRoot ".tools\7zip-shims"
+
+    if ($env:PATH -notlike "*$toolDir*") {
+        $env:PATH = "$toolDir;$env:PATH"
+    }
+
+    if ($toolName -ieq "7za.exe") {
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
+    $shimPath = Join-Path $shimDir "7za.cmd"
+    $shimContent = "@echo off`r`n""$ToolPath"" %*`r`n"
+    Set-Content -LiteralPath $shimPath -Value $shimContent -Encoding ASCII
+
+    if ($env:PATH -notlike "*$shimDir*") {
+        $env:PATH = "$shimDir;$env:PATH"
+    }
+}
+
+function Initialize-NsisTools {
+    param(
+        [string]$ArchiveToolPath
+    )
+
+    if ($env:ELECTRON_BUILDER_NSIS_DIR -and (Test-Path (Join-Path $env:ELECTRON_BUILDER_NSIS_DIR "makensis.exe"))) {
+        return
+    }
+
+    $nsisRoot = Join-Path $RepoRoot ".tools\electron-builder-binaries\nsis-3.0.4.1"
+    $nsisArchive = Join-Path $nsisRoot "nsis-3.0.4.1.7z"
+    $nsisUnpacked = Join-Path $nsisRoot "unpacked"
+
+    if (Test-Path (Join-Path $nsisUnpacked "makensis.exe")) {
+        $env:ELECTRON_BUILDER_NSIS_DIR = $nsisUnpacked
+        return
+    }
+
+    if (-not (Test-Path $nsisArchive)) {
+        return
+    }
+
+    if (-not $ArchiveToolPath) {
+        throw "A 7-Zip command-line tool (7za.exe or 7z.exe) is required to unpack $nsisArchive for electron-builder."
+    }
+
+    if ((Test-Path $nsisArchive) -and $ArchiveToolPath) {
+        if (Test-Path $nsisUnpacked) {
+            Remove-Item -LiteralPath $nsisUnpacked -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $nsisUnpacked | Out-Null
+        & $ArchiveToolPath x "-y" "-o$nsisUnpacked" $nsisArchive | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $nsisUnpacked "makensis.exe"))) {
+            throw "Failed to unpack NSIS helper from $nsisArchive"
+        }
+        $env:ELECTRON_BUILDER_NSIS_DIR = $nsisUnpacked
+    }
+}
+
 $PythonCmd = Resolve-BuildPython
 $NodeHome = Resolve-BuildNodeHome
+$ElectronDist = Join-Path $RepoRoot ".tools\\electron-v36.3.1-win32-x64"
+$ArchiveTool = Resolve-ArchiveTool
+
+Ensure-ArchiveToolInPath -ToolPath $ArchiveTool
+Initialize-NsisTools -ArchiveToolPath $ArchiveTool
 
 & $PythonCmd -m PyInstaller packaging\pyinstaller\netbotpro_backend.spec --clean --noconfirm
 & $PythonCmd scripts\release\stage_backend_runtime.py
@@ -44,8 +152,18 @@ try {
     if ($NodeHome) {
         $env:PATH = "$NodeHome;$env:PATH"
     }
+    if (Test-Path $ElectronDist) {
+        $env:ELECTRON_SKIP_BINARY_DOWNLOAD = "1"
+    }
 
     npm install --prefer-offline --no-audit --no-fund
+    if (Test-Path $ElectronDist) {
+        $ElectronPackageDist = Join-Path (Join-Path $RepoRoot "desktop\\electron\\node_modules\\electron") "dist"
+        if (Test-Path $ElectronPackageDist) {
+            Remove-Item -LiteralPath $ElectronPackageDist -Recurse -Force
+        }
+        Copy-Item -LiteralPath $ElectronDist -Destination $ElectronPackageDist -Recurse -Force
+    }
     npm run dist -- --win
 } finally {
     Pop-Location
