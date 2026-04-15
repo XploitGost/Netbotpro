@@ -330,10 +330,10 @@ export function useDashboardController() {
 
   async function loadPacketDetail(packet, index) {
     try {
+      setActivePage("inspect");
       const packetId = getPacketId(packet, index, packetMeta.offset);
       setSelectedPacketId(packetId);
       setSelectedPacket(await api.getPacketDetail(packetId));
-      setActivePage("monitor");
     } catch (err) {
       setError(String(err));
     }
@@ -341,10 +341,10 @@ export function useDashboardController() {
 
   async function loadAlertDetail(alert, index) {
     try {
+      setActivePage("inspect");
       const alertId = getAlertId(alert, index, alertMeta.offset);
       setSelectedAlertId(alertId);
       setSelectedAlert(await api.getAlertDetail(alertId));
-      setActivePage("monitor");
     } catch (err) {
       setError(String(err));
     }
@@ -377,7 +377,7 @@ export function useDashboardController() {
     setPacketQuery(nextPacketQuery);
     setAlertQuery(nextAlertQuery);
     setStatusMessage(`Locked on ${target.role === "dst" ? "destination" : "source"} ${target.ip}`);
-    setActivePage("monitor");
+    setActivePage("inspect");
     try {
       await Promise.all([loadPacketHistory(nextPacketQuery, 0), loadAlertHistory(nextAlertQuery, 0)]);
     } catch (err) {

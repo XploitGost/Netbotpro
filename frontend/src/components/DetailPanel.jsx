@@ -75,20 +75,22 @@ export function DetailPanel({ title, data }) {
       <p className="eyebrow">{title}</p>
       {!normalizedData ? <p className="muted">Select a row to inspect details</p> : null}
       {normalizedData ? (
-        <div className="detail-sections">
-          {buildGroups(normalizedData).map((group) => (
-            <section key={group.title} className="detail-group">
-              <h3>{group.title}</h3>
-              <dl className="detail-grid">
-                {group.entries.map(([key, value]) => (
-                  <div key={key}>
-                    <dt>{formatLabel(key)}</dt>
-                    <dd>{String(value ?? "-")}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
+        <div className="detail-panel-scroll">
+          <div className="detail-sections">
+            {buildGroups(normalizedData).map((group) => (
+              <section key={group.title} className="detail-group">
+                <h3>{group.title}</h3>
+                <dl className="detail-grid">
+                  {group.entries.map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{formatLabel(key)}</dt>
+                      <dd>{String(value ?? "-")}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

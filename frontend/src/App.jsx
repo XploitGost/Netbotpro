@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { AppNav } from "./components/AppNav";
 import { DetailPanel } from "./components/DetailPanel";
@@ -24,6 +25,16 @@ function PageSection({ title, subtitle, children, wide = false, fullWidth = fals
       </div>
       {children}
     </section>
+  );
+}
+
+function InspectSummaryCard({ label, value, hint, tone = "neutral" }) {
+  return (
+    <div className={`inspect-summary-card inspect-summary-${tone}`}>
+      <p className="eyebrow">{label}</p>
+      <strong>{value}</strong>
+      <p className="muted">{hint}</p>
+    </div>
   );
 }
 
@@ -97,35 +108,19 @@ function App() {
     resumeLiveFollow,
   } = useDashboardController();
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [activePage]);
+
   const monitorPage = (
-    <section className="page-grid">
-      <PageSection title="Traffic Graph" subtitle="Realtime graph for packets and alerts">
+    <section className="page-grid page-grid-monitor">
+      <PageSection title="Traffic Graph" subtitle="Realtime graph for packets and alerts" fullWidth>
         <LiveGraphPanel focusedTarget={focusedTarget} liveFollow={liveFollow} timeline={timeline} />
-      </PageSection>
-      <PageSection title="Pinned Target" subtitle="Lock onto one IP without the view jumping">
-        <FocusedIpPanel
-          focusedTarget={focusedTarget}
-          focusedPacketCount={focusedPacketCount}
-          focusedAlerts={focusedAlerts}
-          liveFollow={liveFollow}
-          onClearFocusedTarget={clearFocusedTarget}
-          onResumeLive={resumeLiveFollow}
-        />
       </PageSection>
       <PageSection title="Ops Snapshot" subtitle="Health-aware runtime telemetry for stream, queries, and persistence" fullWidth>
         <OpsPanel observability={observability} />
-      </PageSection>
-      <PageSection title="Top Sources" subtitle="Most active source IPs">
-        <MiniList title="Top Sources" items={topSources} onSelect={(item) => handleTrackRow({ src: item.label }, "src")} />
-      </PageSection>
-      <PageSection title="Top Remote IPs" subtitle="Most active external peers">
-        <MiniList title="Top Remote IPs" items={topRemotes} onSelect={(item) => handleTrackRow({ remote_ip: item.label }, "either")} />
-      </PageSection>
-      <PageSection title="Top Conversations" subtitle="Busiest local-to-remote conversations" fullWidth>
-        <MiniList title="Top Conversations" items={topConversations} />
-      </PageSection>
-      <PageSection title="Top Protocols" subtitle="Current protocol mix">
-        <MiniList title="Top Protocols" items={topProtocols} />
       </PageSection>
       <PageSection title="Packets" subtitle="Realtime packet table with clear LAN/WAN markers" wide fullWidth>
         <PacketsPanel
@@ -161,11 +156,60 @@ function App() {
           pageSize={PAGE_SIZE}
         />
       </PageSection>
-      <PageSection title="Packet Detail" subtitle="Selected packet metadata">
+    </section>
+  );
+
+  const inspectPage = (
+    <section className="page-grid page-grid-inspect">
+      <PageSection title="Investigation Desk" subtitle="Selected traffic and focused targets live here now" fullWidth>
+        <div className="inspect-summary-grid">
+          <InspectSummaryCard
+            label="Selected Packet"
+            value={selectedPacket ? `${selectedPacket.src || "-"} -> ${selectedPacket.dst || "-"}` : "No packet selected"}
+            hint={selectedPacket ? `${selectedPacket.proto || "Unknown"} packet • ${selectedPacket.ts || "No time"}` : "Click any packet row in Monitor to inspect it here."}
+            tone={selectedPacket ? "active" : "neutral"}
+          />
+          <InspectSummaryCard
+            label="Selected Alert"
+            value={selectedAlert?.attack_type || "No alert selected"}
+            hint={selectedAlert ? `${selectedAlert.severity || "info"} severity • ${selectedAlert.ts || "No time"}` : "Click any alert row in Monitor to bring its detail here."}
+            tone={selectedAlert ? "warning" : "neutral"}
+          />
+          <InspectSummaryCard
+            label="Pinned Focus"
+            value={focusedTarget?.ip || "No IP pinned"}
+            hint={focusedTarget ? `Tracking ${focusedTarget.role === "dst" ? "destination" : "source"} traffic across the live tables.` : "Track any source, destination, or peer to keep context stable."}
+            tone={focusedTarget ? "focus" : "neutral"}
+          />
+        </div>
+      </PageSection>
+      <PageSection title="Packet Detail" subtitle="Selected packet metadata without the long monitor scroll" wide>
         <DetailPanel title="Packet Detail" data={selectedPacket} />
       </PageSection>
-      <PageSection title="Alert Detail" subtitle="Selected alert metadata">
+      <PageSection title="Alert Detail" subtitle="Selected detection context and scoring" wide>
         <DetailPanel title="Alert Detail" data={selectedAlert} />
+      </PageSection>
+      <PageSection title="Pinned Target" subtitle="Lock onto one IP without the view jumping" fullWidth>
+        <FocusedIpPanel
+          focusedTarget={focusedTarget}
+          focusedPacketCount={focusedPacketCount}
+          focusedAlerts={focusedAlerts}
+          liveFollow={liveFollow}
+          onClearFocusedTarget={clearFocusedTarget}
+          onResumeLive={resumeLiveFollow}
+        />
+      </PageSection>
+      <PageSection title="Top Sources" subtitle="Most active source IPs">
+        <MiniList title="Top Sources" items={topSources} onSelect={(item) => handleTrackRow({ src: item.label }, "src")} />
+      </PageSection>
+      <PageSection title="Top Remote IPs" subtitle="Most active external peers">
+        <MiniList title="Top Remote IPs" items={topRemotes} onSelect={(item) => handleTrackRow({ remote_ip: item.label }, "either")} />
+      </PageSection>
+      <PageSection title="Top Protocols" subtitle="Current protocol mix">
+        <MiniList title="Top Protocols" items={topProtocols} />
+      </PageSection>
+      <PageSection title="Top Conversations" subtitle="Busiest local-to-remote conversations" fullWidth>
+        <MiniList title="Top Conversations" items={topConversations} />
       </PageSection>
     </section>
   );
@@ -224,6 +268,7 @@ function App() {
 
   const currentPage = {
     monitor: monitorPage,
+    inspect: inspectPage,
     settings: settingsPage,
     traceroute: traceroutePage,
     exports: exportsPage,

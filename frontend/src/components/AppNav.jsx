@@ -1,5 +1,6 @@
 const NAV_ITEMS = [
   { id: "monitor", label: "Monitor" },
+  { id: "inspect", label: "Inspect" },
   { id: "settings", label: "Settings" },
   { id: "traceroute", label: "Traceroute" },
   { id: "exports", label: "Exports" },
