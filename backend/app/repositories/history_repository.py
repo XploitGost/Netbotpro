@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import aiosqlite
 from dataclasses import dataclass
-import re
 import sqlite3
 from typing import Any, Callable, Protocol
 
@@ -11,6 +10,7 @@ from backend.app.bootstrap import ensure_project_root_on_path
 
 ensure_project_root_on_path()
 
+from core.netbotpro_sniffer_core.ip_utils import is_local_ip, is_public_ip, is_remote_ip, preferred_remote_ip
 from log_manager import DB_PATH  # noqa: E402
 
 
@@ -26,42 +26,47 @@ def _coerce_positive_int(value: Any, default: int, minimum: int, maximum: int) -
     return max(minimum, min(maximum, num))
 
 
-def _is_private_ip(value: str | None) -> bool:
-    text = str(value or "").strip()
-    return (
-        text.startswith("10.")
-        or text.startswith("192.168.")
-        or text.startswith("127.")
-        or text.startswith("169.254.")
-        or re.match(r"^172\.(1[6-9]|2\d|3[01])\.", text) is not None
-    )
+def _is_local_ip(value: str | None) -> bool:
+    return is_local_ip(value)
+
+
+def _is_public_ip(value: str | None) -> bool:
+    return is_public_ip(value)
 
 
 def _is_remote_traffic(row: dict[str, Any]) -> bool:
     src = str(row.get("src") or "").strip()
     dst = str(row.get("dst") or "").strip()
     remote_ip = str(row.get("remote_ip") or "").strip()
-    if remote_ip and not _is_private_ip(remote_ip):
-        return True
-    return (src and not _is_private_ip(src)) or (dst and not _is_private_ip(dst))
+    candidates = [candidate for candidate in (remote_ip, src, dst) if candidate]
+    return any(is_remote_ip(candidate) for candidate in candidates)
+
+
+def _preferred_remote_ip(
+    row: dict[str, Any] | tuple[Any, ...],
+    *,
+    remote_index: int | None = None,
+    src_index: int | None = None,
+    dst_index: int | None = None,
+) -> str | None:
+    if isinstance(row, dict):
+        remote_ip = str(row.get("remote_ip") or "").strip()
+        src = str(row.get("src") or "").strip()
+        dst = str(row.get("dst") or "").strip()
+    else:
+        remote_ip = str(row[remote_index] or "").strip() if remote_index is not None else ""
+        src = str(row[src_index] or "").strip() if src_index is not None else ""
+        dst = str(row[dst_index] or "").strip() if dst_index is not None else ""
+
+    return preferred_remote_ip(remote_ip, dst, src)
+
+
+def _sqlite_is_remote_flow(src: Any, dst: Any, remote_ip: Any) -> int:
+    return 1 if _is_remote_traffic({"src": src, "dst": dst, "remote_ip": remote_ip}) else 0
 
 
 def _sqlite_remote_clause() -> str:
-    private = [
-        "src LIKE '10.%'",
-        "src LIKE '192.168.%'",
-        "src LIKE '127.%'",
-        "src LIKE '169.254.%'",
-        "src LIKE '172.16.%'",
-        "src LIKE '172.17.%'",
-        "src LIKE '172.18.%'",
-        "src LIKE '172.19.%'",
-        "src LIKE '172.2%.%'",
-        "src LIKE '172.30.%'",
-        "src LIKE '172.31.%'",
-    ]
-    private_dst = [clause.replace("src ", "dst ", 1) for clause in private]
-    return f"NOT (({' OR '.join(private)}) AND ({' OR '.join(private_dst)}))"
+    return "netbot_is_remote_flow(src, dst, remote_ip) = 1"
 
 
 @dataclass(frozen=True)
@@ -264,11 +269,21 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
     def _default_connect(db_path: str) -> sqlite3.Connection:
         return sqlite3.connect(db_path)
 
+    @staticmethod
+    def _configure_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
+        conn.create_function("netbot_is_remote_flow", 3, _sqlite_is_remote_flow)
+        return conn
+
+    @staticmethod
+    async def _configure_async_connection(conn: aiosqlite.Connection) -> aiosqlite.Connection:
+        await conn.create_function("netbot_is_remote_flow", 3, _sqlite_is_remote_flow)
+        return conn
+
     def list_packets(self, query: PacketListQuery) -> dict[str, Any]:
         where, params = self._build_packet_where(query)
 
         try:
-            conn = self._connect_factory(self._db_path)
+            conn = self._configure_connection(self._connect_factory(self._db_path))
         except sqlite3.Error as exc:
             raise HistoryRepositoryError("History database is unavailable") from exc
         try:
@@ -291,7 +306,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         where, params = self._build_alert_where(query)
 
         try:
-            conn = self._connect_factory(self._db_path)
+            conn = self._configure_connection(self._connect_factory(self._db_path))
         except sqlite3.Error as exc:
             raise HistoryRepositoryError("History database is unavailable") from exc
         try:
@@ -314,6 +329,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         where, params = self._build_packet_where(query)
         try:
             async with aiosqlite.connect(self._db_path) as conn:
+                await self._configure_async_connection(conn)
                 total = int(await self._fetch_scalar_async(conn, f"SELECT COUNT(*) FROM packets{where}", params))
                 rows = await self._fetch_rows_async(
                     conn,
@@ -335,6 +351,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         where, params = self._build_alert_where(query)
         try:
             async with aiosqlite.connect(self._db_path) as conn:
+                await self._configure_async_connection(conn)
                 total = int(await self._fetch_scalar_async(conn, f"SELECT COUNT(*) FROM alerts{where}", params))
                 rows = await self._fetch_rows_async(
                     conn,
@@ -358,7 +375,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         except (TypeError, ValueError):
             return None
         try:
-            conn = self._connect_factory(self._db_path)
+            conn = self._configure_connection(self._connect_factory(self._db_path))
         except sqlite3.Error as exc:
             raise HistoryRepositoryError("History database is unavailable") from exc
         try:
@@ -382,6 +399,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             return None
         try:
             async with aiosqlite.connect(self._db_path) as conn:
+                await self._configure_async_connection(conn)
                 row = await self._fetch_row_async(
                     conn,
                     "SELECT id, ts, src, dst, proto, sport, dport, length, country, org, summary, is_alert, remote_ip, app_protocol, app_category, app_confidence, l7, dns_qname, http_host, http_path, sni, tls_version "
@@ -398,7 +416,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         except (TypeError, ValueError):
             return None
         try:
-            conn = self._connect_factory(self._db_path)
+            conn = self._configure_connection(self._connect_factory(self._db_path))
         except sqlite3.Error as exc:
             raise HistoryRepositoryError("History database is unavailable") from exc
         try:
@@ -422,6 +440,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             return None
         try:
             async with aiosqlite.connect(self._db_path) as conn:
+                await self._configure_async_connection(conn)
                 row = await self._fetch_row_async(
                     conn,
                     "SELECT id, ts, src, dst, proto, attack_type, score, detail, severity, engine, score_raw, incident_id, incident_count, incident_score, packet_id, remote_ip, app_protocol, app_category, app_confidence, dns_qname, http_host, http_path, sni "
@@ -523,7 +542,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             "org": row[9],
             "summary": row[10],
             "is_alert": bool(row[11]),
-            "remote_ip": row[12],
+            "remote_ip": _preferred_remote_ip(row, remote_index=12, src_index=2, dst_index=3),
             "app_protocol": row[13],
             "app_category": row[14],
             "app_confidence": row[15],
@@ -553,7 +572,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             "incident_count": row[12],
             "incident_score": row[13],
             "packet_id": row[14],
-            "remote_ip": row[15],
+            "remote_ip": _preferred_remote_ip(row, remote_index=15, src_index=2, dst_index=3),
             "app_protocol": row[16],
             "app_category": row[17],
             "app_confidence": row[18],

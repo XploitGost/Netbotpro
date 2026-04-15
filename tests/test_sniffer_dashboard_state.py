@@ -43,6 +43,23 @@ class SnifferDashboardStateTests(unittest.TestCase):
         self.assertEqual(dashboard["recent_packets"], [])
         self.assertEqual(dashboard["recent_alerts"], [])
 
+    def test_dashboard_prefers_public_remote_ip_over_stale_local_remote(self):
+        state = SnifferDashboardState(max_items=5)
+
+        state.add_packet(
+            {
+                "src": "192.168.1.10",
+                "dst": "8.8.8.8",
+                "proto": "tcp",
+                "ts": "now",
+                "remote_ip": "192.168.1.1",
+            }
+        )
+
+        dashboard = state.dashboard(running=True, iface="eth0")
+
+        self.assertEqual(dashboard["top_remotes"][0]["label"], "8.8.8.8")
+
 
 if __name__ == "__main__":
     unittest.main()

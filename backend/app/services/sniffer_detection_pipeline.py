@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-import ipaddress
 import logging
 import threading
 import time
@@ -13,6 +12,7 @@ from backend.app.services.app_protocols import infer_app_protocol
 
 ensure_project_root_on_path()
 
+from core.netbotpro_sniffer_core.ip_utils import is_local_ip, is_remote_ip
 from core.firewall_tools import block_ip  # noqa: E402
 from core.ids_ml import MLIDS  # noqa: E402
 from core.ids_rules_engine import RuleEngine  # noqa: E402
@@ -314,10 +314,7 @@ class SnifferDetectionPipeline:
 
     @staticmethod
     def _is_private_ip(ip: str) -> bool:
-        try:
-            return ipaddress.ip_address(ip).is_private
-        except ValueError:
-            return False
+        return is_local_ip(ip)
 
     def _cooldown_active(self, ip: str) -> bool:
         now = time.time()
@@ -368,7 +365,7 @@ class SnifferDetectionPipeline:
     def _is_remote_flow(self, packet: dict[str, Any]) -> bool:
         remote_ip = str(packet.get("remote_ip") or "").strip()
         if remote_ip:
-            return not self._is_private_ip(remote_ip)
+            return is_remote_ip(remote_ip)
         src = str(packet.get("src") or "").strip()
         dst = str(packet.get("dst") or "").strip()
-        return bool((src and not self._is_private_ip(src)) or (dst and not self._is_private_ip(dst)))
+        return bool((src and is_remote_ip(src)) or (dst and is_remote_ip(dst)))

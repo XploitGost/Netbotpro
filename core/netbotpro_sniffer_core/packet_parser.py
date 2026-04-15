@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import ipaddress
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from .ip_utils import infer_flow, is_local_ip, is_public_ip, normalize_ip_set, parse_ip, preferred_remote_ip
 from .layer7 import extract_layer7, extract_payload, safe_bytes_preview
 from .providers import DefaultGeoIpProvider, DefaultMacVendorProvider, DefaultProcessMapper
 
@@ -32,6 +32,7 @@ class PacketMetadataBuilder:
     enable_geoip: bool = True
     enable_mac_vendor: bool = True
     local_country_code: str = LOCAL_COUNTRY_CODE
+    local_ips: set[str] | None = None
     geoip_provider: Any | None = None
     mac_vendor_provider: Any | None = None
     process_mapper: Any | None = None
@@ -46,6 +47,7 @@ class PacketMetadataBuilder:
             self.process_mapper = DefaultProcessMapper(enabled=True)
         if self.timestamp_factory is None:
             self.timestamp_factory = lambda: datetime.now().strftime("%H:%M:%S")
+        self.local_ips = normalize_ip_set(self.local_ips)
 
     def build(self, pkt: Any) -> dict[str, Any]:
         ts = self.timestamp_factory()
@@ -162,25 +164,7 @@ class PacketMetadataBuilder:
         }
 
     def _infer_direction(self, src: str | None, dst: str | None) -> dict[str, Any]:
-        is_src_private = self._is_private(src)
-        is_dst_private = self._is_private(dst)
-        direction = "OTHER"
-        remote_ip = dst or src
-
-        if is_src_private and not is_dst_private:
-            direction = "OUTGOING"
-            remote_ip = dst
-        elif not is_src_private and is_dst_private:
-            direction = "INCOMING"
-            remote_ip = src
-        elif is_src_private and is_dst_private:
-            direction = "LOCAL"
-            remote_ip = dst or src
-
-        return {
-            "direction": direction,
-            "remote_ip": remote_ip,
-        }
+        return infer_flow(src, dst, local_ips=self.local_ips)
 
     def _finalize_scope(
         self,
@@ -193,7 +177,7 @@ class PacketMetadataBuilder:
         country = geo.get("country")
         if country:
             scope = "Same-Country" if country == self.local_country_code else "International"
-        elif self._is_private(src) and self._is_private(dst):
+        elif self._is_local_ip(src) and self._is_local_ip(dst):
             scope = "Local/LAN"
 
         inside_outside = None
@@ -240,14 +224,17 @@ class PacketMetadataBuilder:
         except Exception:
             return None
 
-    @staticmethod
-    def _is_private(ip_addr: str | None) -> bool:
-        if not ip_addr:
-            return False
-        try:
-            return ipaddress.ip_address(ip_addr).is_private
-        except Exception:
-            return False
+    def _parse_ip(self, ip_addr: str | None) -> Any | None:
+        return parse_ip(ip_addr)
+
+    def _is_local_ip(self, ip_addr: str | None) -> bool:
+        return is_local_ip(ip_addr, local_ips=self.local_ips)
+
+    def _is_public_ip(self, ip_addr: str | None) -> bool:
+        return is_public_ip(ip_addr, local_ips=self.local_ips)
+
+    def _best_remote_ip(self, src: str | None, dst: str | None) -> str | None:
+        return preferred_remote_ip(dst, src, local_ips=self.local_ips)
 
     @staticmethod
     def _safe_summary(pkt: Any) -> str:

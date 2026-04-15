@@ -46,6 +46,23 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
         self.assertEqual(result["total"], 2)
         self.assertEqual(result["items"][0]["dst"], "8.8.8.8")
 
+    def test_remote_filter_ignores_stale_local_remote_ip_when_public_peer_exists(self):
+        class _StaleRemoteSniffer:
+            def recent_packets(self):
+                return [
+                    {"id": "mem-pkt-x", "src": "192.168.1.10", "dst": "8.8.8.8", "proto": "TCP", "summary": "public", "remote_ip": "192.168.1.1"},
+                ]
+
+            def recent_alerts(self):
+                return []
+
+        repository = MemoryHistoryRepository(_StaleRemoteSniffer())
+
+        result = repository.list_packets(PacketListQuery(only_remote=True))
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["items"][0]["dst"], "8.8.8.8")
+
 
 class SQLiteHistoryRepositoryTests(unittest.TestCase):
     def test_sqlite_alert_queries_keep_enriched_fields(self):
@@ -162,6 +179,61 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             self.assertEqual(detail["remote_ip"], "8.8.8.8")
             self.assertEqual(detail["http_host"], "example.com")
 
+    def test_sqlite_only_remote_filter_excludes_ipv6_local_flows(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "history.db"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE packets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts TEXT,
+                        src TEXT,
+                        dst TEXT,
+                        proto TEXT,
+                        sport INTEGER,
+                        dport INTEGER,
+                        length INTEGER,
+                        country TEXT,
+                        org TEXT,
+                        summary TEXT,
+                        is_alert INTEGER DEFAULT 0,
+                        remote_ip TEXT,
+                        app_protocol TEXT,
+                        app_category TEXT,
+                        app_confidence TEXT,
+                        l7 TEXT,
+                        dns_qname TEXT,
+                        http_host TEXT,
+                        http_path TEXT,
+                        sni TEXT,
+                        tls_version TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO packets (
+                        ts, src, dst, proto, sport, dport, length,
+                        country, org, summary, is_alert, remote_ip,
+                        app_protocol, app_category, app_confidence, l7,
+                        dns_qname, http_host, http_path, sni, tls_version
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("10:00:00", "fd00::10", "fd00::20", "TCP", 1234, 443, 60, None, None, "ipv6-local", 0, "fd00::20", "HTTPS", "web", "high", None, None, None, None, None, "TLS1.3"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            repository = SQLiteHistoryRepository(db_path=str(db_path))
+            result = repository.list_packets(PacketListQuery(only_remote=True))
+
+            self.assertEqual(result["total"], 0)
+            self.assertEqual(result["items"], [])
+
     def test_async_wrapper_matches_sync_result(self):
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "history.db"
@@ -216,6 +288,36 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             async_result = asyncio.run(repository.alist_packets(PacketListQuery(text="hello", limit=50, offset=0)))
 
             self.assertEqual(sync_result, async_result)
+
+    def test_sqlite_normalization_prefers_public_peer_as_remote_ip(self):
+        row = (
+            1,
+            "10:00:00",
+            "192.168.1.10",
+            "8.8.8.8",
+            "TCP",
+            1234,
+            443,
+            60,
+            "US",
+            "Example",
+            "hello",
+            0,
+            "192.168.1.1",
+            "HTTPS",
+            "web",
+            "high",
+            None,
+            None,
+            None,
+            None,
+            None,
+            "TLS1.3",
+        )
+
+        normalized = SQLiteHistoryRepository._normalize_packet_row(row)
+
+        self.assertEqual(normalized["remote_ip"], "8.8.8.8")
 
 
 if __name__ == "__main__":

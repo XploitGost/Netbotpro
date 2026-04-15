@@ -183,3 +183,39 @@ def list_capture_interfaces() -> dict[str, Any]:
         "recommended_label": recommended_label,
         "items": items,
     }
+
+
+def interface_local_ips(candidate: str | None) -> set[str]:
+    resolved = resolve_capture_interface(candidate) or str(candidate or "").strip() or None
+    if not resolved:
+        return set()
+
+    ips: set[str] = set()
+    interface_names: set[str] = set()
+
+    for item in _scapy_interfaces():
+        if item.get("value") != resolved:
+            continue
+        ip_addr = str(item.get("ip") or "").split("%", 1)[0].strip()
+        if ip_addr:
+            ips.add(ip_addr)
+        for key in ("name", "network_name", "value"):
+            text = str(item.get(key) or "").strip()
+            if text:
+                interface_names.add(text)
+
+    if psutil is not None and interface_names:
+        try:
+            addrs_map = psutil.net_if_addrs()  # type: ignore[attr-defined]
+            for iface_name in interface_names:
+                for addr in addrs_map.get(iface_name, []):
+                    family = getattr(addr, "family", None)
+                    if family not in {socket.AF_INET, socket.AF_INET6}:
+                        continue
+                    text = str(getattr(addr, "address", "") or "").split("%", 1)[0].strip()
+                    if text:
+                        ips.add(text)
+        except Exception:
+            logger.debug("psutil interface address enumeration failed", exc_info=True)
+
+    return ips

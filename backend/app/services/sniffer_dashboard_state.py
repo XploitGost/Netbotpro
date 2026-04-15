@@ -2,31 +2,36 @@ from __future__ import annotations
 
 import threading
 from collections import Counter, deque
-import re
 from typing import Any
 
+from core.netbotpro_sniffer_core.ip_utils import is_local_ip, is_public_ip, preferred_remote_ip
 
-def _is_private_ip(value: str | None) -> bool:
-    text = str(value or "").strip()
-    return (
-        text.startswith("10.")
-        or text.startswith("192.168.")
-        or text.startswith("127.")
-        or text.startswith("169.254.")
-        or re.match(r"^172\.(1[6-9]|2\d|3[01])\.", text) is not None
-    )
+def _is_local_ip(value: str | None) -> bool:
+    return is_local_ip(value)
+
+
+def _is_public_ip(value: str | None) -> bool:
+    return is_public_ip(value)
+
+
+def _preferred_remote_ip(*candidates: str | None) -> str | None:
+    return preferred_remote_ip(*candidates)
 
 
 def _remote_ip(packet: dict[str, Any]) -> str:
     remote_ip = str(packet.get("remote_ip") or "").strip()
-    if remote_ip:
-        return remote_ip
     src = str(packet.get("src") or "").strip()
     dst = str(packet.get("dst") or "").strip()
+    preferred = _preferred_remote_ip(dst, src, remote_ip)
+    if preferred:
+        return preferred
+
+    if remote_ip:
+        return remote_ip
     if src and dst:
-        if _is_private_ip(src) and not _is_private_ip(dst):
+        if _is_local_ip(src) and not _is_local_ip(dst):
             return dst
-        if _is_private_ip(dst) and not _is_private_ip(src):
+        if _is_local_ip(dst) and not _is_local_ip(src):
             return src
         return dst
     return dst or src or "-"

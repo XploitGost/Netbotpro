@@ -153,6 +153,22 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
         self.assertEqual(mock_block_ip.call_count, 0)
         self.assertEqual(pipeline.stats()["private_ip_skips"], 1)
 
+    @patch("backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True)
+    def test_auto_block_skips_cgnat_source_ips(self, mock_block_ip):
+        pipeline = SnifferDetectionPipeline(
+            settings_provider=lambda: {"auto_block": True, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            ids_sig=_NoopEngine(),
+            ids_ml=_NoopEngine(),
+            rule_engine=_RuleEngine(),
+            scorer=_NoopScorer(),
+            incidents=_NoopIncidents(),
+        )
+
+        pipeline.analyze({"src": "100.64.10.20", "dst": "10.0.0.2", "proto": "TCP", "ts": "now"})
+
+        self.assertEqual(mock_block_ip.call_count, 0)
+        self.assertEqual(pipeline.stats()["private_ip_skips"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

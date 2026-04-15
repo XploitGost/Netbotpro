@@ -4,7 +4,7 @@ import logging
 import threading
 from typing import Any, Callable
 
-from .interfaces import recommended_interface_name, resolve_capture_interface
+from .interfaces import interface_local_ips, recommended_interface_name, resolve_capture_interface
 from .packet_parser import PacketLayers, PacketMetadataBuilder
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ class NetSniffer:
             if self._running:
                 return
             self._iface = iface
+            self._builder = None
             self._running = True
             self._stop_event.clear()
             logger.info("starting sniffer on iface=%s", iface or "<scapy-default>")
@@ -160,6 +161,7 @@ class NetSniffer:
             layers=self._layers,
             enable_geoip=self.enable_geoip,
             enable_mac_vendor=self.enable_mac_vendor,
+            local_ips=interface_local_ips(self.selected_iface()),
             geoip_provider=self._geoip_provider,
             mac_vendor_provider=self._mac_vendor_provider,
             process_mapper=self._process_mapper,
