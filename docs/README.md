@@ -9,19 +9,11 @@ The maintained product path is:
 - `core/`
 - `config/`
 
-## Legacy desktop UI
-
-The files in `legacy/` are kept only as a deprecated desktop reference:
-
-- `legacy/ui_kali.py`
-- `legacy/ui_main.py`
-- `legacy/main_kali.py`
-
-They are not the active development target.
-
 ## Cleanup policy
 
-The repository should not keep:
+The repository should stay focused on the active desktop and web runtime. Old debug artifacts and abandoned UI paths should not remain in the tree.
+
+Do not keep:
 
 - `__pycache__/`
 - `*.pyc`
@@ -40,7 +32,6 @@ project/
 ├── frontend/
 ├── core/
 ├── config/
-├── legacy/
 ├── tests/
 ├── docs/
 ├── requirements.txt

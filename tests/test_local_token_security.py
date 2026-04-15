@@ -14,6 +14,13 @@ class LocalTokenSecurityTests(unittest.TestCase):
         scope = {"type": "http", "headers": encoded_headers, "client": ("127.0.0.1", 8765)}
         return Request(scope)
 
+    @staticmethod
+    def _route(path: str, method: str = "GET"):
+        for route in main.app.routes:
+            if getattr(route, "path", None) == path and method in getattr(route, "methods", set()):
+                return route
+        raise AssertionError(f"Route not found: {method} {path}")
+
     def test_status_reports_when_local_token_is_enabled(self):
         with (
             patch.dict(os.environ, {"NETBOT_LOCAL_TOKEN": "desktop-secret"}, clear=False),
@@ -36,6 +43,16 @@ class LocalTokenSecurityTests(unittest.TestCase):
             result = main.require_local_token(self._build_request({"X-NetBot-Token": "desktop-secret"}))
 
         self.assertIsNone(result)
+
+    def test_reports_route_declares_local_token_dependency(self):
+        route = self._route("/api/reports")
+        dependencies = {dependency.call for dependency in route.dependant.dependencies}
+        self.assertIn(main.require_local_token, dependencies)
+
+    def test_export_download_route_declares_local_token_dependency(self):
+        route = self._route("/api/exports/download")
+        dependencies = {dependency.call for dependency in route.dependant.dependencies}
+        self.assertIn(main.require_local_token, dependencies)
 
 
 if __name__ == "__main__":

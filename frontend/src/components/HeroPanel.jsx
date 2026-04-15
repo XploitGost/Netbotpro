@@ -8,6 +8,10 @@ export function HeroPanel({
   localToken,
   localTokenRequired,
   managedLocalToken,
+  capturePreflight,
+  captureUnavailableDetail,
+  canStartSniffer,
+  error,
   onTokenChange,
   onStartSniffer,
   onStopSniffer,
@@ -52,8 +56,15 @@ export function HeroPanel({
         {localTokenRequired && managedLocalToken ? (
           <p className="muted">Sensitive actions are secured with a desktop-managed local token.</p>
         ) : null}
+        {!canStartSniffer && captureUnavailableDetail ? (
+          <p className="error">Live capture unavailable: {captureUnavailableDetail}</p>
+        ) : null}
+        {capturePreflight?.requires_elevation ? (
+          <p className="muted">Run the desktop app as Administrator if you want live capture and firewall actions.</p>
+        ) : null}
+        {error ? <p className="error">{error}</p> : null}
         <div className="hero-actions">
-          <button className="primary" onClick={onStartSniffer}>Start Sniffer</button>
+          <button className="primary" onClick={onStartSniffer} disabled={!canStartSniffer}>Start Sniffer</button>
           <button className="secondary" onClick={onStopSniffer}>Stop Sniffer</button>
           <button className="secondary" onClick={onResetData}>Reset Data</button>
         </div>

@@ -18,6 +18,23 @@ async function readResponsePayload(res) {
   }
 }
 
+function inferDownloadFilename(exportPath, res) {
+  const disposition = res.headers.get("content-disposition") || "";
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+    }
+  }
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1];
+  }
+  const parts = String(exportPath || "").split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || "netbotpro-export";
+}
+
 export function useApiClient(localToken) {
   const apiBase = getApiBase();
 
@@ -35,6 +52,7 @@ export function useApiClient(localToken) {
 
   return {
     apiBase,
+    getStatus: () => request("/status"),
     getDashboard: () => request("/dashboard"),
     getSettings: () => request("/settings"),
     getInterfaces: () => request("/interfaces"),
@@ -49,6 +67,19 @@ export function useApiClient(localToken) {
     getReports: () => request("/reports"),
     runTraceroute: (payload) => request("/traceroute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
     exportSession: (payload) => request("/exports/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    downloadExport: async (exportPath) => {
+      const res = await fetch(`${apiBase}/exports/download?path=${encodeURIComponent(exportPath)}`, {
+        headers: buildAuthHeaders(localToken),
+      });
+      if (!res.ok) {
+        const data = await readResponsePayload(res);
+        throw new Error(data?.detail || `Export download failed (${res.status})`);
+      }
+      return {
+        blob: await res.blob(),
+        filename: inferDownloadFilename(exportPath, res),
+      };
+    },
     analyzePcap: async (file) => {
       const form = new FormData();
       form.append("file", file);

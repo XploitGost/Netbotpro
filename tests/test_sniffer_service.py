@@ -1,7 +1,8 @@
 import unittest
+from unittest.mock import patch
 
 from backend.app.services.event_bus import EventBus
-from backend.app.services.sniffer_service import SnifferService
+from backend.app.services.sniffer_service import CaptureStartUnavailableError, SnifferService
 
 
 class _FakeCaptureSession:
@@ -42,9 +43,36 @@ class _FakeCaptureProvider:
         class _Report:
             @staticmethod
             def to_dict():
-                return {"provider": "fake", "ready": True}
+                return {
+                    "provider": "fake",
+                    "ready": True,
+                    "checks": [{"code": "interfaces_available", "ok": True, "severity": "error", "detail": "ok"}],
+                }
 
         return _Report()
+
+
+class _UnavailableCaptureProvider(_FakeCaptureProvider):
+    def create_session(self, packet_callback):
+        raise AssertionError("create_session should not be called when preflight is not ready")
+
+    def preflight(self):
+        class _Report:
+            @staticmethod
+            def to_dict():
+                return {
+                    "provider": "fake",
+                    "ready": False,
+                    "checks": [{"code": "interfaces_available", "ok": False, "severity": "error", "detail": "Detected 0 capture interface(s)."}],
+                }
+
+        return _Report()
+
+
+class _SlowCaptureProvider(_FakeCaptureProvider):
+    def create_session(self, packet_callback):
+        __import__("time").sleep(0.2)
+        return super().create_session(packet_callback)
 
 
 class SnifferServiceTests(unittest.TestCase):
@@ -67,6 +95,24 @@ class SnifferServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["recommended"], "eth0")
         self.assertEqual(payload["preflight"]["provider"], "fake")
+
+    def test_start_fails_fast_when_preflight_is_not_ready(self):
+        service = SnifferService(EventBus(), capture_provider=_UnavailableCaptureProvider())
+
+        with self.assertRaises(CaptureStartUnavailableError) as ctx:
+            service.start("iface=default")
+
+        self.assertIn("Detected 0 capture interface", str(ctx.exception))
+
+    def test_start_times_out_when_capture_session_creation_hangs(self):
+        service = SnifferService(EventBus(), capture_provider=_SlowCaptureProvider())
+
+        with patch("backend.app.services.sniffer_service.CAPTURE_START_TIMEOUT_SEC", 0.01):
+            with self.assertRaises(CaptureStartUnavailableError) as ctx:
+                service.start("eth0")
+
+        self.assertIn("timed out", str(ctx.exception).lower())
+        service.close()
 
 
 if __name__ == "__main__":

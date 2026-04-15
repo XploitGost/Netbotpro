@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime
 from typing import Any
@@ -17,6 +18,14 @@ from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
 ensure_project_root_on_path()
 
 logger = logging.getLogger(__name__)
+CAPTURE_START_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_START_TIMEOUT_SEC", "4.0"))
+
+
+class CaptureStartUnavailableError(RuntimeError):
+    def __init__(self, detail: str, *, preflight: dict[str, Any] | None = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.preflight = preflight or {}
 
 
 class SnifferService:
@@ -32,6 +41,49 @@ class SnifferService:
         self._detection_pipeline = SnifferDetectionPipeline(settings_provider=get_settings_snapshot)
         self._persistence = SnifferPersistence()
         self._publisher = SnifferEventPublisher(event_bus)
+
+    @staticmethod
+    def _first_blocking_preflight_detail(preflight: dict[str, Any]) -> str:
+        for check in preflight.get("checks", []):
+            if not check.get("ok") and str(check.get("severity") or "error") == "error":
+                detail = str(check.get("detail") or "").strip()
+                if detail:
+                    return detail
+        return "Live capture is unavailable in the current runtime."
+
+    def _start_capture_session(self, iface: str | None) -> tuple[CaptureSession, str]:
+        preflight = self.capture_preflight()
+        if not preflight.get("ready"):
+            raise CaptureStartUnavailableError(self._first_blocking_preflight_detail(preflight), preflight=preflight)
+
+        result: dict[str, Any] = {}
+        error: dict[str, BaseException] = {}
+
+        def runner() -> None:
+            try:
+                engine = self._capture_provider.create_session(self._on_packet)
+                engine.start(iface=iface)
+                actual_iface = engine.selected_iface() or iface or "default"
+                result["engine"] = engine
+                result["iface"] = self._capture_provider.describe_interface(actual_iface) or str(actual_iface)
+            except BaseException as exc:  # pragma: no cover - defensive path
+                error["exc"] = exc
+
+        worker = threading.Thread(target=runner, name="netbotpro-capture-start", daemon=True)
+        worker.start()
+        worker.join(CAPTURE_START_TIMEOUT_SEC)
+
+        if worker.is_alive():
+            raise CaptureStartUnavailableError(
+                "Live capture startup timed out. Check Npcap/adapter readiness and run the desktop app as Administrator.",
+                preflight=preflight,
+            )
+        if "exc" in error:
+            raise CaptureStartUnavailableError(
+                f"Live capture failed to start: {error['exc'].__class__.__name__}",
+                preflight=preflight,
+            ) from error["exc"]
+        return result["engine"], result["iface"]
 
     def _on_packet(self, meta: dict[str, Any]) -> None:
         packet = dict(meta)
@@ -56,10 +108,7 @@ class SnifferService:
                 already_running = True
             else:
                 already_running = False
-                self._engine = self._capture_provider.create_session(self._on_packet)
-                self._engine.start(iface=iface)
-                actual_iface = self._engine.selected_iface() or iface or "default"
-                self._iface = self._capture_provider.describe_interface(actual_iface) or str(actual_iface)
+                self._engine, self._iface = self._start_capture_session(iface)
         if already_running:
             return self.get_state()
         state = self.get_state()

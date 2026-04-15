@@ -1,3 +1,4 @@
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from log_manager import _df_from_alert_rows, _df_from_packet_rows, export_packets_csv, is_persist_enabled
 
 
+@unittest.skipUnless(importlib.util.find_spec("pandas") is not None, "pandas is not installed in this environment")
 class LogManagerFacadeTests(unittest.TestCase):
     def test_packet_df_keeps_compatibility_columns(self):
         df = _df_from_packet_rows(

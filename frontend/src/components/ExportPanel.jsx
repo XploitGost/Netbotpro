@@ -1,4 +1,4 @@
-export function ExportPanel({ apiBase, error, exportInfo, onExport }) {
+export function ExportPanel({ error, exportInfo, onDownload, onExport }) {
   return (
     <div className="panel-body">
       <p className="eyebrow">Session Export</p>
@@ -13,7 +13,7 @@ export function ExportPanel({ apiBase, error, exportInfo, onExport }) {
           <div className="export-box">
             <p className="muted">Last export</p>
             <p>{exportInfo.path}</p>
-            <a href={`${apiBase}/exports/download?path=${encodeURIComponent(exportInfo.path)}`}>Download generated file</a>
+            <button className="secondary" onClick={() => onDownload(exportInfo.path)}>Download generated file</button>
           </div>
         ) : null}
         {error ? <p className="error">{error}</p> : null}

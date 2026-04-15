@@ -4,11 +4,6 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any
 
-from scapy.layers.dns import DNS, DNSQR  # type: ignore
-from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
-from scapy.layers.l2 import Ether  # type: ignore
-from scapy.utils import rdpcap  # type: ignore
-
 from backend.app.bootstrap import ensure_project_root_on_path
 
 ensure_project_root_on_path()
@@ -23,6 +18,12 @@ class _OfflineProcessMapper:
         return {}
 
 
+def _read_pcap(path: str):
+    from scapy.utils import rdpcap  # type: ignore
+
+    return rdpcap(path)
+
+
 def _packet_timestamp(pkt: Any) -> str:
     try:
         return datetime.fromtimestamp(float(getattr(pkt, "time", 0.0))).strftime("%H:%M:%S")
@@ -31,6 +32,10 @@ def _packet_timestamp(pkt: Any) -> str:
 
 
 def _packet_layers() -> PacketLayers:
+    from scapy.layers.dns import DNS, DNSQR  # type: ignore
+    from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
+    from scapy.layers.l2 import Ether  # type: ignore
+
     return PacketLayers(
         Ether=Ether,
         IP=IP,
@@ -60,7 +65,7 @@ def _top_pairs(counter: Counter, key_name: str, limit: int = 20) -> list[dict[st
 
 
 def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str, Any]:
-    packets = rdpcap(path)
+    packets = _read_pcap(path)
     settings = get_settings_snapshot()
     if ml_threshold is not None:
         settings["ids_ml_threshold"] = ml_threshold

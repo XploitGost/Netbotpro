@@ -128,6 +128,12 @@ function buildHistoryCacheKey(query, offset) {
   return JSON.stringify({ query, offset, limit: PAGE_SIZE });
 }
 
+function blockingCaptureDetail(preflight) {
+  if (!preflight || !Array.isArray(preflight.checks)) return "";
+  const blocking = preflight.checks.find((check) => !check?.ok && String(check?.severity || "error") === "error");
+  return String(blocking?.detail || "").trim();
+}
+
 export function useDashboardController() {
   const { localToken, setLocalToken, managedLocalToken } = useLocalAuth();
   const api = useApiClient(localToken);
@@ -147,6 +153,7 @@ export function useDashboardController() {
   const [interfaces, setInterfaces] = useState([]);
   const [recommendedInterface, setRecommendedInterface] = useState("");
   const [recommendedInterfaceLabel, setRecommendedInterfaceLabel] = useState("");
+  const [capturePreflight, setCapturePreflight] = useState(null);
   const [tracerouteTarget, setTracerouteTarget] = useState("");
   const [tracerouteResult, setTracerouteResult] = useState(null);
   const [offlineFile, setOfflineFile] = useState(null);
@@ -210,16 +217,32 @@ export function useDashboardController() {
 
     async function loadInitial() {
       try {
+        const statusData = await api.getStatus();
+        if (!active) return;
+        setLocalTokenRequired(Boolean(statusData.local_token_required));
+        mergeObservability(statusData.observability || {});
+
+        if (statusData.local_token_required && !localToken) {
+          setDashboard((current) => ({ ...(current || {}), state: statusData.sniffer || {} }));
+          setPackets([]);
+          setAlerts([]);
+          setTimeline(createTimeline());
+          setPacketMeta({ total: 0, source: "memory", offset: 0, limit: PAGE_SIZE });
+          setAlertMeta({ total: 0, source: "memory", offset: 0, limit: PAGE_SIZE });
+          setStatusMessage("Enter the local token to unlock dashboard data");
+          return;
+        }
+
         const [dashboardData, settingsData, interfacesData] = await Promise.all([
           api.getDashboard(),
           api.getSettings(),
-          api.getInterfaces().catch(() => ({ recommended: "", items: [] })),
+          api.getInterfaces().catch(() => ({ recommended: "", items: [], preflight: null })),
         ]);
         if (!active) return;
         clearHistoryCaches();
         setDashboard(dashboardData);
         mergeObservability(dashboardData.observability || dashboardData.state?.observability || {});
-        setLocalTokenRequired(Boolean(dashboardData.local_token_required));
+        setLocalTokenRequired(Boolean(statusData.local_token_required || dashboardData.local_token_required));
         setPackets(dashboardData.recent_packets || []);
         setAlerts(dashboardData.recent_alerts || []);
         setTimeline(seedTimeline(dashboardData.recent_packets || [], dashboardData.recent_alerts || []));
@@ -232,6 +255,7 @@ export function useDashboardController() {
         setInterfaces(interfaceItems);
         setRecommendedInterface(interfacesData.recommended || "");
         setRecommendedInterfaceLabel(interfacesData.recommended_label || "");
+        setCapturePreflight(interfacesData.preflight || null);
         const reportsData = await api.getReports();
         if (!active) return;
         setReports(reportsData || []);
@@ -389,11 +413,20 @@ export function useDashboardController() {
 
   async function startSniffer() {
     setError("");
+    const unavailableDetail = blockingCaptureDetail(capturePreflight);
+    if (capturePreflight && !capturePreflight.ready && unavailableDetail) {
+      setError(unavailableDetail);
+      setStatusMessage(unavailableDetail);
+      return;
+    }
     try {
       const data = await api.startSniffer({ iface: settings.iface || "iface=default" });
       setDashboard((current) => ({ ...(current || {}), state: data }));
+      setStatusMessage("Live capture started");
     } catch (err) {
-      setError(String(err));
+      const message = String(err);
+      setError(message);
+      setStatusMessage(message);
     }
   }
 
@@ -467,6 +500,30 @@ export function useDashboardController() {
       setStatusMessage(`Export created: ${data.format}`);
     } catch (err) {
       setError(String(err));
+    }
+  }
+
+  async function downloadExport(path) {
+    if (!path || typeof window === "undefined") {
+      return;
+    }
+    setError("");
+    try {
+      const { blob, filename } = await api.downloadExport(path);
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
+      setStatusMessage(`Downloaded ${filename}`);
+    } catch (err) {
+      const message = String(err);
+      setError(message);
+      setStatusMessage(message);
     }
   }
 
@@ -622,6 +679,8 @@ export function useDashboardController() {
     if (connectionState === "degraded") return "Degraded";
     return "Connecting";
   }, [connectionState]);
+  const captureUnavailableDetail = useMemo(() => blockingCaptureDetail(capturePreflight), [capturePreflight]);
+  const canStartSniffer = useMemo(() => !capturePreflight || Boolean(capturePreflight.ready), [capturePreflight]);
 
   const focusedPacketCount = useMemo(
     () => packets.filter((packet) => matchesFocusedTarget(packet, focusedTarget)).length,
@@ -652,6 +711,8 @@ export function useDashboardController() {
     interfaces,
     recommendedInterface,
     recommendedInterfaceLabel,
+    capturePreflight,
+    captureUnavailableDetail,
     tracerouteTarget,
     setTracerouteTarget,
     tracerouteResult,
@@ -666,6 +727,7 @@ export function useDashboardController() {
     error,
     localTokenRequired,
     managedLocalToken,
+    canStartSniffer,
     liveFollow,
     setLiveFollow,
     focusedTarget,
@@ -684,6 +746,7 @@ export function useDashboardController() {
     saveSettings,
     runTraceroute,
     exportSession,
+    downloadExport,
     runOfflineAnalysis,
     loadPacketDetail,
     loadAlertDetail,

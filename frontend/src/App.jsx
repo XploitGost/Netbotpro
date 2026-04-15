@@ -29,7 +29,6 @@ function PageSection({ title, subtitle, children, wide = false, fullWidth = fals
 
 function App() {
   const {
-    api,
     localToken,
     setLocalToken,
     activePage,
@@ -48,6 +47,8 @@ function App() {
     interfaces,
     recommendedInterface,
     recommendedInterfaceLabel,
+    capturePreflight,
+    captureUnavailableDetail,
     tracerouteTarget,
     setTracerouteTarget,
     tracerouteResult,
@@ -62,6 +63,7 @@ function App() {
     error,
     localTokenRequired,
     managedLocalToken,
+    canStartSniffer,
     liveFollow,
     setLiveFollow,
     focusedTarget,
@@ -79,6 +81,7 @@ function App() {
     saveSettings,
     runTraceroute,
     exportSession,
+    downloadExport,
     runOfflineAnalysis,
     loadPacketDetail,
     loadAlertDetail,
@@ -198,7 +201,7 @@ function App() {
   const exportsPage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Exports" subtitle="Session exports separated from monitoring" wide>
-        <ExportPanel apiBase={api.apiBase} error={error} exportInfo={exportInfo} onExport={exportSession} />
+        <ExportPanel error={error} exportInfo={exportInfo} onDownload={downloadExport} onExport={exportSession} />
       </PageSection>
     </section>
   );
@@ -206,7 +209,7 @@ function App() {
   const reportsPage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Reports" subtitle="Generated report archive" wide>
-        <ReportsPanel apiBase={api.apiBase} reports={reports} />
+        <ReportsPanel onDownload={downloadExport} reports={reports} />
       </PageSection>
     </section>
   );
@@ -240,6 +243,10 @@ function App() {
         localToken={localToken}
         localTokenRequired={localTokenRequired}
         managedLocalToken={managedLocalToken}
+        capturePreflight={capturePreflight}
+        captureUnavailableDetail={captureUnavailableDetail}
+        canStartSniffer={canStartSniffer}
+        error={error}
         onTokenChange={setLocalToken}
         onStartSniffer={startSniffer}
         onStopSniffer={stopSniffer}

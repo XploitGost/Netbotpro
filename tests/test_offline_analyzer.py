@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from core.offline_analyzer import analyze_pcap_file
+from core.offline_analyzer import PacketLayers, analyze_pcap_file
 
 
 class _FakePipeline:
@@ -28,6 +28,7 @@ class _FakePipeline:
 class OfflineAnalyzerTests(unittest.TestCase):
     def test_offline_analysis_reports_attacks_in_summary(self):
         packets = [object(), object()]
+        fake_layers = PacketLayers(Ether=object(), IP=object(), TCP=object(), UDP=object(), ICMP=object(), DNS=object(), DNSQR=object())
         metas = [
             {
                 "src": "192.168.1.5",
@@ -49,12 +50,15 @@ class OfflineAnalyzerTests(unittest.TestCase):
             },
         ]
 
-        with patch("core.offline_analyzer.rdpcap", return_value=packets), patch(
+        with patch("core.offline_analyzer._read_pcap", return_value=packets), patch(
             "core.offline_analyzer.get_settings_snapshot",
             return_value={"ids_ml_threshold": 0.25, "auto_block": True},
         ), patch(
             "core.offline_analyzer._build_offline_pipeline",
             return_value=_FakePipeline(),
+        ), patch(
+            "core.offline_analyzer._packet_layers",
+            return_value=fake_layers,
         ), patch(
             "core.offline_analyzer._build_meta",
             side_effect=lambda pkt, builder, index: {"id": f"pcap-pkt-{index + 1}", **metas[index]},

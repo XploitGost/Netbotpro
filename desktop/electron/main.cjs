@@ -13,6 +13,21 @@ let backendProcess = null;
 let shuttingDown = false;
 let desktopLocalToken = "";
 
+function appendDesktopLog(paths, channel, text) {
+  if (!paths?.logDir || !text) return;
+  const logFile = path.join(paths.logDir, "desktop-backend.log");
+  const lines = String(text)
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => `[${new Date().toISOString()}] [${channel}] ${line}`)
+    .join("\n");
+  if (!lines) return;
+  try {
+    fs.appendFileSync(logFile, `${lines}\n`, "utf8");
+  } catch (_error) {
+  }
+}
+
 function isPackagedApp() {
   return app.isPackaged;
 }
@@ -200,6 +215,7 @@ async function startBackend(paths) {
     return;
   }
   const launch = resolveBackendLaunch(paths);
+  appendDesktopLog(paths, "launcher", `command=${launch.command} cwd=${launch.cwd} args=${launch.args.join(" ")}`);
   backendProcess = spawn(launch.command, launch.args, {
     cwd: launch.cwd,
     env: launch.env,
@@ -207,8 +223,12 @@ async function startBackend(paths) {
     windowsHide: true,
   });
 
+  backendProcess.stdout?.on("data", (chunk) => appendDesktopLog(paths, "stdout", chunk));
+  backendProcess.stderr?.on("data", (chunk) => appendDesktopLog(paths, "stderr", chunk));
+
   backendProcess.on("exit", async (code) => {
     const crashed = !shuttingDown && code !== 0;
+    appendDesktopLog(paths, "exit", `code=${code}`);
     backendProcess = null;
     if (crashed) {
       await dialog.showErrorBox("Netbotpro Backend", `Backend process exited with code ${code}.`);

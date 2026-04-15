@@ -1,4 +1,4 @@
-# NetBotPro Web
+# NetBotPro
 
 NetBotPro is now organized around a single primary execution path:
 
@@ -6,7 +6,6 @@ NetBotPro is now organized around a single primary execution path:
 - `frontend/` for the React dashboard
 - `core/` for packet capture, IDS, scoring, traceroute, firewall, and offline analysis
 - `config/` for persisted settings
-- `legacy/` for the deprecated Tkinter desktop UI
 
 ## Main architecture
 
@@ -57,12 +56,12 @@ npm run dev
 ## Notes
 
 - The supported primary UI is the web stack.
-- A cross-platform Electron shell is now scaffolded for the desktop delivery path.
-- The desktop UI was moved to `legacy/` and is not the active development path.
+- The maintained desktop delivery path is the Electron shell in `desktop/electron/`.
+- Deprecated Tkinter UI files were removed to keep the repository focused on the active product path.
 - Temporary caches, build artifacts, and zip backups are intentionally excluded from the final repo layout.
 
 ## More docs
 
 - Detailed migration notes: `docs/WEB_MIGRATION.md`
 - Desktop shell notes: `docs/DESKTOP_SHELL.md`
-- Legacy/deprecation notes: `docs/README.md`
+- Repo cleanup notes: `docs/README.md`

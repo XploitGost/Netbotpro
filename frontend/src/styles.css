@@ -934,6 +934,11 @@ a {
   color: var(--danger);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @media (max-width: 1024px) {
   .page-grid,
   .workspace-grid,

@@ -1,4 +1,4 @@
-export function ReportsPanel({ apiBase, reports }) {
+export function ReportsPanel({ onDownload, reports }) {
   return (
     <div className="panel-body">
       <p className="eyebrow">Generated Reports</p>
@@ -19,7 +19,7 @@ export function ReportsPanel({ apiBase, reports }) {
                 <td>{report.name}</td>
                 <td>{report.size}</td>
                 <td>
-                  <a href={`${apiBase}/exports/download?path=${encodeURIComponent(report.path)}`}>Download</a>
+                  <button className="secondary" onClick={() => onDownload(report.path)}>Download</button>
                 </td>
               </tr>
             ))}

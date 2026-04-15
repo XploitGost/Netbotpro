@@ -26,35 +26,22 @@ class NetSniffer:
         iface_resolver: Callable[[], str | None] | None = None,
         candidate_resolver: Callable[[str | None], str | None] | None = None,
     ) -> None:
-        from scapy.layers.dns import DNS, DNSQR  # type: ignore
-        from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
-        from scapy.layers.l2 import Ether  # type: ignore
-        from scapy.sendrecv import sniff  # type: ignore
-
         self.packet_callback = packet_callback
         self.enable_geoip = enable_geoip
         self.enable_mac_vendor = enable_mac_vendor
-        self._sniff_func = sniff_func or sniff
+        if sniff_func is None:
+            from scapy.sendrecv import sniff  # type: ignore
+
+            sniff_func = sniff
+        self._sniff_func = sniff_func
         self._iface_resolver = iface_resolver or self._default_iface_resolver
         self._candidate_resolver = candidate_resolver or resolve_capture_interface
         self._poll_seconds = max(0.2, float(sniff_poll_seconds))
-        self._layers = PacketLayers(
-            Ether=Ether,
-            IP=IP,
-            TCP=TCP,
-            UDP=UDP,
-            ICMP=ICMP,
-            DNS=DNS,
-            DNSQR=DNSQR,
-        )
-        self._builder = PacketMetadataBuilder(
-            layers=self._layers,
-            enable_geoip=enable_geoip,
-            enable_mac_vendor=enable_mac_vendor,
-            geoip_provider=geoip_provider,
-            mac_vendor_provider=mac_vendor_provider,
-            process_mapper=process_mapper,
-        )
+        self._geoip_provider = geoip_provider
+        self._mac_vendor_provider = mac_vendor_provider
+        self._process_mapper = process_mapper
+        self._layers: PacketLayers | None = None
+        self._builder: PacketMetadataBuilder | None = None
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._running = False
@@ -118,7 +105,7 @@ class NetSniffer:
         if not self._should_run():
             return
         try:
-            meta = self._builder.build(pkt)
+            meta = self._packet_builder().build(pkt)
             self.packet_callback(meta)
         except Exception:
             logger.exception("packet callback pipeline failed")
@@ -151,3 +138,30 @@ class NetSniffer:
     @staticmethod
     def _default_iface_resolver() -> str | None:
         return recommended_interface_name()
+
+    def _packet_builder(self) -> PacketMetadataBuilder:
+        if self._builder is not None:
+            return self._builder
+
+        from scapy.layers.dns import DNS, DNSQR  # type: ignore
+        from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
+        from scapy.layers.l2 import Ether  # type: ignore
+
+        self._layers = PacketLayers(
+            Ether=Ether,
+            IP=IP,
+            TCP=TCP,
+            UDP=UDP,
+            ICMP=ICMP,
+            DNS=DNS,
+            DNSQR=DNSQR,
+        )
+        self._builder = PacketMetadataBuilder(
+            layers=self._layers,
+            enable_geoip=self.enable_geoip,
+            enable_mac_vendor=self.enable_mac_vendor,
+            geoip_provider=self._geoip_provider,
+            mac_vendor_provider=self._mac_vendor_provider,
+            process_mapper=self._process_mapper,
+        )
+        return self._builder

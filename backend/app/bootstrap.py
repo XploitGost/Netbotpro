@@ -33,6 +33,6 @@ def ensure_project_root_on_path() -> Path:
     cache_root = runtime_cache_root()
     scapy_cache = cache_root / "scapy"
     scapy_cache.mkdir(parents=True, exist_ok=True)
-    os.environ["XDG_CACHE_HOME"] = str(cache_root)
+    os.environ["NETBOT_CACHE_DIR"] = str(cache_root)
     os.environ["SCAPY_CACHE_FOLDER"] = str(scapy_cache)
     return project_root

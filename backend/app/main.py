@@ -30,7 +30,7 @@ from backend.app.services.export_service import ExportService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
 from backend.app.services.report_service import ReportService
 from backend.app.services.settings_service import get_settings, update_settings
-from backend.app.services.sniffer_service import SnifferService
+from backend.app.services.sniffer_service import CaptureStartUnavailableError, SnifferService
 from backend.app.services.traceroute_service import TracerouteService
 from core.capture import SystemCaptureProvider
 
@@ -133,12 +133,18 @@ def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
 
 
 @app.get("/api/settings", response_model=SettingsPayload)
-def api_get_settings(_: None = Depends(require_loopback)) -> dict[str, Any]:
+def api_get_settings(
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
     return get_settings()
 
 
 @app.get("/api/interfaces")
-def api_interfaces(_: None = Depends(require_loopback)) -> dict[str, Any]:
+def api_interfaces(
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
     return sniffer_service.capture_interfaces()
 
 
@@ -163,7 +169,11 @@ def api_start_sniffer(
     enforce_rate_limit(request, "sniffer_start", limit=12, window_sec=60)
     payload = payload or {}
     iface = payload.get("iface")
-    return sniffer_service.start(iface=iface)
+    try:
+        return sniffer_service.start(iface=iface)
+    except CaptureStartUnavailableError as exc:
+        logger.warning("capture_start_unavailable detail=%s", exc.detail)
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
 
 
 @app.post("/api/sniffer/stop")
@@ -187,7 +197,10 @@ def api_reset_session(
 
 
 @app.get("/api/sniffer/state")
-def api_sniffer_state(_: None = Depends(require_loopback)) -> dict[str, Any]:
+def api_sniffer_state(
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
     state = sniffer_service.get_state()
     state["observability"] = _observability_snapshot()
     return state
@@ -204,6 +217,7 @@ async def api_recent_packets(
     limit: int = 50,
     offset: int = 0,
     _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
         return await history_service.aget_packets(
@@ -223,7 +237,11 @@ async def api_recent_packets(
 
 
 @app.get("/api/packets/{packet_id}", response_model=PacketItem)
-async def api_packet_detail(packet_id: str, _: None = Depends(require_loopback)) -> dict[str, Any]:
+async def api_packet_detail(
+    packet_id: str,
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
     try:
         item = await history_service.aget_packet_detail(packet_id)
     except HistoryRepositoryError as exc:
@@ -234,9 +252,13 @@ async def api_packet_detail(packet_id: str, _: None = Depends(require_loopback))
 
 
 @app.get("/api/dashboard", response_model=DashboardResponse)
-def api_dashboard(_: None = Depends(require_loopback)) -> dict[str, Any]:
+def api_dashboard(
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
     dashboard = sniffer_service.dashboard()
     dashboard["observability"] = _observability_snapshot()
+    dashboard["local_token_required"] = is_local_token_enabled()
     return dashboard
 
 
@@ -252,6 +274,7 @@ async def api_recent_alerts(
     limit: int = 50,
     offset: int = 0,
     _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
         return await history_service.aget_alerts(
@@ -272,7 +295,11 @@ async def api_recent_alerts(
 
 
 @app.get("/api/alerts/{alert_id}", response_model=AlertItem)
-async def api_alert_detail(alert_id: str, _: None = Depends(require_loopback)) -> dict[str, Any]:
+async def api_alert_detail(
+    alert_id: str,
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
     try:
         item = await history_service.aget_alert_detail(alert_id)
     except HistoryRepositoryError as exc:
@@ -309,7 +336,10 @@ def api_traceroute(
 
 
 @app.get("/api/traceroute/history")
-def api_traceroute_history(_: None = Depends(require_loopback)) -> list[dict[str, Any]]:
+def api_traceroute_history(
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> list[dict[str, Any]]:
     return traceroute_service.history()
 
 
@@ -334,15 +364,22 @@ def api_export_session(
 
 
 @app.get("/api/exports/download")
-def api_export_download(path: str, _: None = Depends(require_loopback)) -> FileResponse:
+def api_export_download(
+    path: str,
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> FileResponse:
     file_path = Path(ensure_within_directory(str(LOG_DIR), path))
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Export not found")
-    return FileResponse(file_path)
+    return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/reports")
-def api_reports(_: None = Depends(require_loopback)) -> list[dict[str, Any]]:
+def api_reports(
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> list[dict[str, Any]]:
     return report_service.list_reports()
 
 

@@ -25,6 +25,7 @@ packaging/runtime/backend/
 .packaged-debug*/
 .smoke-debug*/
 .source-debug*/
+.venv-build/
 .venv-build312/
 .venv-pack312/
 desktop/electron/npm-install*.log
