@@ -15,6 +15,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { StatCard } from "./components/StatCard";
 import { TraceroutePanel } from "./components/TraceroutePanel";
 import { PAGE_SIZE, useDashboardController } from "./hooks/useDashboardController";
+import { buildAlertInspectionContext, buildAlertInspectionModel, buildCaptureInspectionContext, buildPacketInspectionContext, buildPacketInspectionModel } from "./lib/inspectionModel";
 
 function PageSection({ title, subtitle, children, wide = false, fullWidth = false }) {
   return (
@@ -38,6 +39,18 @@ function InspectSummaryCard({ label, value, hint, tone = "neutral" }) {
   );
 }
 
+function cleanInspectCopy(value) {
+  return String(value ?? "").replaceAll("â€¢", "|").trim();
+}
+
+function normalizeInspectCopy(value) {
+  return String(value ?? "")
+    .replaceAll("\u2022", "|")
+    .replaceAll("\u00e2\u20ac\u00a2", "|")
+    .replaceAll("\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a2", "|")
+    .trim();
+}
+
 function App() {
   const {
     localToken,
@@ -51,9 +64,12 @@ function App() {
     packetMeta,
     alertMeta,
     selectedPacket,
+    selectedPacketContext,
     selectedAlert,
+    selectedAlertContext,
     selectedPacketId,
     selectedAlertId,
+    inspectionPinned,
     settings,
     interfaces,
     recommendedInterface,
@@ -82,6 +98,7 @@ function App() {
     sniffer,
     topSources,
     topProtocols,
+    topProcesses,
     topRemotes,
     topConversations,
     focusedPacketCount,
@@ -104,9 +121,89 @@ function App() {
     handleAlertQueryChange,
     handleSettingsChange,
     handleTrackRow,
+    filterByProcess,
+    toggleInspectionPin,
+    navigatePacketDetail,
+    navigateAlertDetail,
+    freezeLiveFollow,
     clearFocusedTarget,
     resumeLiveFollow,
   } = useDashboardController();
+
+  const captureContext = buildCaptureInspectionContext({
+    packetMeta,
+    settings,
+    interfaces,
+    capturePreflight,
+    sniffer,
+  });
+  const packetInspectionContext = selectedPacketContext || buildPacketInspectionContext(selectedPacket, packets, alerts);
+  const alertInspectionContext = selectedAlertContext || buildAlertInspectionContext(selectedAlert, packets, alerts);
+  const packetInspection = buildPacketInspectionModel(selectedPacket, {
+    context: packetInspectionContext,
+    capture: captureContext,
+  });
+  const alertInspection = buildAlertInspectionModel(selectedAlert, { context: alertInspectionContext });
+  const selectedPacketIndex = packets.findIndex((packet, index) => String(packet?.id ?? packetMeta.offset + index) === selectedPacketId);
+  const selectedAlertIndex = alerts.findIndex((alert, index) => String(alert?.id ?? alertMeta.offset + index) === selectedAlertId);
+  const packetNavigation = {
+    canPrevious: selectedPacketIndex > 0,
+    canNext: selectedPacketIndex >= 0 && selectedPacketIndex < packets.length - 1,
+    canPin: Boolean(selectedPacketId),
+    pinned: inspectionPinned.kind === "packet" && inspectionPinned.id === selectedPacketId,
+    frozen: !liveFollow,
+    onPrevious: () => navigatePacketDetail(-1),
+    onNext: () => navigatePacketDetail(1),
+    onPin: () => toggleInspectionPin("packet"),
+    onFreeze: () => (liveFollow ? freezeLiveFollow() : resumeLiveFollow()),
+  };
+  const alertNavigation = {
+    canPrevious: selectedAlertIndex > 0,
+    canNext: selectedAlertIndex >= 0 && selectedAlertIndex < alerts.length - 1,
+    canPin: Boolean(selectedAlertId),
+    pinned: inspectionPinned.kind === "alert" && inspectionPinned.id === selectedAlertId,
+    frozen: !liveFollow,
+    onPrevious: () => navigateAlertDetail(-1),
+    onNext: () => navigateAlertDetail(1),
+    onPin: () => toggleInspectionPin("alert"),
+    onFreeze: () => (liveFollow ? freezeLiveFollow() : resumeLiveFollow()),
+  };
+  const inspectSummaryCards = !packetInspection.empty
+    ? packetInspection.analystCards
+    : !alertInspection.empty
+      ? alertInspection.analystCards
+      : [
+          {
+            label: "Protocol Guess",
+            value: "No packet selected",
+            hint: "Pick a packet from Monitor to get an analyst summary here.",
+            tone: "neutral",
+          },
+          {
+            label: "Risk",
+            value: "Waiting for inspection",
+            hint: "Risk, confidence, and service guess appear once a packet is selected.",
+            tone: "neutral",
+          },
+          {
+            label: "Flow / Conversation",
+            value: focusedTarget?.ip || "No flow pinned",
+            hint: focusedTarget ? "Pinned target context stays visible while you inspect traffic." : "Track a source, destination, or peer to lock the investigation context.",
+            tone: focusedTarget ? "focus" : "neutral",
+          },
+          {
+            label: "Process Attribution",
+            value: "Unavailable",
+            hint: "Socket attribution, host metadata, and decode details show up in Packet Detail.",
+            tone: "neutral",
+          },
+          {
+            label: "Why It Matters",
+            value: selectedAlert?.attack_type || "Inspection desk is idle",
+            hint: selectedAlert ? "An alert is selected; packet context will fill in after you pick related traffic." : "Alert and packet detail stay here so you do not need to scroll back through Monitor.",
+            tone: selectedAlert ? "warning" : "neutral",
+          },
+        ];
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -161,33 +258,36 @@ function App() {
 
   const inspectPage = (
     <section className="page-grid page-grid-inspect">
-      <PageSection title="Investigation Desk" subtitle="Selected traffic and focused targets live here now" fullWidth>
+      <PageSection title="Analyst Summary" subtitle="Fast answers for the packet or alert you are inspecting" fullWidth>
         <div className="inspect-summary-grid">
-          <InspectSummaryCard
-            label="Selected Packet"
-            value={selectedPacket ? `${selectedPacket.src || "-"} -> ${selectedPacket.dst || "-"}` : "No packet selected"}
-            hint={selectedPacket ? `${selectedPacket.proto || "Unknown"} packet • ${selectedPacket.ts || "No time"}` : "Click any packet row in Monitor to inspect it here."}
-            tone={selectedPacket ? "active" : "neutral"}
-          />
-          <InspectSummaryCard
-            label="Selected Alert"
-            value={selectedAlert?.attack_type || "No alert selected"}
-            hint={selectedAlert ? `${selectedAlert.severity || "info"} severity • ${selectedAlert.ts || "No time"}` : "Click any alert row in Monitor to bring its detail here."}
-            tone={selectedAlert ? "warning" : "neutral"}
-          />
-          <InspectSummaryCard
-            label="Pinned Focus"
-            value={focusedTarget?.ip || "No IP pinned"}
-            hint={focusedTarget ? `Tracking ${focusedTarget.role === "dst" ? "destination" : "source"} traffic across the live tables.` : "Track any source, destination, or peer to keep context stable."}
-            tone={focusedTarget ? "focus" : "neutral"}
-          />
+          {inspectSummaryCards.map((card) => (
+            <InspectSummaryCard
+              key={card.label}
+              label={card.label}
+              value={normalizeInspectCopy(card.value)}
+              hint={normalizeInspectCopy(card.hint)}
+              tone={card.tone || "neutral"}
+            />
+          ))}
         </div>
       </PageSection>
-      <PageSection title="Packet Detail" subtitle="Selected packet metadata without the long monitor scroll" wide>
-        <DetailPanel title="Packet Detail" data={selectedPacket} />
+      <PageSection title="Packet Detail" subtitle="Interpretation, correlation, and payload context for the selected packet" wide>
+        <DetailPanel
+          title="Packet Detail"
+          model={packetInspection}
+          selectionKey={selectedPacketId}
+          navigation={packetNavigation}
+          emptyMessage="Select a packet from Monitor to open the inspection view."
+        />
       </PageSection>
-      <PageSection title="Alert Detail" subtitle="Selected detection context and scoring" wide>
-        <DetailPanel title="Alert Detail" data={selectedAlert} />
+      <PageSection title="Alert Detail" subtitle="Detection context and scoring without the monitor scroll" wide>
+        <DetailPanel
+          title="Alert Detail"
+          model={alertInspection}
+          selectionKey={selectedAlertId}
+          navigation={alertNavigation}
+          emptyMessage="Select an alert from Monitor to inspect its detection metadata."
+        />
       </PageSection>
       <PageSection title="Pinned Target" subtitle="Lock onto one IP without the view jumping" fullWidth>
         <FocusedIpPanel
@@ -207,6 +307,9 @@ function App() {
       </PageSection>
       <PageSection title="Top Protocols" subtitle="Current protocol mix">
         <MiniList title="Top Protocols" items={topProtocols} />
+      </PageSection>
+      <PageSection title="Top Processes" subtitle="Most active processes in the live sample">
+        <MiniList title="Top Processes" items={topProcesses} onSelect={filterByProcess} />
       </PageSection>
       <PageSection title="Top Conversations" subtitle="Busiest local-to-remote conversations" fullWidth>
         <MiniList title="Top Conversations" items={topConversations} />

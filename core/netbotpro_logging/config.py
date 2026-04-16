@@ -34,16 +34,46 @@ PERSIST_LOGS = False
 _CONN: sqlite3.Connection | None = None
 
 _PACKET_SCHEMA_UPDATES = {
+    "capture_id": "ALTER TABLE packets ADD COLUMN capture_id TEXT",
     "remote_ip": "ALTER TABLE packets ADD COLUMN remote_ip TEXT",
     "app_protocol": "ALTER TABLE packets ADD COLUMN app_protocol TEXT",
     "app_category": "ALTER TABLE packets ADD COLUMN app_category TEXT",
     "app_confidence": "ALTER TABLE packets ADD COLUMN app_confidence TEXT",
+    "protocol_basis": "ALTER TABLE packets ADD COLUMN protocol_basis TEXT",
+    "protocol_notes": "ALTER TABLE packets ADD COLUMN protocol_notes TEXT",
+    "protocol_handshake": "ALTER TABLE packets ADD COLUMN protocol_handshake TEXT",
+    "protocol_unusual_port": "ALTER TABLE packets ADD COLUMN protocol_unusual_port INTEGER",
     "l7": "ALTER TABLE packets ADD COLUMN l7 TEXT",
     "dns_qname": "ALTER TABLE packets ADD COLUMN dns_qname TEXT",
+    "dns_qtype": "ALTER TABLE packets ADD COLUMN dns_qtype INTEGER",
+    "dns_rcode": "ALTER TABLE packets ADD COLUMN dns_rcode INTEGER",
+    "http_method": "ALTER TABLE packets ADD COLUMN http_method TEXT",
+    "http_status": "ALTER TABLE packets ADD COLUMN http_status INTEGER",
+    "http_reason": "ALTER TABLE packets ADD COLUMN http_reason TEXT",
     "http_host": "ALTER TABLE packets ADD COLUMN http_host TEXT",
     "http_path": "ALTER TABLE packets ADD COLUMN http_path TEXT",
+    "http_user_agent": "ALTER TABLE packets ADD COLUMN http_user_agent TEXT",
+    "http_content_type": "ALTER TABLE packets ADD COLUMN http_content_type TEXT",
     "sni": "ALTER TABLE packets ADD COLUMN sni TEXT",
     "tls_version": "ALTER TABLE packets ADD COLUMN tls_version TEXT",
+    "tls_alpn": "ALTER TABLE packets ADD COLUMN tls_alpn TEXT",
+    "ja3": "ALTER TABLE packets ADD COLUMN ja3 TEXT",
+    "ja3_str": "ALTER TABLE packets ADD COLUMN ja3_str TEXT",
+    "ja4": "ALTER TABLE packets ADD COLUMN ja4 TEXT",
+    "payload_len": "ALTER TABLE packets ADD COLUMN payload_len INTEGER",
+    "payload_hex": "ALTER TABLE packets ADD COLUMN payload_hex TEXT",
+    "payload_ascii": "ALTER TABLE packets ADD COLUMN payload_ascii TEXT",
+    "payload_binary_like": "ALTER TABLE packets ADD COLUMN payload_binary_like INTEGER",
+    "payload_entropy": "ALTER TABLE packets ADD COLUMN payload_entropy REAL",
+    "payload_printable_ratio": "ALTER TABLE packets ADD COLUMN payload_printable_ratio REAL",
+    "pid": "ALTER TABLE packets ADD COLUMN pid INTEGER",
+    "process_name": "ALTER TABLE packets ADD COLUMN process_name TEXT",
+    "parent_pid": "ALTER TABLE packets ADD COLUMN parent_pid INTEGER",
+    "parent_process_name": "ALTER TABLE packets ADD COLUMN parent_process_name TEXT",
+    "executable_path": "ALTER TABLE packets ADD COLUMN executable_path TEXT",
+    "attribution_confidence": "ALTER TABLE packets ADD COLUMN attribution_confidence TEXT",
+    "attribution_reason_unavailable": "ALTER TABLE packets ADD COLUMN attribution_reason_unavailable TEXT",
+    "attribution_source": "ALTER TABLE packets ADD COLUMN attribution_source TEXT",
 }
 
 _ALERT_SCHEMA_UPDATES = {
@@ -54,14 +84,47 @@ _ALERT_SCHEMA_UPDATES = {
     "incident_count": "ALTER TABLE alerts ADD COLUMN incident_count INTEGER",
     "incident_score": "ALTER TABLE alerts ADD COLUMN incident_score REAL",
     "packet_id": "ALTER TABLE alerts ADD COLUMN packet_id TEXT",
+    "direction": "ALTER TABLE alerts ADD COLUMN direction TEXT",
+    "sport": "ALTER TABLE alerts ADD COLUMN sport INTEGER",
+    "dport": "ALTER TABLE alerts ADD COLUMN dport INTEGER",
     "remote_ip": "ALTER TABLE alerts ADD COLUMN remote_ip TEXT",
     "app_protocol": "ALTER TABLE alerts ADD COLUMN app_protocol TEXT",
     "app_category": "ALTER TABLE alerts ADD COLUMN app_category TEXT",
     "app_confidence": "ALTER TABLE alerts ADD COLUMN app_confidence TEXT",
+    "protocol_basis": "ALTER TABLE alerts ADD COLUMN protocol_basis TEXT",
+    "protocol_notes": "ALTER TABLE alerts ADD COLUMN protocol_notes TEXT",
+    "protocol_handshake": "ALTER TABLE alerts ADD COLUMN protocol_handshake TEXT",
+    "protocol_unusual_port": "ALTER TABLE alerts ADD COLUMN protocol_unusual_port INTEGER",
     "dns_qname": "ALTER TABLE alerts ADD COLUMN dns_qname TEXT",
+    "dns_qtype": "ALTER TABLE alerts ADD COLUMN dns_qtype INTEGER",
+    "dns_rcode": "ALTER TABLE alerts ADD COLUMN dns_rcode INTEGER",
+    "http_method": "ALTER TABLE alerts ADD COLUMN http_method TEXT",
     "http_host": "ALTER TABLE alerts ADD COLUMN http_host TEXT",
     "http_path": "ALTER TABLE alerts ADD COLUMN http_path TEXT",
+    "http_status": "ALTER TABLE alerts ADD COLUMN http_status INTEGER",
+    "http_reason": "ALTER TABLE alerts ADD COLUMN http_reason TEXT",
+    "http_user_agent": "ALTER TABLE alerts ADD COLUMN http_user_agent TEXT",
+    "http_content_type": "ALTER TABLE alerts ADD COLUMN http_content_type TEXT",
     "sni": "ALTER TABLE alerts ADD COLUMN sni TEXT",
+    "tls_version": "ALTER TABLE alerts ADD COLUMN tls_version TEXT",
+    "tls_alpn": "ALTER TABLE alerts ADD COLUMN tls_alpn TEXT",
+    "ja3": "ALTER TABLE alerts ADD COLUMN ja3 TEXT",
+    "ja3_str": "ALTER TABLE alerts ADD COLUMN ja3_str TEXT",
+    "ja4": "ALTER TABLE alerts ADD COLUMN ja4 TEXT",
+    "payload_len": "ALTER TABLE alerts ADD COLUMN payload_len INTEGER",
+    "payload_hex": "ALTER TABLE alerts ADD COLUMN payload_hex TEXT",
+    "payload_ascii": "ALTER TABLE alerts ADD COLUMN payload_ascii TEXT",
+    "payload_binary_like": "ALTER TABLE alerts ADD COLUMN payload_binary_like INTEGER",
+    "payload_entropy": "ALTER TABLE alerts ADD COLUMN payload_entropy REAL",
+    "payload_printable_ratio": "ALTER TABLE alerts ADD COLUMN payload_printable_ratio REAL",
+    "pid": "ALTER TABLE alerts ADD COLUMN pid INTEGER",
+    "process_name": "ALTER TABLE alerts ADD COLUMN process_name TEXT",
+    "parent_pid": "ALTER TABLE alerts ADD COLUMN parent_pid INTEGER",
+    "parent_process_name": "ALTER TABLE alerts ADD COLUMN parent_process_name TEXT",
+    "executable_path": "ALTER TABLE alerts ADD COLUMN executable_path TEXT",
+    "attribution_confidence": "ALTER TABLE alerts ADD COLUMN attribution_confidence TEXT",
+    "attribution_reason_unavailable": "ALTER TABLE alerts ADD COLUMN attribution_reason_unavailable TEXT",
+    "attribution_source": "ALTER TABLE alerts ADD COLUMN attribution_source TEXT",
 }
 
 
@@ -104,6 +167,7 @@ def get_conn() -> sqlite3.Connection | None:
             """
             CREATE TABLE IF NOT EXISTS packets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                capture_id TEXT,
                 ts TEXT,
                 src TEXT,
                 dst TEXT,
@@ -119,12 +183,41 @@ def get_conn() -> sqlite3.Connection | None:
                 app_protocol TEXT,
                 app_category TEXT,
                 app_confidence TEXT,
+                protocol_basis TEXT,
+                protocol_notes TEXT,
+                protocol_handshake TEXT,
+                protocol_unusual_port INTEGER,
                 l7 TEXT,
                 dns_qname TEXT,
+                dns_qtype INTEGER,
+                dns_rcode INTEGER,
+                http_method TEXT,
+                http_status INTEGER,
+                http_reason TEXT,
                 http_host TEXT,
                 http_path TEXT,
+                http_user_agent TEXT,
+                http_content_type TEXT,
                 sni TEXT,
-                tls_version TEXT
+                tls_version TEXT,
+                tls_alpn TEXT,
+                ja3 TEXT,
+                ja3_str TEXT,
+                ja4 TEXT,
+                payload_len INTEGER,
+                payload_hex TEXT,
+                payload_ascii TEXT,
+                payload_binary_like INTEGER,
+                payload_entropy REAL,
+                payload_printable_ratio REAL,
+                pid INTEGER,
+                process_name TEXT,
+                parent_pid INTEGER,
+                parent_process_name TEXT,
+                executable_path TEXT,
+                attribution_confidence TEXT,
+                attribution_reason_unavailable TEXT,
+                attribution_source TEXT
             )
             """
         )
@@ -146,14 +239,47 @@ def get_conn() -> sqlite3.Connection | None:
                 incident_count INTEGER,
                 incident_score REAL,
                 packet_id TEXT,
+                direction TEXT,
+                sport INTEGER,
+                dport INTEGER,
                 remote_ip TEXT,
                 app_protocol TEXT,
                 app_category TEXT,
                 app_confidence TEXT,
+                protocol_basis TEXT,
+                protocol_notes TEXT,
+                protocol_handshake TEXT,
+                protocol_unusual_port INTEGER,
                 dns_qname TEXT,
+                dns_qtype INTEGER,
+                dns_rcode INTEGER,
+                http_method TEXT,
                 http_host TEXT,
                 http_path TEXT,
-                sni TEXT
+                http_status INTEGER,
+                http_reason TEXT,
+                http_user_agent TEXT,
+                http_content_type TEXT,
+                sni TEXT,
+                tls_version TEXT,
+                tls_alpn TEXT,
+                ja3 TEXT,
+                ja3_str TEXT,
+                ja4 TEXT,
+                payload_len INTEGER,
+                payload_hex TEXT,
+                payload_ascii TEXT,
+                payload_binary_like INTEGER,
+                payload_entropy REAL,
+                payload_printable_ratio REAL,
+                pid INTEGER,
+                process_name TEXT,
+                parent_pid INTEGER,
+                parent_process_name TEXT,
+                executable_path TEXT,
+                attribution_confidence TEXT,
+                attribution_reason_unavailable TEXT,
+                attribution_source TEXT
             )
             """
         )
@@ -164,6 +290,9 @@ def get_conn() -> sqlite3.Connection | None:
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_app_protocol ON packets(app_protocol)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_remote_ip ON packets(remote_ip)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_is_alert ON packets(is_alert)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_capture_id ON packets(capture_id)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_process_name ON packets(process_name)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_packets_pid ON packets(pid)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_src ON alerts(src)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_dst ON alerts(dst)")
@@ -172,6 +301,9 @@ def get_conn() -> sqlite3.Connection | None:
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_attack_type ON alerts(attack_type)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_score ON alerts(score)")
         _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_remote_ip ON alerts(remote_ip)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_packet_id ON alerts(packet_id)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_process_name ON alerts(process_name)")
+        _CONN.execute("CREATE INDEX IF NOT EXISTS idx_alerts_pid ON alerts(pid)")
         for column, statement in _PACKET_SCHEMA_UPDATES.items():
             _ensure_column(_CONN, "packets", column, statement)
         for column, statement in _ALERT_SCHEMA_UPDATES.items():

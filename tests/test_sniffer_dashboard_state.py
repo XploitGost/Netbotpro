@@ -7,13 +7,16 @@ class SnifferDashboardStateTests(unittest.TestCase):
     def test_add_packet_updates_totals_and_counters(self):
         state = SnifferDashboardState(max_items=5)
 
-        state.add_packet({"src": "192.168.1.10", "dst": "2.2.2.2", "proto": "tcp", "ts": "now", "remote_ip": "2.2.2.2"})
+        state.add_packet({"src": "192.168.1.10", "dst": "2.2.2.2", "proto": "tcp", "ts": "now", "remote_ip": "2.2.2.2", "process_name": "browser.exe", "pid": 4242})
         dashboard = state.dashboard(running=True, iface="eth0")
 
         self.assertEqual(dashboard["state"]["total_packets"], 1)
         self.assertEqual(dashboard["state"]["packet_count"], 1)
         self.assertEqual(dashboard["top_sources"][0]["label"], "192.168.1.10")
         self.assertEqual(dashboard["top_protocols"][0]["label"], "TCP")
+        self.assertEqual(dashboard["top_processes"][0]["label"], "browser.exe (PID 4242)")
+        self.assertEqual(dashboard["top_processes"][0]["process_name"], "browser.exe")
+        self.assertEqual(dashboard["top_processes"][0]["pid"], "4242")
         self.assertEqual(dashboard["top_remotes"][0]["label"], "2.2.2.2")
         self.assertIn("192.168.1.10 -> 2.2.2.2", dashboard["top_conversations"][0]["label"])
 

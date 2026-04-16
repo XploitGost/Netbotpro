@@ -141,14 +141,17 @@ export function useDashboardController() {
   const [dashboard, setDashboard] = useState(null);
   const [packets, setPackets] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [packetQuery, setPacketQuery] = useState({ src: "", dst: "", proto: "", text: "", only_alerts: false, only_remote: true });
-  const [alertQuery, setAlertQuery] = useState({ src: "", dst: "", attack: "", proto: "", text: "", min_score: "", only_remote: true });
+  const [packetQuery, setPacketQuery] = useState({ src: "", dst: "", proto: "", process: "", pid: "", text: "", only_alerts: false, only_remote: true });
+  const [alertQuery, setAlertQuery] = useState({ src: "", dst: "", attack: "", proto: "", process: "", pid: "", text: "", min_score: "", only_remote: true });
   const [packetMeta, setPacketMeta] = useState({ total: 0, source: "memory", offset: 0, limit: PAGE_SIZE });
   const [alertMeta, setAlertMeta] = useState({ total: 0, source: "memory", offset: 0, limit: PAGE_SIZE });
   const [selectedPacket, setSelectedPacket] = useState(null);
+  const [selectedPacketContext, setSelectedPacketContext] = useState(null);
   const [selectedAlert, setSelectedAlert] = useState(null);
+  const [selectedAlertContext, setSelectedAlertContext] = useState(null);
   const [selectedPacketId, setSelectedPacketId] = useState("");
   const [selectedAlertId, setSelectedAlertId] = useState("");
+  const [inspectionPinned, setInspectionPinned] = useState({ kind: "", id: "" });
   const [settings, setSettings] = useState(defaultSettings);
   const [interfaces, setInterfaces] = useState([]);
   const [recommendedInterface, setRecommendedInterface] = useState("");
@@ -291,8 +294,11 @@ export function useDashboardController() {
     mergeObservability(data.observability || {});
     setPackets(data.items || []);
     setPacketMeta({ total: data.total || 0, source: data.source || "memory", offset: data.offset || 0, limit: data.limit || PAGE_SIZE });
-    setSelectedPacket(null);
-    setSelectedPacketId("");
+    if (!(inspectionPinned.kind === "packet" && inspectionPinned.id)) {
+      setSelectedPacket(null);
+      setSelectedPacketContext(null);
+      setSelectedPacketId("");
+    }
     if (data.query_ms != null) {
       setStatusMessage(`Packet history loaded in ${data.query_ms} ms`);
     }
@@ -316,8 +322,11 @@ export function useDashboardController() {
     mergeObservability(data.observability || {});
     setAlerts(data.items || []);
     setAlertMeta({ total: data.total || 0, source: data.source || "memory", offset: data.offset || 0, limit: data.limit || PAGE_SIZE });
-    setSelectedAlert(null);
-    setSelectedAlertId("");
+    if (!(inspectionPinned.kind === "alert" && inspectionPinned.id)) {
+      setSelectedAlert(null);
+      setSelectedAlertContext(null);
+      setSelectedAlertId("");
+    }
     if (data.query_ms != null) {
       setStatusMessage(`Alert history loaded in ${data.query_ms} ms`);
     }
@@ -333,7 +342,11 @@ export function useDashboardController() {
       setActivePage("inspect");
       const packetId = getPacketId(packet, index, packetMeta.offset);
       setSelectedPacketId(packetId);
-      setSelectedPacket(await api.getPacketDetail(packetId));
+      setSelectedPacketContext(null);
+      const [detail, context] = await Promise.all([api.getPacketDetail(packetId), api.getPacketContext(packetId).catch(() => null)]);
+      setSelectedPacket(detail);
+      setSelectedPacketContext(context);
+      setInspectionPinned((current) => (current.kind === "packet" ? { kind: "packet", id: packetId } : current));
     } catch (err) {
       setError(String(err));
     }
@@ -344,7 +357,11 @@ export function useDashboardController() {
       setActivePage("inspect");
       const alertId = getAlertId(alert, index, alertMeta.offset);
       setSelectedAlertId(alertId);
-      setSelectedAlert(await api.getAlertDetail(alertId));
+      setSelectedAlertContext(null);
+      const [detail, context] = await Promise.all([api.getAlertDetail(alertId), api.getAlertContext(alertId).catch(() => null)]);
+      setSelectedAlert(detail);
+      setSelectedAlertContext(context);
+      setInspectionPinned((current) => (current.kind === "alert" ? { kind: "alert", id: alertId } : current));
     } catch (err) {
       setError(String(err));
     }
@@ -364,6 +381,8 @@ export function useDashboardController() {
       ...packetQuery,
       src: target.role === "src" ? target.ip : "",
       dst: target.role === "dst" ? target.ip : "",
+      process: "",
+      pid: "",
       text: "",
       only_remote: true,
     };
@@ -371,6 +390,8 @@ export function useDashboardController() {
       ...alertQuery,
       src: target.role === "src" ? target.ip : "",
       dst: target.role === "dst" ? target.ip : "",
+      process: "",
+      pid: "",
       text: "",
       only_remote: true,
     };
@@ -406,9 +427,74 @@ export function useDashboardController() {
     await applyFocusedTarget(target);
   }
 
+  async function filterByProcess(item) {
+    const processName = String(item?.process_name || "").trim();
+    const pid = String(item?.pid || "").trim();
+    const processLabel = processName || (pid ? `PID ${pid}` : "selected process");
+    const nextPacketQuery = {
+      ...packetQuery,
+      src: "",
+      dst: "",
+      process: processName,
+      pid,
+      text: "",
+    };
+    const nextAlertQuery = {
+      ...alertQuery,
+      src: "",
+      dst: "",
+      process: processName,
+      pid,
+      text: "",
+    };
+    focusQuerySnapshotRef.current = null;
+    setFocusedTarget(null);
+    setLiveFollow(false);
+    setActivePage("monitor");
+    setPacketQuery(nextPacketQuery);
+    setAlertQuery(nextAlertQuery);
+    setStatusMessage(`Filtering traffic for ${processLabel}`);
+    try {
+      await Promise.all([loadPacketHistory(nextPacketQuery, 0), loadAlertHistory(nextAlertQuery, 0)]);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
   function resumeLiveFollow() {
     setLiveFollow(true);
     setStatusMessage("Live lists are following the newest traffic");
+  }
+
+  function freezeLiveFollow() {
+    setLiveFollow(false);
+    setStatusMessage("Live lists are frozen for investigation");
+  }
+
+  function toggleInspectionPin(kind) {
+    if (kind === "packet" && selectedPacketId) {
+      setInspectionPinned((current) => (current.kind === "packet" && current.id === selectedPacketId ? { kind: "", id: "" } : { kind: "packet", id: selectedPacketId }));
+      return;
+    }
+    if (kind === "alert" && selectedAlertId) {
+      setInspectionPinned((current) => (current.kind === "alert" && current.id === selectedAlertId ? { kind: "", id: "" } : { kind: "alert", id: selectedAlertId }));
+    }
+  }
+
+  async function navigatePacketDetail(step) {
+    const currentIndex = packets.findIndex((packet, index) => getPacketId(packet, index, packetMeta.offset) === selectedPacketId);
+    if (currentIndex < 0) return;
+    const nextIndex = currentIndex + step;
+    if (nextIndex < 0 || nextIndex >= packets.length) return;
+    await loadPacketDetail(packets[nextIndex], nextIndex);
+  }
+
+  async function navigateAlertDetail(step) {
+    const currentIndex = alerts.findIndex((alert, index) => getAlertId(alert, index, alertMeta.offset) === selectedAlertId);
+    if (currentIndex < 0) return;
+    const nextIndex = currentIndex + step;
+    if (nextIndex < 0 || nextIndex >= alerts.length) return;
+    await loadAlertDetail(alerts[nextIndex], nextIndex);
   }
 
   async function startSniffer() {
@@ -561,9 +647,12 @@ export function useDashboardController() {
       setPacketMeta((current) => ({ total: 0, source: current.source, offset: 0, limit: PAGE_SIZE }));
       setAlertMeta((current) => ({ total: 0, source: current.source, offset: 0, limit: PAGE_SIZE }));
       setSelectedPacket(null);
+      setSelectedPacketContext(null);
       setSelectedAlert(null);
+      setSelectedAlertContext(null);
       setSelectedPacketId("");
       setSelectedAlertId("");
+      setInspectionPinned({ kind: "", id: "" });
       setFocusedTarget(null);
       setLiveFollow(true);
       focusQuerySnapshotRef.current = null;
@@ -640,9 +729,12 @@ export function useDashboardController() {
         setPackets([]);
         setAlerts([]);
         setSelectedPacket(null);
+        setSelectedPacketContext(null);
         setSelectedAlert(null);
+        setSelectedAlertContext(null);
         setSelectedPacketId("");
         setSelectedAlertId("");
+        setInspectionPinned({ kind: "", id: "" });
         setFocusedTarget(null);
         setLiveFollow(true);
         setTimeline(createTimeline());
@@ -670,6 +762,7 @@ export function useDashboardController() {
   const topSources = dashboard?.top_sources || [];
   const topDestinations = dashboard?.top_destinations || [];
   const topProtocols = dashboard?.top_protocols || [];
+  const topProcesses = dashboard?.top_processes || [];
   const topRemotes = dashboard?.top_remotes || [];
   const topConversations = dashboard?.top_conversations || [];
 
@@ -704,9 +797,12 @@ export function useDashboardController() {
     packetMeta,
     alertMeta,
     selectedPacket,
+    selectedPacketContext,
     selectedAlert,
+    selectedAlertContext,
     selectedPacketId,
     selectedAlertId,
+    inspectionPinned,
     settings,
     interfaces,
     recommendedInterface,
@@ -736,6 +832,7 @@ export function useDashboardController() {
     topSources,
     topDestinations,
     topProtocols,
+    topProcesses,
     topRemotes,
     topConversations,
     focusedPacketCount,
@@ -758,6 +855,11 @@ export function useDashboardController() {
     handleAlertQueryChange,
     handleSettingsChange,
     handleTrackRow,
+    filterByProcess,
+    toggleInspectionPin,
+    navigatePacketDetail,
+    navigateAlertDetail,
+    freezeLiveFollow,
     clearFocusedTarget,
     resumeLiveFollow,
   };

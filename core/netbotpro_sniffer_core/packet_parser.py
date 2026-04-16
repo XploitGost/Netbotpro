@@ -93,6 +93,12 @@ class PacketMetadataBuilder:
             "inside_outside": direction["inside_outside"],
             "pid": process.get("pid"),
             "process_name": process.get("process_name"),
+            "parent_pid": process.get("parent_pid"),
+            "parent_process_name": process.get("parent_process_name"),
+            "executable_path": process.get("executable_path"),
+            "attribution_confidence": process.get("attribution_confidence"),
+            "attribution_reason_unavailable": process.get("attribution_reason_unavailable"),
+            "attribution_source": process.get("attribution_source"),
             "summary": summary,
         }
         meta.update(layer7)

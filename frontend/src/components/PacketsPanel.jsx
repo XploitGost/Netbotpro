@@ -35,6 +35,8 @@ export function PacketsPanel({
         <input placeholder="src" value={packetQuery.src} onChange={(event) => onPacketQueryChange("src", event.target.value)} />
         <input placeholder="dst" value={packetQuery.dst} onChange={(event) => onPacketQueryChange("dst", event.target.value)} />
         <input placeholder="proto" value={packetQuery.proto} onChange={(event) => onPacketQueryChange("proto", event.target.value)} />
+        <input placeholder="process" value={packetQuery.process} onChange={(event) => onPacketQueryChange("process", event.target.value)} />
+        <input placeholder="pid" value={packetQuery.pid} onChange={(event) => onPacketQueryChange("pid", event.target.value)} />
         <input placeholder="text" value={packetQuery.text} onChange={(event) => onPacketQueryChange("text", event.target.value)} />
         <label className="toggle">
           <input type="checkbox" checked={packetQuery.only_alerts} onChange={(event) => onPacketQueryChange("only_alerts", event.target.checked)} />
@@ -67,15 +69,16 @@ export function PacketsPanel({
               <th>Remote / Peer</th>
               <th>Source</th>
               <th>Destination</th>
+              <th>Process</th>
               <th>Flow</th>
               <th>Protocol</th>
             </tr>
           </thead>
           <tbody>
             {packets.length === 0 ? (
-              <tr><td colSpan="6" className="muted">No packets yet</td></tr>
+              <tr><td colSpan="7" className="muted">No packets yet</td></tr>
             ) : topSpacerHeight > 0 ? (
-              <tr className="spacer-row" aria-hidden="true"><td colSpan="6" style={{ height: `${topSpacerHeight}px` }} /></tr>
+              <tr className="spacer-row" aria-hidden="true"><td colSpan="7" style={{ height: `${topSpacerHeight}px` }} /></tr>
             ) : null}
             {visibleItems.map((packet, index) => (
               (() => {
@@ -84,6 +87,8 @@ export function PacketsPanel({
                 const dstSide = getTrafficSide(packet.dst);
                 const flow = getFlowSummary(packet.src, packet.dst);
                 const peer = getPeerInfo(packet);
+                const processLabel = packet.process_name || (packet.pid ? `PID ${packet.pid}` : "Unknown");
+                const processHint = packet.executable_path || packet.parent_process_name || packet.attribution_reason_unavailable || packet.attribution_confidence || "-";
                 return (
                   <tr
                     key={`${packet.id ?? packet.ts ?? "pkt"}-${absoluteIndex}`}
@@ -115,6 +120,12 @@ export function PacketsPanel({
                         <span className={`side-pill side-${dstSide.tone}`}>{dstSide.label}</span>
                       </div>
                     </td>
+                    <td>
+                      <span>{processLabel}</span>
+                      <div className="table-subline">
+                        <span className="muted">{processHint}</span>
+                      </div>
+                    </td>
                     <td><span className="side-pill side-flow">{flow.label}</span></td>
                     <td>
                       <span className={`protocol-pill ${packet.is_alert ? "protocol-pill-alert" : ""}`}>{packet.proto || "-"}</span>
@@ -129,7 +140,7 @@ export function PacketsPanel({
               })()
             ))}
             {packets.length > 0 && bottomSpacerHeight > 0 ? (
-              <tr className="spacer-row" aria-hidden="true"><td colSpan="6" style={{ height: `${bottomSpacerHeight}px` }} /></tr>
+              <tr className="spacer-row" aria-hidden="true"><td colSpan="7" style={{ height: `${bottomSpacerHeight}px` }} /></tr>
             ) : null}
           </tbody>
         </table>

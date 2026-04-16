@@ -35,6 +35,8 @@ export function AlertsPanel({
         <input placeholder="src" value={alertQuery.src} onChange={(event) => onAlertQueryChange("src", event.target.value)} />
         <input placeholder="attack" value={alertQuery.attack} onChange={(event) => onAlertQueryChange("attack", event.target.value)} />
         <input placeholder="proto" value={alertQuery.proto} onChange={(event) => onAlertQueryChange("proto", event.target.value)} />
+        <input placeholder="process" value={alertQuery.process} onChange={(event) => onAlertQueryChange("process", event.target.value)} />
+        <input placeholder="pid" value={alertQuery.pid} onChange={(event) => onAlertQueryChange("pid", event.target.value)} />
         <input placeholder="detail text" value={alertQuery.text} onChange={(event) => onAlertQueryChange("text", event.target.value)} />
         <input placeholder="min score" value={alertQuery.min_score} onChange={(event) => onAlertQueryChange("min_score", event.target.value)} />
         <label className="toggle">
@@ -65,21 +67,24 @@ export function AlertsPanel({
               <th>Source</th>
               <th>Destination</th>
               <th>Flow</th>
+              <th>Process</th>
               <th>Attack</th>
               <th>Score</th>
             </tr>
           </thead>
           <tbody>
             {alerts.length === 0 ? (
-              <tr><td colSpan="7" className="muted">No alerts yet</td></tr>
+              <tr><td colSpan="8" className="muted">No alerts yet</td></tr>
             ) : topSpacerHeight > 0 ? (
-              <tr className="spacer-row" aria-hidden="true"><td colSpan="7" style={{ height: `${topSpacerHeight}px` }} /></tr>
+              <tr className="spacer-row" aria-hidden="true"><td colSpan="8" style={{ height: `${topSpacerHeight}px` }} /></tr>
             ) : null}
             {visibleItems.map((alert, index) => (
               (() => {
                 const absoluteIndex = startIndex + index;
                 const flow = getFlowSummary(alert.src, alert.dst);
                 const peer = getPeerInfo(alert);
+                const processLabel = alert.process_name || (alert.pid ? `PID ${alert.pid}` : "Unknown");
+                const processHint = alert.executable_path || alert.parent_process_name || alert.attribution_reason_unavailable || alert.attribution_confidence || "-";
                 return (
                   <tr
                     key={`${alert.id ?? alert.ts ?? "alert"}-${absoluteIndex}`}
@@ -104,6 +109,12 @@ export function AlertsPanel({
                     </td>
                     <td><span className="side-pill side-flow">{flow.label}</span></td>
                     <td>
+                      <span>{processLabel}</span>
+                      <div className="table-subline">
+                        <span className="muted">{processHint}</span>
+                      </div>
+                    </td>
+                    <td>
                       <span className={`severity-pill severity-${String(alert.severity || "info").toLowerCase()}`}>
                         {alert.attack_type || "-"}
                       </span>
@@ -119,7 +130,7 @@ export function AlertsPanel({
               })()
             ))}
             {alerts.length > 0 && bottomSpacerHeight > 0 ? (
-              <tr className="spacer-row" aria-hidden="true"><td colSpan="7" style={{ height: `${bottomSpacerHeight}px` }} /></tr>
+              <tr className="spacer-row" aria-hidden="true"><td colSpan="8" style={{ height: `${bottomSpacerHeight}px` }} /></tr>
             ) : null}
           </tbody>
         </table>

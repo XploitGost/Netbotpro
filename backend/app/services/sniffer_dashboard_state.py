@@ -44,6 +44,23 @@ def _conversation_key(packet: dict[str, Any]) -> str:
     return f"{src} -> {dst} ({proto})"
 
 
+def _process_meta(packet: dict[str, Any]) -> dict[str, Any]:
+    process_name = str(packet.get("process_name") or "").strip()
+    pid = str(packet.get("pid") or "").strip()
+    label = "Unknown process"
+    if process_name and pid:
+        label = f"{process_name} (PID {pid})"
+    elif process_name:
+        label = process_name
+    elif pid:
+        label = f"PID {pid}"
+    return {
+        "label": label,
+        "process_name": process_name or None,
+        "pid": pid or None,
+    }
+
+
 class SnifferDashboardState:
     def __init__(self, max_items: int = 300) -> None:
         self._lock = threading.Lock()
@@ -52,6 +69,8 @@ class SnifferDashboardState:
         self._counter_src: Counter[str] = Counter()
         self._counter_dst: Counter[str] = Counter()
         self._counter_proto: Counter[str] = Counter()
+        self._counter_process: Counter[str] = Counter()
+        self._process_meta: dict[str, dict[str, Any]] = {}
         self._counter_remote: Counter[str] = Counter()
         self._counter_conversation: Counter[str] = Counter()
         self._total_packets = 0
@@ -61,6 +80,7 @@ class SnifferDashboardState:
         src = str(packet.get("src") or "-")
         dst = str(packet.get("dst") or "-")
         proto = str(packet.get("proto") or "OTHER").upper()
+        process = _process_meta(packet)
         remote = _remote_ip(packet)
         conversation = _conversation_key(packet)
         with self._lock:
@@ -69,6 +89,8 @@ class SnifferDashboardState:
             self._counter_src[src] += 1
             self._counter_dst[dst] += 1
             self._counter_proto[proto] += 1
+            self._counter_process[process["label"]] += 1
+            self._process_meta[process["label"]] = process
             self._counter_remote[remote] += 1
             self._counter_conversation[conversation] += 1
 
@@ -87,6 +109,8 @@ class SnifferDashboardState:
             self._counter_src.clear()
             self._counter_dst.clear()
             self._counter_proto.clear()
+            self._counter_process.clear()
+            self._process_meta.clear()
             self._counter_remote.clear()
             self._counter_conversation.clear()
             self._total_packets = 0
@@ -115,6 +139,15 @@ class SnifferDashboardState:
             top_sources = [{"label": key, "count": value} for key, value in self._counter_src.most_common(5)]
             top_destinations = [{"label": key, "count": value} for key, value in self._counter_dst.most_common(5)]
             top_protocols = [{"label": key, "count": value} for key, value in self._counter_proto.most_common(5)]
+            top_processes = [
+                {
+                    "label": key,
+                    "count": value,
+                    "process_name": self._process_meta.get(key, {}).get("process_name"),
+                    "pid": self._process_meta.get(key, {}).get("pid"),
+                }
+                for key, value in self._counter_process.most_common(5)
+            ]
             top_remotes = [{"label": key, "count": value} for key, value in self._counter_remote.most_common(5)]
             top_conversations = [{"label": key, "count": value} for key, value in self._counter_conversation.most_common(5)]
             recent_alerts = list(self._alerts)[:10]
@@ -131,6 +164,7 @@ class SnifferDashboardState:
             "top_sources": top_sources,
             "top_destinations": top_destinations,
             "top_protocols": top_protocols,
+            "top_processes": top_processes,
             "top_remotes": top_remotes,
             "top_conversations": top_conversations,
             "recent_alerts": recent_alerts,

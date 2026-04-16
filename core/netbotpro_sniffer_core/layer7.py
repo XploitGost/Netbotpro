@@ -42,9 +42,12 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
         "dns_qtype": None,
         "dns_rcode": None,
         "http_method": None,
+        "http_status": None,
+        "http_reason": None,
         "http_host": None,
         "http_path": None,
         "http_user_agent": None,
+        "http_content_type": None,
         "tls_version": None,
         "tls_sni": None,
         "tls_alpn": [],
@@ -87,6 +90,8 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
                         http_host = line.split(":", 1)[1].strip()
                     elif lower.startswith("user-agent:"):
                         http_user_agent = line.split(":", 1)[1].strip()
+                    elif lower.startswith("content-type:"):
+                        data["http_content_type"] = line.split(":", 1)[1].strip()
                 data.update(
                     {
                         "http_method": http_method,
@@ -94,6 +99,34 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
                         "http_host": http_host,
                         "http_user_agent": http_user_agent,
                         "l7": f"HTTP {http_method or ''} {http_path or ''}".strip(),
+                    }
+                )
+            elif line0.startswith("HTTP/"):
+                parts = line0.split(maxsplit=2)
+                status_code = None
+                reason = None
+                if len(parts) >= 2:
+                    try:
+                        status_code = int(parts[1])
+                    except Exception:
+                        status_code = None
+                if len(parts) >= 3:
+                    reason = parts[2]
+                http_host = None
+                http_content_type = None
+                for line in lines[1:50]:
+                    lower = line.lower()
+                    if lower.startswith("host:"):
+                        http_host = line.split(":", 1)[1].strip()
+                    elif lower.startswith("content-type:"):
+                        http_content_type = line.split(":", 1)[1].strip()
+                data.update(
+                    {
+                        "http_status": status_code,
+                        "http_reason": reason,
+                        "http_host": http_host,
+                        "http_content_type": http_content_type,
+                        "l7": f"HTTP RESPONSE {status_code or ''}".strip(),
                     }
                 )
         except Exception:

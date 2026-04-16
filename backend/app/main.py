@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from backend.app.bootstrap import ensure_project_root_on_path
-from backend.app.schemas import DashboardResponse, PacketItem, AlertItem, PaginatedAlertsResponse, PaginatedPacketsResponse, SettingsPayload, StatusResponse
+from backend.app.schemas import AlertInvestigationContext, DashboardResponse, PacketFlowContext, PacketItem, AlertItem, PaginatedAlertsResponse, PaginatedPacketsResponse, SettingsPayload, StatusResponse
 from backend.app.security import (
     allowed_origins,
     check_local_token,
@@ -211,6 +211,8 @@ async def api_recent_packets(
     src: str = "",
     dst: str = "",
     proto: str = "",
+    process: str = "",
+    pid: str = "",
     text: str = "",
     only_alerts: bool = False,
     only_remote: bool = False,
@@ -225,6 +227,8 @@ async def api_recent_packets(
                 "src": src,
                 "dst": dst,
                 "proto": proto,
+                "process": process,
+                "pid": pid,
                 "text": text,
                 "only_alerts": only_alerts,
                 "only_remote": only_remote,
@@ -251,6 +255,21 @@ async def api_packet_detail(
     return item
 
 
+@app.get("/api/packets/{packet_id}/context", response_model=PacketFlowContext)
+async def api_packet_flow_context(
+    packet_id: str,
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    try:
+        item = await history_service.aget_packet_flow_context(packet_id)
+    except HistoryRepositoryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="Packet not found")
+    return item
+
+
 @app.get("/api/dashboard", response_model=DashboardResponse)
 def api_dashboard(
     _: None = Depends(require_loopback),
@@ -268,6 +287,8 @@ async def api_recent_alerts(
     dst: str = "",
     attack: str = "",
     proto: str = "",
+    process: str = "",
+    pid: str = "",
     text: str = "",
     min_score: str = "",
     only_remote: bool = False,
@@ -283,6 +304,8 @@ async def api_recent_alerts(
                 "dst": dst,
                 "attack": attack,
                 "proto": proto,
+                "process": process,
+                "pid": pid,
                 "text": text,
                 "min_score": min_score,
                 "only_remote": only_remote,
@@ -302,6 +325,21 @@ async def api_alert_detail(
 ) -> dict[str, Any]:
     try:
         item = await history_service.aget_alert_detail(alert_id)
+    except HistoryRepositoryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return item
+
+
+@app.get("/api/alerts/{alert_id}/context", response_model=AlertInvestigationContext)
+async def api_alert_context(
+    alert_id: str,
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    try:
+        item = await history_service.aget_alert_context(alert_id)
     except HistoryRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if item is None:

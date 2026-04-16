@@ -27,8 +27,14 @@ class _FakeRepository:
     def get_packet_detail(self, packet_id):
         return self._result("get_packet_detail", packet_id)
 
+    def get_packet_flow_context(self, packet_id):
+        return self._result("get_packet_flow_context", packet_id)
+
     def get_alert_detail(self, alert_id):
         return self._result("get_alert_detail", alert_id)
+
+    def get_alert_context(self, alert_id):
+        return self._result("get_alert_context", alert_id)
 
     async def alist_packets(self, query):
         return self._result("alist_packets", query)
@@ -39,8 +45,14 @@ class _FakeRepository:
     async def aget_packet_detail(self, packet_id):
         return self._result("aget_packet_detail", packet_id)
 
+    async def aget_packet_flow_context(self, packet_id):
+        return self._result("aget_packet_flow_context", packet_id)
+
     async def aget_alert_detail(self, alert_id):
         return self._result("aget_alert_detail", alert_id)
+
+    async def aget_alert_context(self, alert_id):
+        return self._result("aget_alert_context", alert_id)
 
 
 class HistoryServiceTests(unittest.TestCase):
@@ -91,6 +103,30 @@ class HistoryServiceTests(unittest.TestCase):
         with self.assertRaises(HistoryRepositoryError):
             service.get_packet_detail("1")
 
+        self.assertEqual(memory_repo.calls, [])
+
+    @patch("backend.app.services.history_service.is_persist_enabled", return_value=False)
+    def test_packet_flow_context_uses_selected_repository(self, _mock_persist):
+        memory_repo = _FakeRepository("memory")
+        sqlite_repo = _FakeRepository("sqlite")
+        service = HistoryService(object(), sqlite_repository=sqlite_repo, memory_repository=memory_repo)
+
+        result = asyncio.run(service.aget_packet_flow_context("mem-pkt-9"))
+
+        self.assertEqual(result["source"], "memory")
+        self.assertTrue(any(call[0] == "aget_packet_flow_context" for call in memory_repo.calls))
+        self.assertEqual(sqlite_repo.calls, [])
+
+    @patch("backend.app.services.history_service.is_persist_enabled", return_value=True)
+    def test_alert_context_uses_selected_repository(self, _mock_persist):
+        memory_repo = _FakeRepository("memory")
+        sqlite_repo = _FakeRepository("sqlite")
+        service = HistoryService(object(), sqlite_repository=sqlite_repo, memory_repository=memory_repo)
+
+        result = asyncio.run(service.aget_alert_context("7"))
+
+        self.assertEqual(result["source"], "sqlite")
+        self.assertTrue(any(call[0] == "aget_alert_context" for call in sqlite_repo.calls))
         self.assertEqual(memory_repo.calls, [])
 
 

@@ -135,6 +135,30 @@ class CoreSnifferRefactorTests(unittest.TestCase):
         self.assertEqual(meta["direction"], "OUTGOING")
         self.assertEqual(meta["remote_ip"], "1.1.1.1")
 
+    def test_packet_builder_extracts_http_response_metadata(self):
+        layers = PacketLayers(Ether=_Ether, IP=_IP, TCP=_TCP, UDP=_UDP, ICMP=_ICMP, DNS=_DNS, DNSQR=_DNSQR)
+        builder = PacketMetadataBuilder(
+            layers=layers,
+            geoip_provider=_Geo(),
+            mac_vendor_provider=_Vendor(),
+            process_mapper=_Process(),
+            timestamp_factory=lambda: "10:00:00",
+        )
+        payload = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nServer: unit-test\r\n\r\n{}"
+        pkt = (
+            _FakePacket()
+            .set_layer(_Ether, _FakeLayer(src="aa:bb", dst="cc:dd"))
+            .set_layer(_IP, _FakeLayer(src="8.8.8.8", dst="192.168.1.10", ttl=64, proto=6))
+            .set_layer(_TCP, _FakeLayer(sport=8088, dport=54000, flags="PA", payload=payload))
+        )
+
+        meta = builder.build(pkt)
+
+        self.assertEqual(meta["http_status"], 200)
+        self.assertEqual(meta["http_reason"], "OK")
+        self.assertEqual(meta["http_content_type"], "application/json")
+        self.assertEqual(meta["l7"], "HTTP RESPONSE 200")
+
 
 if __name__ == "__main__":
     unittest.main()

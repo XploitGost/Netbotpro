@@ -27,6 +27,82 @@ _SCAN_INTERVAL = 3.0
 _NETSTAT_TIMEOUT = 2.0
 
 
+def _unavailable_process_info(reason: str) -> Dict[str, Any]:
+    return {
+        "pid": None,
+        "process_name": None,
+        "parent_pid": None,
+        "parent_process_name": None,
+        "executable_path": None,
+        "attribution_confidence": "unavailable",
+        "attribution_reason_unavailable": reason,
+        "attribution_source": "unavailable",
+    }
+
+
+def _safe_process_metadata(pid: Optional[int]) -> Dict[str, Any]:
+    info: Dict[str, Any] = {
+        "pid": pid,
+        "process_name": None,
+        "parent_pid": None,
+        "parent_process_name": None,
+        "executable_path": None,
+    }
+    if psutil is None or pid is None or pid <= 0:
+        return info
+    try:
+        process = psutil.Process(pid)  # type: ignore
+        info["process_name"] = process.name()
+    except Exception:
+        process = None
+    if process is None:
+        return info
+    try:
+        info["executable_path"] = process.exe() or None
+    except Exception:
+        info["executable_path"] = None
+    try:
+        parent_pid = process.ppid()
+        info["parent_pid"] = parent_pid or None
+    except Exception:
+        parent_pid = None
+        info["parent_pid"] = None
+    if parent_pid:
+        try:
+            parent = psutil.Process(parent_pid)  # type: ignore
+            info["parent_process_name"] = parent.name()
+        except Exception:
+            info["parent_process_name"] = None
+    return info
+
+
+def _confidence_for_metadata(info: Dict[str, Any], *, source: str) -> str:
+    if not info.get("pid") and not info.get("process_name"):
+        return "unavailable"
+    if source == "netstat":
+        return "medium"
+    if info.get("executable_path") and info.get("parent_process_name"):
+        return "high"
+    if info.get("process_name"):
+        return "medium"
+    return "low"
+
+
+def _finalize_process_info(info: Dict[str, Any], *, source: str, reason: str | None = None) -> Dict[str, Any]:
+    if not info.get("pid") and not info.get("process_name"):
+        return _unavailable_process_info(reason or "No active socket match / kernel-owned / stale mapping.")
+    return {
+        "pid": info.get("pid"),
+        "process_name": info.get("process_name"),
+        "parent_pid": info.get("parent_pid"),
+        "parent_process_name": info.get("parent_process_name"),
+        "executable_path": info.get("executable_path"),
+        "attribution_confidence": _confidence_for_metadata(info, source=source),
+        "attribution_reason_unavailable": None,
+        "attribution_source": source,
+    }
+
+
 def _scan_with_psutil() -> None:
     global _CACHE, _LAST_SCAN
     if psutil is None:
@@ -52,17 +128,8 @@ def _scan_with_psutil() -> None:
         if proto is None:
             continue
         pid: Optional[int] = c.pid
-        name: Optional[str] = None
-        if pid is not None and pid > 0:
-            try:
-                p = psutil.Process(pid)  # type: ignore
-                name = p.name()
-            except Exception:
-                name = None
-        _CACHE[(local_ip, int(local_port), proto)] = {
-            "pid": pid,
-            "process_name": name or "unknown",
-        }
+        info = _safe_process_metadata(pid)
+        _CACHE[(local_ip, int(local_port), proto)] = _finalize_process_info(info, source="psutil")
     _LAST_SCAN = time.time()
 
 
@@ -120,17 +187,8 @@ def _scan_with_netstat_windows() -> None:
 
         if not local_ip or local_port is None or proto is None:
             continue
-        name = None
-        if psutil is not None and pid is not None:
-            try:
-                p = psutil.Process(pid)  # type: ignore
-                name = p.name()
-            except Exception:
-                name = None
-        _CACHE[(local_ip, local_port, proto)] = {
-            "pid": pid,
-            "process_name": name or "unknown",
-        }
+        info = _safe_process_metadata(pid)
+        _CACHE[(local_ip, local_port, proto)] = _finalize_process_info(info, source="netstat")
     _LAST_SCAN = time.time()
 
 
@@ -145,12 +203,14 @@ def _refresh_cache() -> None:
 
 def get_process_for_flow(local_ip: str, local_port: Optional[int], proto: Optional[str]) -> Dict[str, Any]:
     if not local_ip or local_port is None or not proto:
-        return {"pid": None, "process_name": None}
+        return _unavailable_process_info("No local socket key was available for process attribution.")
     now = time.time()
     if now - _LAST_SCAN > _SCAN_INTERVAL:
         _refresh_cache()
     key = (local_ip, int(local_port), proto.upper())
     info = _CACHE.get(key)
     if not info:
-        return {"pid": None, "process_name": None}
+        if psutil is None and platform.system().lower() != "windows":
+            return _unavailable_process_info("Process attribution is unavailable in this runtime.")
+        return _unavailable_process_info("No active socket match / kernel-owned / stale mapping.")
     return info.copy()

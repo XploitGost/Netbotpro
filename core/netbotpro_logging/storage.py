@@ -12,44 +12,126 @@ _DB_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 _LOCK_RETRY_DELAYS_SEC = (0.02, 0.05, 0.1)
 
+_PACKET_COLUMNS = (
+    "capture_id",
+    "ts",
+    "src",
+    "dst",
+    "proto",
+    "sport",
+    "dport",
+    "length",
+    "country",
+    "org",
+    "summary",
+    "is_alert",
+    "remote_ip",
+    "app_protocol",
+    "app_category",
+    "app_confidence",
+    "protocol_basis",
+    "protocol_notes",
+    "protocol_handshake",
+    "protocol_unusual_port",
+    "l7",
+    "dns_qname",
+    "dns_qtype",
+    "dns_rcode",
+    "http_method",
+    "http_status",
+    "http_reason",
+    "http_host",
+    "http_path",
+    "http_user_agent",
+    "http_content_type",
+    "sni",
+    "tls_version",
+    "tls_alpn",
+    "ja3",
+    "ja3_str",
+    "ja4",
+    "payload_len",
+    "payload_hex",
+    "payload_ascii",
+    "payload_binary_like",
+    "payload_entropy",
+    "payload_printable_ratio",
+    "pid",
+    "process_name",
+    "parent_pid",
+    "parent_process_name",
+    "executable_path",
+    "attribution_confidence",
+    "attribution_reason_unavailable",
+    "attribution_source",
+)
+
+_ALERT_COLUMNS = (
+    "ts",
+    "src",
+    "dst",
+    "proto",
+    "sport",
+    "dport",
+    "direction",
+    "attack_type",
+    "score",
+    "detail",
+    "severity",
+    "engine",
+    "score_raw",
+    "incident_id",
+    "incident_count",
+    "incident_score",
+    "packet_id",
+    "remote_ip",
+    "app_protocol",
+    "app_category",
+    "app_confidence",
+    "protocol_basis",
+    "protocol_notes",
+    "protocol_handshake",
+    "protocol_unusual_port",
+    "dns_qname",
+    "dns_qtype",
+    "dns_rcode",
+    "http_method",
+    "http_host",
+    "http_path",
+    "http_status",
+    "http_reason",
+    "http_user_agent",
+    "http_content_type",
+    "sni",
+    "tls_version",
+    "tls_alpn",
+    "ja3",
+    "ja3_str",
+    "ja4",
+    "payload_len",
+    "payload_hex",
+    "payload_ascii",
+    "payload_binary_like",
+    "payload_entropy",
+    "payload_printable_ratio",
+    "pid",
+    "process_name",
+    "parent_pid",
+    "parent_process_name",
+    "executable_path",
+    "attribution_confidence",
+    "attribution_reason_unavailable",
+    "attribution_source",
+)
+
 
 def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     conn.executemany(
-        """
-        INSERT INTO packets (
-            ts, src, dst, proto, sport, dport, length,
-            country, org, summary, is_alert, remote_ip,
-            app_protocol, app_category, app_confidence, l7,
-            dns_qname, http_host, http_path, sni, tls_version
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        f"INSERT INTO packets ({', '.join(_PACKET_COLUMNS)}) VALUES ({', '.join(['?'] * len(_PACKET_COLUMNS))})",
         [
-            (
-                row.get("ts"),
-                row.get("src"),
-                row.get("dst"),
-                row.get("proto"),
-                row.get("sport"),
-                row.get("dport"),
-                row.get("length"),
-                row.get("country"),
-                row.get("org"),
-                row.get("summary"),
-                1 if row.get("is_alert") else 0,
-                row.get("remote_ip"),
-                row.get("app_protocol"),
-                row.get("app_category"),
-                row.get("app_confidence"),
-                row.get("l7"),
-                row.get("dns_qname"),
-                row.get("http_host"),
-                row.get("http_path"),
-                row.get("sni"),
-                row.get("tls_version"),
-            )
+            tuple((1 if column == "is_alert" and row.get(column) else 0) if column == "is_alert" else row.get(column) for column in _PACKET_COLUMNS)
             for row in rows
         ],
     )
@@ -59,41 +141,9 @@ def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     conn.executemany(
-        """
-        INSERT INTO alerts (
-            ts, src, dst, proto, attack_type, score, detail,
-            severity, engine, score_raw, incident_id,
-            incident_count, incident_score, packet_id, remote_ip,
-            app_protocol, app_category, app_confidence, dns_qname,
-            http_host, http_path, sni
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        f"INSERT INTO alerts ({', '.join(_ALERT_COLUMNS)}) VALUES ({', '.join(['?'] * len(_ALERT_COLUMNS))})",
         [
-            (
-                row.get("ts"),
-                row.get("src"),
-                row.get("dst"),
-                row.get("proto"),
-                row.get("attack_type"),
-                row.get("score"),
-                row.get("detail"),
-                row.get("severity"),
-                row.get("engine"),
-                row.get("score_raw"),
-                row.get("incident_id"),
-                row.get("incident_count"),
-                row.get("incident_score"),
-                row.get("packet_id"),
-                row.get("remote_ip"),
-                row.get("app_protocol"),
-                row.get("app_category"),
-                row.get("app_confidence"),
-                row.get("dns_qname"),
-                row.get("http_host"),
-                row.get("http_path"),
-                row.get("sni"),
-            )
+            tuple(row.get(column) for column in _ALERT_COLUMNS)
             for row in rows
         ],
     )

@@ -27,7 +27,9 @@ class HistoryService:
             "packets_list": self._blank_metric(),
             "alerts_list": self._blank_metric(),
             "packet_detail": self._blank_metric(),
+            "packet_context": self._blank_metric(),
             "alert_detail": self._blank_metric(),
+            "alert_context": self._blank_metric(),
         }
 
     def get_packets(self, query: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +68,16 @@ class HistoryService:
         self._record_metric("packet_detail", time.perf_counter() - started, failed=False)
         return result
 
+    def get_packet_flow_context(self, packet_id: str) -> dict[str, Any] | None:
+        started = time.perf_counter()
+        try:
+            result = self._repository().get_packet_flow_context(packet_id)
+        except Exception:
+            self._record_metric("packet_context", time.perf_counter() - started, failed=True)
+            raise
+        self._record_metric("packet_context", time.perf_counter() - started, failed=False)
+        return result
+
     def get_alert_detail(self, alert_id: str) -> dict[str, Any] | None:
         started = time.perf_counter()
         try:
@@ -74,6 +86,16 @@ class HistoryService:
             self._record_metric("alert_detail", time.perf_counter() - started, failed=True)
             raise
         self._record_metric("alert_detail", time.perf_counter() - started, failed=False)
+        return result
+
+    def get_alert_context(self, alert_id: str) -> dict[str, Any] | None:
+        started = time.perf_counter()
+        try:
+            result = self._repository().get_alert_context(alert_id)
+        except Exception:
+            self._record_metric("alert_context", time.perf_counter() - started, failed=True)
+            raise
+        self._record_metric("alert_context", time.perf_counter() - started, failed=False)
         return result
 
     async def aget_packets(self, query: dict[str, Any]) -> dict[str, Any]:
@@ -112,6 +134,16 @@ class HistoryService:
         self._record_metric("packet_detail", time.perf_counter() - started, failed=False)
         return result
 
+    async def aget_packet_flow_context(self, packet_id: str) -> dict[str, Any] | None:
+        started = time.perf_counter()
+        try:
+            result = await self._repository().aget_packet_flow_context(packet_id)
+        except Exception:
+            self._record_metric("packet_context", time.perf_counter() - started, failed=True)
+            raise
+        self._record_metric("packet_context", time.perf_counter() - started, failed=False)
+        return result
+
     async def aget_alert_detail(self, alert_id: str) -> dict[str, Any] | None:
         started = time.perf_counter()
         try:
@@ -120,6 +152,16 @@ class HistoryService:
             self._record_metric("alert_detail", time.perf_counter() - started, failed=True)
             raise
         self._record_metric("alert_detail", time.perf_counter() - started, failed=False)
+        return result
+
+    async def aget_alert_context(self, alert_id: str) -> dict[str, Any] | None:
+        started = time.perf_counter()
+        try:
+            result = await self._repository().aget_alert_context(alert_id)
+        except Exception:
+            self._record_metric("alert_context", time.perf_counter() - started, failed=True)
+            raise
+        self._record_metric("alert_context", time.perf_counter() - started, failed=False)
         return result
 
     def metrics(self) -> dict[str, dict[str, float | int]]:

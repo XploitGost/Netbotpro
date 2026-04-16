@@ -7,6 +7,25 @@ NetBotPro is now organized around a single primary execution path:
 - `core/` for packet capture, IDS, scoring, traceroute, firewall, and offline analysis
 - `config/` for persisted settings
 
+## Current product focus
+
+NetBotPro is a local-first network investigation console with:
+
+- a live Monitor workspace for packets and alerts
+- an analyst-focused Inspect workspace for packet, alert, flow, and process investigation
+- process attribution and same-process traffic correlation
+- flow and conversation context with related packets, related alerts, and remote-host recurrence
+- protocol identification that combines port hints, payload hints, handshake checks, and unusual-port detection
+- risk explanation panels with top reasons, likely benign signals, confidence text, and analyst-readable narrative
+- persisted history that keeps investigation context much closer to live mode
+
+## Investigation highlights
+
+- Packet and alert clicks land directly in Inspect instead of forcing a long Monitor scroll.
+- Inspect now includes `Packet`, `Flow`, and `Process` tabs, plus next/prev navigation, pin, and freeze-live controls.
+- Detail views show protocol guess, risk, confidence, flow stats, process attribution, related activity, behavior correlation, and payload previews.
+- History queries support process and PID filtering, and stored evidence is re-interpreted on read so older rows still get richer protocol context when possible.
+
 ## Main architecture
 
 - API entrypoint: `backend/app/main.py`
@@ -51,6 +70,17 @@ cd desktop\electron
 npm install
 npm run build:frontend
 npm run dev
+```
+
+## Verification
+
+Useful checks during development:
+
+```powershell
+python -m compileall backend core
+python -m unittest tests.test_history_repository tests.test_history_service tests.test_sniffer_persistence tests.test_app_protocols tests.test_sniffer_detection_pipeline tests.test_core_sniffer_refactor
+cd frontend
+npm run build
 ```
 
 ## Notes

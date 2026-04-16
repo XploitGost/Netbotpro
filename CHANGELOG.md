@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Added final alert investigation context so Inspect can correlate packet, alert, flow, process, related alerts, and root-cause style groupings.
+- Added richer investigation UX with packet, flow, and process tabs, related flow views, same-process and same-remote activity, plus next/prev and pin/freeze controls.
+- Added analyst-readable risk explanation panels with top reasons, likely benign signals, confidence text, and investigation narrative.
+
+### Changed
+- Improved protocol identification with stronger port, payload, handshake, encrypted/binary, and unusual-port evidence.
+- Brought persisted history closer to live parity by persisting more protocol and payload evidence and enriching older rows again on the read path.
+- Expanded README documentation to reflect the current Inspect-first investigation workflow and development verification steps.
+
+### Fixed
+- Fixed history parity gaps where persisted rows could lose important protocol context compared with live traffic.
+- Fixed alert-to-packet linking and flow correlation so related alerts and root-cause summaries stay consistent in Inspect.
+- Fixed history queries against older SQLite schemas by degrading gracefully when newer evidence columns are not present.
+
 ## 0.1.1 - 2026-04-15
 
 ### Added

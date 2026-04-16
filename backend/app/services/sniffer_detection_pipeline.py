@@ -114,7 +114,9 @@ class SnifferDetectionPipeline:
             "src": packet.get("src"),
             "dst": packet.get("dst"),
             "proto": packet.get("proto"),
+            "sport": packet.get("sport"),
             "dport": packet.get("dport"),
+            "direction": packet.get("direction"),
             "attack_type": alert.get("attack_type") or alert.get("attack") or "Alert",
             "engine": alert.get("engine", ""),
             "severity": alert.get("severity", ""),
@@ -129,11 +131,47 @@ class SnifferDetectionPipeline:
             "app_protocol": alert.get("app_protocol") or packet.get("app_protocol"),
             "app_category": alert.get("app_category") or packet.get("app_category"),
             "app_confidence": alert.get("app_confidence") or packet.get("app_confidence"),
+            "protocol_basis": alert.get("protocol_basis") or packet.get("protocol_basis"),
+            "protocol_notes": alert.get("protocol_notes") or packet.get("protocol_notes"),
+            "protocol_handshake": alert.get("protocol_handshake") or packet.get("protocol_handshake"),
+            "protocol_unusual_port": alert.get("protocol_unusual_port")
+            if alert.get("protocol_unusual_port") is not None
+            else packet.get("protocol_unusual_port"),
             "l7": packet.get("l7"),
             "dns_qname": alert.get("dns_qname") or packet.get("dns_qname"),
+            "dns_qtype": alert.get("dns_qtype") if alert.get("dns_qtype") is not None else packet.get("dns_qtype"),
+            "dns_rcode": alert.get("dns_rcode") if alert.get("dns_rcode") is not None else packet.get("dns_rcode"),
+            "http_method": alert.get("http_method") or packet.get("http_method"),
             "http_host": alert.get("http_host") or packet.get("http_host"),
             "http_path": alert.get("http_path") or packet.get("http_path"),
+            "http_status": alert.get("http_status") if alert.get("http_status") is not None else packet.get("http_status"),
+            "http_reason": alert.get("http_reason") or packet.get("http_reason"),
+            "http_user_agent": alert.get("http_user_agent") or packet.get("http_user_agent"),
+            "http_content_type": alert.get("http_content_type") or packet.get("http_content_type"),
             "sni": alert.get("sni") or packet.get("tls_sni") or packet.get("sni"),
+            "tls_version": alert.get("tls_version") or packet.get("tls_version"),
+            "tls_alpn": alert.get("tls_alpn") or packet.get("tls_alpn") or packet.get("alpn"),
+            "ja3": alert.get("ja3") or packet.get("ja3"),
+            "ja3_str": alert.get("ja3_str") or packet.get("ja3_str"),
+            "ja4": alert.get("ja4") or packet.get("ja4"),
+            "payload_len": alert.get("payload_len") if alert.get("payload_len") is not None else packet.get("payload_len"),
+            "payload_hex": alert.get("payload_hex") or packet.get("payload_hex"),
+            "payload_ascii": alert.get("payload_ascii") or packet.get("payload_ascii"),
+            "payload_binary_like": alert.get("payload_binary_like")
+            if alert.get("payload_binary_like") is not None
+            else packet.get("payload_binary_like"),
+            "payload_entropy": alert.get("payload_entropy") if alert.get("payload_entropy") is not None else packet.get("payload_entropy"),
+            "payload_printable_ratio": alert.get("payload_printable_ratio")
+            if alert.get("payload_printable_ratio") is not None
+            else packet.get("payload_printable_ratio"),
+            "pid": alert.get("pid") or packet.get("pid"),
+            "process_name": alert.get("process_name") or packet.get("process_name"),
+            "parent_pid": alert.get("parent_pid") or packet.get("parent_pid"),
+            "parent_process_name": alert.get("parent_process_name") or packet.get("parent_process_name"),
+            "executable_path": alert.get("executable_path") or packet.get("executable_path"),
+            "attribution_confidence": alert.get("attribution_confidence") or packet.get("attribution_confidence"),
+            "attribution_reason_unavailable": alert.get("attribution_reason_unavailable") or packet.get("attribution_reason_unavailable"),
+            "attribution_source": alert.get("attribution_source") or packet.get("attribution_source"),
         }
 
     def _detect_application_alerts(self, packet: dict[str, Any]) -> list[dict[str, Any]]:

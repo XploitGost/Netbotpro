@@ -56,6 +56,35 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
         self.assertEqual(alerts, [])
         self.assertEqual(packet["app_protocol"], "DNS")
         self.assertEqual(packet["app_category"], "dns")
+        self.assertEqual(packet["protocol_handshake"], "DNS question")
+
+    def test_pipeline_marks_http_on_unusual_port(self):
+        pipeline = SnifferDetectionPipeline(
+            settings_provider=lambda: {"auto_block": False, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            ids_sig=_NoopEngine(),
+            ids_ml=_NoopEngine(),
+            rule_engine=_NoopEngine(),
+            scorer=_NoopScorer(),
+            incidents=_NoopIncidents(),
+        )
+        packet = {
+            "src": "10.0.0.4",
+            "dst": "93.184.216.34",
+            "remote_ip": "93.184.216.34",
+            "proto": "TCP",
+            "dport": 8088,
+            "http_method": "GET",
+            "http_host": "example.com",
+            "http_path": "/status",
+            "ts": "now",
+        }
+
+        alerts = pipeline.analyze(packet)
+
+        self.assertEqual(alerts, [])
+        self.assertEqual(packet["app_protocol"], "HTTP")
+        self.assertTrue(packet["protocol_unusual_port"])
+        self.assertIn("unusual port 8088", packet["protocol_basis"])
 
     def test_pipeline_detects_repeated_dns_tunneling_pattern(self):
         pipeline = SnifferDetectionPipeline(
@@ -114,6 +143,8 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0]["attack_type"], "Cleartext Auth Over HTTP")
         self.assertEqual(alerts[0]["app_protocol"], "HTTP")
+        self.assertFalse(alerts[0]["protocol_unusual_port"])
+        self.assertEqual(alerts[0]["protocol_handshake"], "HTTP request")
 
     @patch("backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True)
     def test_auto_block_uses_cooldown_and_skips_duplicate_blocks(self, mock_block_ip):
