@@ -15,7 +15,21 @@ function readStoredLocalToken() {
   if (typeof window === "undefined") {
     return "";
   }
-  return window.localStorage.getItem(LOCAL_TOKEN_STORAGE_KEY) || "";
+  try {
+    const sessionValue = window.sessionStorage.getItem(LOCAL_TOKEN_STORAGE_KEY) || "";
+    if (sessionValue) return sessionValue;
+  } catch {}
+  try {
+    const legacyValue = window.localStorage.getItem(LOCAL_TOKEN_STORAGE_KEY) || "";
+    if (legacyValue) {
+      try {
+        window.sessionStorage.setItem(LOCAL_TOKEN_STORAGE_KEY, legacyValue);
+      } catch {}
+      window.localStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+      return legacyValue;
+    }
+  } catch {}
+  return "";
 }
 
 export function useLocalAuth() {
@@ -27,7 +41,12 @@ export function useLocalAuth() {
     if (typeof window === "undefined" || !managedLocalToken) {
       return;
     }
-    window.localStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+    try {
+      window.localStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+    } catch {}
+    try {
+      window.sessionStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+    } catch {}
     setLocalTokenState(runtimeLocalToken);
   }, [managedLocalToken, runtimeLocalToken]);
 
@@ -37,11 +56,16 @@ export function useLocalAuth() {
     if (typeof window === "undefined" || managedLocalToken) {
       return;
     }
-    if (normalized) {
-      window.localStorage.setItem(LOCAL_TOKEN_STORAGE_KEY, normalized);
-      return;
-    }
-    window.localStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+    try {
+      if (normalized) {
+        window.sessionStorage.setItem(LOCAL_TOKEN_STORAGE_KEY, normalized);
+      } else {
+        window.sessionStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+      }
+    } catch {}
+    try {
+      window.localStorage.removeItem(LOCAL_TOKEN_STORAGE_KEY);
+    } catch {}
   }
 
   return { localToken, setLocalToken, managedLocalToken };

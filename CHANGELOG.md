@@ -11,11 +11,14 @@
 - Improved protocol identification with stronger port, payload, handshake, encrypted/binary, and unusual-port evidence.
 - Brought persisted history closer to live parity by persisting more protocol and payload evidence and enriching older rows again on the read path.
 - Expanded README documentation to reflect the current Inspect-first investigation workflow and development verification steps.
+- Hardened local auth and realtime transport so websocket sessions prefer subprotocol-based token exchange and unmanaged browser tokens stay in session-scoped storage.
 
 ### Fixed
 - Fixed history parity gaps where persisted rows could lose important protocol context compared with live traffic.
 - Fixed alert-to-packet linking and flow correlation so related alerts and root-cause summaries stay consistent in Inspect.
 - Fixed history queries against older SQLite schemas by degrading gracefully when newer evidence columns are not present.
+- Fixed unsafe report enumeration and export download handling by filtering to generated safe file types and rejecting traversal-style paths.
+- Fixed loopback, firewall, and traceroute validation edge cases that could allow weaker input handling or less predictable runtime failures.
 
 ## 0.1.1 - 2026-04-15
 

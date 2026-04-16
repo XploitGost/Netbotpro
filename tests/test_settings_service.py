@@ -37,6 +37,32 @@ class SettingsServiceTests(unittest.TestCase):
         finally:
             settings_service._replace_cache(original)
 
+    @patch("backend.app.services.settings_service.init_storage")
+    @patch("backend.app.services.settings_service.set_persist")
+    @patch("backend.app.services.settings_service.save_settings")
+    def test_update_settings_sanitizes_iface_and_whitelist(self, mock_save, mock_set_persist, mock_init_storage):
+        original = settings_service.get_settings_snapshot()
+        try:
+            settings_service._replace_cache(dict(original))
+
+            updated = settings_service.update_settings(
+                {
+                    "iface": "Wi-Fi 1\r\nInjected",
+                    "whitelist_ips": "127.0.0.1, bad-ip, ::1, 127.0.0.1",
+                }
+            )
+
+            self.assertEqual(updated["iface"], "Wi-Fi 1Injected")
+            self.assertEqual(updated["whitelist_ips"], "127.0.0.1, ::1")
+            mock_save.assert_called_once()
+            mock_set_persist.assert_called_once_with(bool(updated.get("persist_logs")))
+            if updated.get("persist_logs"):
+                mock_init_storage.assert_called_once()
+            else:
+                mock_init_storage.assert_not_called()
+        finally:
+            settings_service._replace_cache(original)
+
 
 if __name__ == "__main__":
     unittest.main()

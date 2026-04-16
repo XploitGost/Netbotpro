@@ -23,6 +23,7 @@ class ExportService:
     def export_session(self, kind: str, packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, Any]], traceroute_rows: list[dict[str, Any]]) -> dict[str, Any]:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         normalized = kind.lower().strip()
+        filename = ""
         if normalized == "csv":
             filename = validate_export_name(f"packets_{ts}", ".csv")
             path = ensure_within_directory(LOG_DIR, filename)
@@ -47,4 +48,4 @@ class ExportService:
             raise ValueError("Unsupported export format")
         if not Path(path).exists():
             raise ValueError(f"Export failed for format: {normalized}")
-        return {"ok": True, "format": normalized, "path": path}
+        return {"ok": True, "format": normalized, "path": filename}

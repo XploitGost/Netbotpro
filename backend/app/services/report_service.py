@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.app.bootstrap import ensure_project_root_on_path
+from backend.app.security import validate_report_download_path
 
 ensure_project_root_on_path()
 
@@ -14,15 +15,26 @@ class ReportService:
         root = Path(LOG_DIR).resolve()
         if not root.exists():
             return []
-        items: list[dict[str, str | int]] = []
-        for path in sorted(root.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
-            if not path.is_file():
+        candidates: list[tuple[float, Path]] = []
+        for path in root.glob("*"):
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                stat = path.stat()
+            except OSError:
                 continue
-            stat = path.stat()
+            candidates.append((stat.st_mtime, path))
+        items: list[dict[str, str | int]] = []
+        for _, path in sorted(candidates, key=lambda item: item[0], reverse=True):
+            try:
+                safe_name = validate_report_download_path(path.name)
+                stat = path.stat()
+            except Exception:
+                continue
             items.append(
                 {
-                    "name": path.name,
-                    "path": path.name,
+                    "name": safe_name,
+                    "path": safe_name,
                     "size": int(stat.st_size),
                     "modified": str(int(stat.st_mtime)),
                 }

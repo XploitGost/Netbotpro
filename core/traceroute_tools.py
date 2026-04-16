@@ -12,6 +12,7 @@ Changes in this patch:
 import platform
 import subprocess
 import re
+import shutil
 import time
 from typing import List, Dict, Any, Optional
 
@@ -105,12 +106,18 @@ def run_traceroute(
 
     system = platform.system().lower()
     if system == "windows":
+        traceroute_bin = shutil.which("tracert")
+        if not traceroute_bin:
+            return []
         # tracert: -d no DNS, -h hops, -w timeout(ms)
-        cmd = ["tracert", "-d", "-h", str(mh), "-w", str(int(timeout_f * 1000)), target]
+        cmd = [traceroute_bin, "-d", "-h", str(mh), "-w", str(int(timeout_f * 1000)), target]
     else:
+        traceroute_bin = shutil.which("traceroute")
+        if not traceroute_bin:
+            return []
         m_upper = (mode or "UDP").strip().upper()
         cmd = [
-            "traceroute",
+            traceroute_bin,
             "-n",
             "-m",
             str(mh),
@@ -141,6 +148,8 @@ def run_traceroute(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            encoding="utf-8",
+            errors="replace",
         )
     except Exception as e:
         return [{

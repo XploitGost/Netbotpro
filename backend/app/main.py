@@ -19,11 +19,15 @@ from backend.app.security import (
     check_local_token,
     ensure_within_directory,
     enforce_rate_limit,
+    extract_websocket_token,
+    is_loopback_host,
     is_allowed_websocket_origin,
     is_local_token_enabled,
     require_local_token,
     require_loopback,
+    validate_block_ip,
     validate_ip,
+    validate_report_download_path,
 )
 from backend.app.services.event_bus import EventBus
 from backend.app.services.export_service import ExportService
@@ -119,6 +123,10 @@ async def log_requests(request: Request, call_next):
         duration_ms,
         request.client.host if request.client else "unknown",
     )
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
     return response
 
 
@@ -355,7 +363,7 @@ def api_block_ip(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "firewall_block", limit=10, window_sec=60)
-    ip = validate_ip(str(payload.get("ip") or ""))
+    ip = validate_block_ip(str(payload.get("ip") or ""))
     ok = block_ip(ip)
     if not ok:
         raise HTTPException(status_code=409, detail=f"Failed to block {ip}")
@@ -375,9 +383,11 @@ def api_traceroute(
 
 @app.get("/api/traceroute/history")
 def api_traceroute_history(
+    request: Request,
     _: None = Depends(require_loopback),
     __: None = Depends(require_local_token),
 ) -> list[dict[str, Any]]:
+    enforce_rate_limit(request, "traceroute_history", limit=60, window_sec=60)
     return traceroute_service.history()
 
 
@@ -404,10 +414,13 @@ def api_export_session(
 @app.get("/api/exports/download")
 def api_export_download(
     path: str,
+    request: Request,
     _: None = Depends(require_loopback),
     __: None = Depends(require_local_token),
 ) -> FileResponse:
-    file_path = Path(ensure_within_directory(str(LOG_DIR), path))
+    enforce_rate_limit(request, "export_download", limit=30, window_sec=60)
+    safe_name = validate_report_download_path(path)
+    file_path = Path(ensure_within_directory(str(LOG_DIR), safe_name))
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Export not found")
     return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
@@ -415,9 +428,11 @@ def api_export_download(
 
 @app.get("/api/reports")
 def api_reports(
+    request: Request,
     _: None = Depends(require_loopback),
     __: None = Depends(require_local_token),
 ) -> list[dict[str, Any]]:
+    enforce_rate_limit(request, "reports_list", limit=60, window_sec=60)
     return report_service.list_reports()
 
 
@@ -457,17 +472,24 @@ async def api_analyze_pcap(
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket) -> None:
     client_host = websocket.client.host if websocket.client else ""
-    if client_host not in {"127.0.0.1", "::1", "localhost"}:
+    if not is_loopback_host(client_host):
         await websocket.close(code=1008)
         return
     if not is_allowed_websocket_origin(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return
-    token = websocket.query_params.get("token", "")
+    try:
+        token, accepted_protocol = extract_websocket_token(
+            websocket.headers.get("sec-websocket-protocol"),
+            websocket.query_params.get("token", ""),
+        )
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
     if not check_local_token(token):
         await websocket.close(code=1008)
         return
-    await websocket.accept()
+    await websocket.accept(subprotocol=accepted_protocol)
     queue = event_bus.subscribe()
     try:
         await websocket.send_json(

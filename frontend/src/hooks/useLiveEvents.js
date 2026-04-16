@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef } from "react";
-import { buildWsEventsUrl } from "../lib/runtimeConfig";
+import { buildWsEventsTransport } from "../lib/runtimeConfig";
 
 const FLUSH_MS = 180;
 const IMMEDIATE_FLUSH_THRESHOLD = 120;
@@ -69,7 +69,8 @@ export function useLiveEvents({
     function connectSocket() {
       if (!active) return;
       handlersRef.current.onStatusChange("connecting", "Connecting to live backend...");
-      socket = new WebSocket(buildWsEventsUrl(localToken));
+      const { url, protocols } = buildWsEventsTransport(localToken);
+      socket = new WebSocket(url, protocols);
 
       socket.onopen = () => {
         attempts = 0;

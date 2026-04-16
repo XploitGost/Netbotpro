@@ -17,9 +17,12 @@ def block_ip(ip: str) -> bool:
         return False
 
     try:
-        ipaddress.ip_address(ip)
+        parsed = ipaddress.ip_address(ip)
     except Exception:
         logger.warning("firewall block rejected invalid ip=%s", ip)
+        return False
+    if parsed.is_unspecified or parsed.is_loopback or parsed.is_multicast:
+        logger.warning("firewall block rejected unsupported ip=%s", ip)
         return False
 
     try:

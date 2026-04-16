@@ -4,6 +4,7 @@ import threading
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
+from backend.app.security import normalize_ip_csv, sanitize_iface_name
 
 ensure_project_root_on_path()
 
@@ -106,8 +107,10 @@ def update_settings(data: dict[str, Any]) -> dict[str, Any]:
             allowed = STR_ENUM_KEYS[key]
             if normalized in allowed:
                 current[key] = normalized
-        elif key in {"iface", "whitelist_ips"}:
-            current[key] = str(value).strip()
+        elif key == "iface":
+            current[key] = sanitize_iface_name(str(value))
+        elif key == "whitelist_ips":
+            current[key] = normalize_ip_csv(str(value))
     save_settings(current)
     current = _replace_cache(current)
     _apply_runtime_settings(current)

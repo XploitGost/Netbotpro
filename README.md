@@ -26,6 +26,14 @@ NetBotPro is a local-first network investigation console with:
 - Detail views show protocol guess, risk, confidence, flow stats, process attribution, related activity, behavior correlation, and payload previews.
 - History queries support process and PID filtering, and stored evidence is re-interpreted on read so older rows still get richer protocol context when possible.
 
+## Security hardening
+
+- The API remains loopback-only by default and now applies stricter response headers plus rate limits on settings, exports, reports, traceroute, and control actions.
+- Local token authentication is still required for sensitive routes, but the browser UI now keeps unmanaged tokens in `sessionStorage` instead of `localStorage`.
+- Live websocket authentication no longer needs a `?token=` query string; the frontend sends the local token through websocket subprotocol negotiation to reduce token leakage in logs and URLs.
+- Export and report downloads are constrained to generated safe file types inside the NetBotPro log directory, and report enumeration skips unsafe or symlinked files.
+- Firewall block targets reject unsupported addresses such as loopback, multicast, and unspecified IPs.
+
 ## Main architecture
 
 - API entrypoint: `backend/app/main.py`
@@ -78,7 +86,7 @@ Useful checks during development:
 
 ```powershell
 python -m compileall backend core
-python -m unittest tests.test_history_repository tests.test_history_service tests.test_sniffer_persistence tests.test_app_protocols tests.test_sniffer_detection_pipeline tests.test_core_sniffer_refactor
+python -m unittest discover -s tests
 cd frontend
 npm run build
 ```
