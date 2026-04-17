@@ -800,16 +800,16 @@ def _target_port_for_identity(identity: dict[str, Any], direction: str) -> int |
 
 def _process_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     pid, process_name = _process_key(packet)
-    attribution_confidence = _normalize_text(_first_present(packet, "attribution_confidence")) or "unavailable"
-    reason_unavailable = _normalize_text(_first_present(packet, "attribution_reason_unavailable")) or "Process metadata is unavailable for this packet or not persisted in history."
-    attribution_source = _normalize_text(_first_present(packet, "attribution_source")) or "unavailable"
+    attribution_confidence = _normalize_text(_first_present(packet, "attribution_confidence")) or "pending"
+    reason_unavailable = _normalize_text(_first_present(packet, "attribution_reason_unavailable")) or "Process metadata was not captured for this packet, or the history row was stored before process attribution was available."
+    attribution_source = _normalize_text(_first_present(packet, "attribution_source")) or "pending"
     parent_pid = _first_present(packet, "parent_pid")
     parent_process_name = _normalize_text(_first_present(packet, "parent_process_name"))
     executable_path = _normalize_text(_first_present(packet, "executable_path"))
     if not pid and not process_name:
         return {
             "available": False,
-            "label": "Unknown process",
+            "label": "Process not mapped yet",
             "pid": None,
             "parent_pid": parent_pid,
             "parent_process_name": parent_process_name or None,
@@ -822,7 +822,7 @@ def _process_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any
             "sessions_total": 0,
             "ports_total": 0,
             "remote_hosts_total": 0,
-            "pattern": "Unavailable",
+            "pattern": "No process pattern available yet",
             "flow_samples": [],
             "related_packets": [],
             "related_alerts": [],
@@ -869,8 +869,8 @@ def _process_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any
         "parent_pid": parent_pid,
         "parent_process_name": parent_process_name or None,
         "executable_path": executable_path or None,
-        "attribution_confidence": attribution_confidence if attribution_confidence != "unavailable" else "medium",
-        "attribution_source": attribution_source if attribution_source != "unavailable" else None,
+        "attribution_confidence": attribution_confidence if attribution_confidence != "pending" else "medium",
+        "attribution_source": attribution_source if attribution_source != "pending" else None,
         "reason_unavailable": None,
         "packets_total": len(rows),
         "alerts_total": len(process_alerts),
@@ -1632,7 +1632,7 @@ def _stream_anomalies(
         anomalies.append(
             _stream_anomaly(
                 "repeated_failed_auth_like",
-                title="Repeated failed auth-like exchanges",
+                title="Possible automated repeated sign-in failures",
                 severity="high",
                 confidence="high",
                 reason=f"{_safe_int(failed_auth_cluster.get('failed_exchanges_total'))} auth-like exchange(s) repeated against the same request target inside this stream.",
@@ -1649,7 +1649,7 @@ def _stream_anomalies(
         anomalies.append(
             _stream_anomaly(
                 "repeated_failed_exchanges",
-                title="Repeated failed exchanges",
+                title="Repeated failed requests in one stream",
                 severity="medium",
                 confidence="high",
                 reason=f"{_safe_int(failed_cluster.get('failed_exchanges_total'))} exchange(s) repeated on the same clustered request target with non-success responses.",
@@ -1675,7 +1675,7 @@ def _stream_anomalies(
         anomalies.append(
             _stream_anomaly(
                 "abrupt_response_status_change",
-                title="Abrupt response status change",
+                title="Response status changed abruptly",
                 severity="medium" if current_class and current_class >= 4 else "low",
                 confidence="high",
                 reason=f"Response status moved from {previous.get('response_title') or '-'} to {current.get('response_title') or '-'} within the same stream.",
@@ -1703,7 +1703,7 @@ def _stream_anomalies(
         anomalies.append(
             _stream_anomaly(
                 "unusual_request_target_shift",
-                title="Unusual request target shift",
+                title="Request target shifted unexpectedly",
                 severity="medium",
                 confidence="medium",
                 reason=f"Request target changed from {previous.get('request_title') or '-'} to {current.get('request_title') or '-'} inside one stream.",
@@ -1723,7 +1723,7 @@ def _stream_anomalies(
             anomalies.append(
                 _stream_anomaly(
                     "suspicious_payload_preview_change",
-                    title="Suspicious payload preview change",
+                    title="Payload preview changed noticeably",
                     severity="medium",
                     confidence="medium",
                     reason="Payload previews changed within the stream while auth-like content was present.",
@@ -1740,7 +1740,7 @@ def _stream_anomalies(
         anomalies.append(
             _stream_anomaly(
                 "binary_shift",
-                title="Binary or encrypted shift inside stream",
+                title="Payload shifted between readable and binary content",
                 severity="medium",
                 confidence="medium",
                 reason="Payload presentation shifted between printable and binary/encrypted-looking content inside one stream.",
@@ -1767,7 +1767,7 @@ def _stream_anomalies(
             anomalies.append(
                 _stream_anomaly(
                     "timing_irregularity",
-                    title="Timing or rhythm irregularity",
+                    title="Timing rhythm changed inside the stream",
                     severity="low",
                     confidence="medium",
                     reason="Packet timing inside the stream shows a sharp gap change compared with the surrounding rhythm.",
@@ -1852,7 +1852,7 @@ def _stream_process_relationships(flow_packets: list[dict[str, Any]], flow_alert
         bucket = buckets.setdefault(
             key,
             {
-                "label": _normalize_text(row.get("process_name")) or (f"PID {_normalize_text(row.get('pid'))}" if _normalize_text(row.get("pid")) else "Unknown process"),
+                "label": _normalize_text(row.get("process_name")) or (f"PID {_normalize_text(row.get('pid'))}" if _normalize_text(row.get("pid")) else "Process not mapped yet"),
                 "process_name": row.get("process_name"),
                 "pid": row.get("pid"),
                 "parent_pid": row.get("parent_pid"),

@@ -91,6 +91,24 @@ cd frontend
 npm run build
 ```
 
+Desktop runtime smoke:
+
+```powershell
+python scripts\qa\packaged_backend_smoke.py
+```
+
+## First-Run Notes
+
+- The desktop shell creates its own config, data, and log folders under the Electron user-data directory on first launch.
+- Live capture and firewall actions can require Administrator privileges on Windows, even when the dashboard itself starts normally.
+- If no process mapping appears immediately, the packet can still be valid; short-lived sockets and kernel-owned traffic can arrive before attribution is available.
+
+## Known Limitations
+
+- Linux packaging is wired and build-ready, but a production Linux artifact still needs to be built and smoke-tested on a real Linux host before it should be called released.
+- Live capture quality depends on the local capture stack and interface permissions.
+- Some history rows can show reduced process or protocol evidence when they were stored before newer enrichment fields existed.
+
 ## Notes
 
 - The supported primary UI is the web stack.

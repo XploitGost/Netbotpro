@@ -62,7 +62,7 @@ function formatDirection(value) {
   if (direction === "INCOMING") return "Inbound";
   if (direction === "OUTGOING") return "Outbound";
   if (direction === "LOCAL") return "Local";
-  return sentenceCase(value || "Unknown");
+  return sentenceCase(value || "Not classified yet");
 }
 
 function parseTimestamp(value) {
@@ -275,7 +275,7 @@ function serviceGuess(packet) {
 
   const ports = [normalizePort(packet?.dport), normalizePort(packet?.sport)].filter(Boolean);
   const match = SERVICE_SIGNATURES.find((item) => item.proto === proto && item.ports.some((port) => ports.includes(port)));
-  return match || { label: proto || "Unknown transport", confidence: 0.32, basis: "Transport metadata only", classification: "unclassified traffic" };
+  return match || { label: proto || "Transport not classified yet", confidence: 0.32, basis: "Transport metadata only", classification: "traffic awaiting deeper classification" };
 }
 
 function protocolSignals(packet, guess, payload) {
@@ -352,7 +352,7 @@ function packetClassification(packet, guess, payload, signals) {
   if (proto === "ICMP") return "control plane traffic";
   if (cleanText(packet?.app_category) === "web") return "web application traffic";
   if (cleanText(packet?.tls_version)) return "encrypted application traffic";
-  return "unknown packet role";
+  return "traffic awaiting deeper classification";
 }
 
 function processSummary(packet) {
@@ -378,17 +378,17 @@ function processSummary(packet) {
     };
   }
   const direction = normalizeDirection(packet?.direction);
-  let reasonUnavailable = cleanText(packet?.attribution_reason_unavailable) || "No active socket match / kernel-owned / stale mapping.";
+  let reasonUnavailable = cleanText(packet?.attribution_reason_unavailable) || "No active socket match was available when this packet was inspected. Kernel-owned, short-lived, or stale sockets can cause this.";
   if (direction === "OUTGOING") {
-    reasonUnavailable = cleanText(packet?.attribution_reason_unavailable) || "No active socket match / short-lived socket / attribution window expired.";
+    reasonUnavailable = cleanText(packet?.attribution_reason_unavailable) || "The outbound socket was not available anymore when attribution ran. Short-lived connections often age out before they can be mapped.";
   } else if (direction === "LOCAL") {
-    reasonUnavailable = cleanText(packet?.attribution_reason_unavailable) || "No socket attribution available for local-only traffic.";
+    reasonUnavailable = cleanText(packet?.attribution_reason_unavailable) || "Local-only traffic often stays below the socket attribution view, so no process match was recorded.";
   }
   return {
-    label: "Unknown process",
-    hint: "Process attribution unavailable",
+    label: "Process not mapped yet",
+    hint: "No process match is available yet",
     reasonUnavailable,
-    confidenceLabel: confidence || "Unavailable",
+    confidenceLabel: confidence || "Pending",
   };
 }
 
@@ -632,14 +632,14 @@ function targetPortForIdentity(identity, direction) {
 function buildProcessCorrelationSample(packet, packetRows, alertRows = []) {
   const pid = cleanText(packet?.pid);
   const processName = cleanText(packet?.process_name);
-  const attributionConfidence = cleanText(packet?.attribution_confidence) || "unavailable";
+  const attributionConfidence = cleanText(packet?.attribution_confidence) || "pending";
   const attributionSource = cleanText(packet?.attribution_source);
   const reasonUnavailable =
-    cleanText(packet?.attribution_reason_unavailable) || "Process metadata is unavailable for this packet or not persisted in history.";
+    cleanText(packet?.attribution_reason_unavailable) || "Process metadata was not captured for this packet, or the history row was stored before process attribution was available.";
   if (!pid && !processName) {
     return {
       available: false,
-      label: "Unknown process",
+      label: "Process not mapped yet",
       pid: null,
       parent_pid: packet?.parent_pid ?? null,
       parent_process_name: cleanText(packet?.parent_process_name) || null,
@@ -709,7 +709,7 @@ function buildProcessCorrelationSample(packet, packetRows, alertRows = []) {
     parent_pid: packet?.parent_pid ?? null,
     parent_process_name: cleanText(packet?.parent_process_name) || null,
     executable_path: cleanText(packet?.executable_path) || null,
-    attribution_confidence: attributionConfidence === "unavailable" ? "medium" : attributionConfidence,
+    attribution_confidence: attributionConfidence === "pending" ? "medium" : attributionConfidence,
     attribution_source: attributionSource || null,
     reason_unavailable: null,
     packets_total: rows.length,
@@ -1413,14 +1413,14 @@ function buildRiskExplanation(packet, risk, confidence, signals, process, contex
       ? "High confidence because the packet has protocol evidence beyond a simple port hint."
       : confidence.label === "Medium"
         ? "Medium confidence because protocol evidence is present, but some interpretation still relies on heuristics."
-        : "Low confidence because interpretation still depends heavily on transport and limited payload context.";
-  const narrative = `${risk.label} risk with ${confidence.label.toLowerCase()} confidence. ${suspiciousReasons[0] || "The packet is mainly interesting because it crossed a monitored boundary."} ${process.reasonUnavailable ? `Process attribution gap: ${process.reasonUnavailable}` : process.hint || ""}`.trim();
+        : "Lower confidence because this interpretation still depends mostly on transport hints and a limited payload sample.";
+  const narrative = `${risk.label} risk with ${confidence.label.toLowerCase()} confidence. ${suspiciousReasons[0] || "This packet is worth a look because it crossed a monitored boundary."} ${process.reasonUnavailable ? `Process mapping note: ${process.reasonUnavailable}` : process.hint || ""}`.trim();
   return {
     narrative,
     rows: toRows([
       { label: "Top Reasons", value: suspiciousReasons.length ? suspiciousReasons.join(" | ") : "No strong suspicious reasons in the current sample" },
       { label: "Behavior Evidence", value: behaviorEvidence.length ? behaviorEvidence.map((item) => `${cleanText(item?.label)}: ${cleanText(item?.reason)}`).join(" | ") : "-" },
-      { label: "Likely Benign Signals", value: benignSignals.length ? benignSignals.join(" | ") : "No strong benign signal in the current sample" },
+      { label: "Likely Benign Signals", value: benignSignals.length ? benignSignals.join(" | ") : "No clear benign signal stood out in the current sample" },
       { label: "Confidence Text", value: confidenceText },
       { label: "Analyst Narrative", value: narrative },
     ]),
@@ -1428,7 +1428,7 @@ function buildRiskExplanation(packet, risk, confidence, signals, process, contex
       {
         title: "Behavior Evidence",
         items: behaviorEvidence.map((item) => ({
-          title: `${cleanText(item?.label) || "Behavior"} | ${sentenceCase(item?.confidence || "medium")} confidence`,
+          title: `${cleanText(item?.label) || "Behavior"} (${sentenceCase(item?.confidence || "medium")} confidence)`,
           body: `${cleanText(item?.reason) || "Behavior evidence available."}${Array.isArray(item?.evidence) && item.evidence.length ? ` Evidence: ${item.evidence.join(" | ")}` : ""}`,
         })),
       },
@@ -1930,7 +1930,7 @@ function buildStreamProcessRelationshipsSample(flowPackets = [], flowAlerts = []
     const key = `${pid}|${processName}`;
     if (!buckets.has(key)) {
       buckets.set(key, {
-        label: processName || (pid ? `PID ${pid}` : "Unknown process"),
+      label: processName || (pid ? `PID ${pid}` : "Process not mapped yet"),
         process_name: processName || null,
         pid: pid || null,
         parent_pid: row?.parent_pid ?? null,
@@ -2163,7 +2163,7 @@ function buildStreamInspection(streamContext) {
     rows: toRows([
       { label: "Status", value: sentenceCase(stream?.status || "fallback") },
       { label: "Protocol", value: stream?.protocol || "-" },
-      { label: "Summary", value: stream?.summary || "No stream context available." },
+      { label: "Summary", value: stream?.summary || "Stream reconstruction is not available for this sample yet." },
       { label: "Requests", value: formatNumber(Number(stream?.requests_total ?? stream?.requestsTotal ?? 0)) },
       { label: "Responses", value: formatNumber(Number(stream?.responses_total ?? stream?.responsesTotal ?? 0)) },
       { label: "Paired Exchanges", value: formatNumber(Number(stream?.pairs_total ?? stream?.pairsTotal ?? 0)) },
@@ -2222,9 +2222,9 @@ function buildStreamInspection(streamContext) {
       {
         title: "Stream Anomalies",
         items: anomalyItems.map((item) => ({
-          title: `${cleanText(item?.title) || cleanText(item?.type) || "Stream anomaly"} | ${sentenceCase(item?.severity || "low")} | ${sentenceCase(item?.confidence || "medium")} confidence`,
+          title: `${cleanText(item?.title) || cleanText(item?.type) || "Stream anomaly"} (${sentenceCase(item?.severity || "low")}, ${sentenceCase(item?.confidence || "medium")} confidence)`,
           body: [
-            cleanText(item?.reason) || "Stream anomaly evidence available.",
+            cleanText(item?.reason) || "Stream anomaly evidence is available for review.",
             Object.entries(item?.metrics || {})
               .slice(0, 3)
               .map(([key, value]) => `${sentenceCase(String(key).replaceAll("_", " "))}: ${Array.isArray(value) ? value.filter(Boolean).join(", ") : cleanText(value)}`)
@@ -2366,7 +2366,7 @@ function buildRelatedActivity(context) {
       title: "Related Flows",
       items: relatedFlows.map((row) => ({
         title: cleanText(row?.title) || "Related flow",
-        body: cleanText(row?.body) || "Flow summary unavailable",
+      body: cleanText(row?.body) || "Flow summary is not available for this sample yet",
       })),
     },
     {
@@ -2401,7 +2401,7 @@ function buildRelatedActivity(context) {
       title: "Root Cause Groups",
       items: rootCauseGroups.map((row) => ({
         title: cleanText(row?.title) || "Root cause group",
-        body: cleanText(row?.body) || "Root cause summary unavailable",
+      body: cleanText(row?.body) || "Root-cause summary is not available for this sample yet",
       })),
     },
   ].filter((group) => group.items.length);

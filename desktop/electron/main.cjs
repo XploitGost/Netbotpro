@@ -29,6 +29,15 @@ function appendDesktopLog(paths, channel, text) {
   }
 }
 
+function summarizeBackendLaunch(launch) {
+  const commandName = path.basename(String(launch?.command || "")) || "backend";
+  const args = Array.isArray(launch?.args) ? launch.args : [];
+  if (args.includes("-m") && args.includes("backend.app.desktop_entry")) {
+    return `${commandName} python module launch`;
+  }
+  return `${commandName} packaged launch`;
+}
+
 function isPackagedApp() {
   return app.isPackaged;
 }
@@ -193,6 +202,7 @@ function backendEnv(paths) {
     NETBOT_DATA_DIR: paths.dataDir,
     NETBOT_LOG_DIR: paths.logDir,
     NETBOT_ALLOWED_ORIGINS: "http://127.0.0.1:5173,http://localhost:5173,null,file://",
+    NETBOT_LOG_LEVEL: process.env.NETBOT_LOG_LEVEL || (isPackagedApp() ? "warning" : "info"),
   };
 }
 
@@ -216,7 +226,7 @@ async function startBackend(paths) {
     return;
   }
   const launch = resolveBackendLaunch(paths);
-  appendDesktopLog(paths, "launcher", `command=${launch.command} cwd=${launch.cwd} args=${launch.args.join(" ")}`);
+  appendDesktopLog(paths, "launcher", summarizeBackendLaunch(launch));
   backendProcess = spawn(launch.command, launch.args, {
     cwd: launch.cwd,
     env: launch.env,

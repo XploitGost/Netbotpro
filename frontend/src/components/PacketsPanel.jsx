@@ -97,7 +97,7 @@ export function PacketsPanel({
                 const dstSide = getTrafficSide(packet.dst);
                 const flow = getFlowSummary(packet.src, packet.dst);
                 const peer = getPeerInfo(packet);
-                const processLabel = packet.process_name || (packet.pid ? `PID ${packet.pid}` : "Unknown");
+                const processLabel = packet.process_name || (packet.pid ? `PID ${packet.pid}` : "Not mapped yet");
                 const processHint = packet.executable_path || packet.parent_process_name || packet.attribution_reason_unavailable || packet.attribution_confidence || "-";
                 return (
                   <tr

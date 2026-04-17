@@ -93,7 +93,7 @@ export function AlertsPanel({
                 const absoluteIndex = startIndex + index;
                 const flow = getFlowSummary(alert.src, alert.dst);
                 const peer = getPeerInfo(alert);
-                const processLabel = alert.process_name || (alert.pid ? `PID ${alert.pid}` : "Unknown");
+                const processLabel = alert.process_name || (alert.pid ? `PID ${alert.pid}` : "Not mapped yet");
                 const processHint = alert.executable_path || alert.parent_process_name || alert.attribution_reason_unavailable || alert.attribution_confidence || "-";
                 return (
                   <tr

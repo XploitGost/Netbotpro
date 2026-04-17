@@ -228,8 +228,8 @@ function App() {
           },
           {
             label: "Process Attribution",
-            value: "Unavailable",
-            hint: "Socket attribution, host metadata, and decode details show up in Packet Detail.",
+            value: "Not mapped yet",
+            hint: "Socket attribution, host metadata, and decode details appear here once a process match is available.",
             tone: "neutral",
           },
           {

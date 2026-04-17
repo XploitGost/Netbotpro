@@ -454,9 +454,9 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
         self.assertIn("Response status changed", diff_titles)
         self.assertIn("Payload snippet changed", diff_titles)
         anomaly_titles = {item["title"] for item in context["stream_context"]["anomalies"]}
-        self.assertIn("Abrupt response status change", anomaly_titles)
-        self.assertIn("Unusual request target shift", anomaly_titles)
-        self.assertIn("Suspicious payload preview change", anomaly_titles)
+        self.assertIn("Response status changed abruptly", anomaly_titles)
+        self.assertIn("Request target shifted unexpectedly", anomaly_titles)
+        self.assertIn("Payload preview changed noticeably", anomaly_titles)
 
     def test_memory_packet_flow_context_detects_stream_anomaly_cues(self):
         repository = MemoryHistoryRepository(_StreamAnomalySnifferService())

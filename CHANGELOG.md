@@ -12,6 +12,10 @@
 - Brought persisted history closer to live parity by persisting more protocol and payload evidence and enriching older rows again on the read path.
 - Expanded README documentation to reflect the current Inspect-first investigation workflow and development verification steps.
 - Hardened local auth and realtime transport so websocket sessions prefer subprotocol-based token exchange and unmanaged browser tokens stay in session-scoped storage.
+- Improved history and inspection wording so process gaps, confidence text, stream anomalies, and fallback summaries read more like analyst notes than raw placeholders.
+- Added list/detail caching plus stale-request guards so monitor and inspect stay smoother under heavier history navigation.
+- Tightened desktop runtime behavior by reducing packaged-backend log verbosity and avoiding raw launch path details in desktop logs.
+- Prepared Linux packaging scripts and Electron build config for real `dist:linux` runs on a Linux host.
 
 ### Fixed
 - Fixed history parity gaps where persisted rows could lose important protocol context compared with live traffic.
@@ -19,6 +23,7 @@
 - Fixed history queries against older SQLite schemas by degrading gracefully when newer evidence columns are not present.
 - Fixed unsafe report enumeration and export download handling by filtering to generated safe file types and rejecting traversal-style paths.
 - Fixed loopback, firewall, and traceroute validation edge cases that could allow weaker input handling or less predictable runtime failures.
+- Fixed async alert-context caching in the history service so repeated detail reads no longer bypass the new cache path.
 
 ## 0.1.1 - 2026-04-15
 
