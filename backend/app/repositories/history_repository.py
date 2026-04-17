@@ -1332,10 +1332,14 @@ def _http_request_entry(row: dict[str, Any]) -> dict[str, Any] | None:
     if snippet:
         body = f"{body} | {snippet}"
     return {
+        "id": row.get("id"),
         "title": f"{method} {path}",
         "body": body,
         "ts": row.get("ts"),
         "snippet": snippet,
+        "method": method,
+        "path": path,
+        "host": host,
     }
 
 
@@ -1350,10 +1354,14 @@ def _http_response_entry(row: dict[str, Any]) -> dict[str, Any] | None:
     if snippet:
         body = f"{body} | {snippet}"
     return {
+        "id": row.get("id"),
         "title": f"{status} {reason}".strip(),
         "body": body,
         "ts": row.get("ts"),
         "snippet": snippet,
+        "status_code": status,
+        "reason": reason,
+        "content_type": content_type,
     }
 
 
@@ -1364,11 +1372,109 @@ def _stream_payload_entry(row: dict[str, Any]) -> dict[str, Any] | None:
     identity = _flow_identity(row)
     direction = _normalize_text(identity.get("direction")).title() or "Unknown"
     return {
+        "id": row.get("id"),
         "title": f"{direction} payload | {_normalize_text(row.get('ts')) or '-'}",
         "body": snippet,
         "ts": row.get("ts"),
         "snippet": snippet,
     }
+
+
+def _folded_exchange_entry(index: int, request: dict[str, Any] | None, response: dict[str, Any] | None) -> dict[str, Any]:
+    summary = " | ".join(
+        part
+        for part in (
+            f"Request: {request.get('title')}" if request else "Request: unavailable",
+            f"Response: {response.get('title')}" if response else "Response: unavailable",
+        )
+        if part
+    )
+    sections: list[dict[str, Any]] = []
+    if request is not None:
+        sections.append(
+            {
+                "title": "Request",
+                "body": request.get("body") or "Request preview unavailable.",
+                "packet_id": request.get("id"),
+                "ts": request.get("ts"),
+            }
+        )
+    if response is not None:
+        sections.append(
+            {
+                "title": "Response",
+                "body": response.get("body") or "Response preview unavailable.",
+                "packet_id": response.get("id"),
+                "ts": response.get("ts"),
+            }
+        )
+
+    return {
+        "id": f"exchange-{index + 1}",
+        "title": request.get("title") if request else response.get("title") if response else f"Exchange {index + 1}",
+        "summary": summary,
+        "status": "complete" if request and response else "partial",
+        "request_title": request.get("title") if request else None,
+        "request_body": request.get("body") if request else None,
+        "request_packet_id": request.get("id") if request else None,
+        "response_title": response.get("title") if response else None,
+        "response_body": response.get("body") if response else None,
+        "response_packet_id": response.get("id") if response else None,
+        "sections": sections,
+    }
+
+
+def _conversation_diff(http_requests: list[dict[str, Any]], http_responses: list[dict[str, Any]], payload_snippets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for index in range(1, len(http_requests)):
+        previous = http_requests[index - 1]
+        current = http_requests[index]
+        if previous.get("title") != current.get("title"):
+            items.append(
+                {
+                    "title": "Request target changed",
+                    "body": f"{previous.get('title') or '-'} -> {current.get('title') or '-'} between {_normalize_text(previous.get('ts')) or '-'} and {_normalize_text(current.get('ts')) or '-'}.",
+                }
+            )
+        elif previous.get("snippet") and current.get("snippet") and previous.get("snippet") != current.get("snippet"):
+            items.append(
+                {
+                    "title": "Request preview changed",
+                    "body": f"Captured request preview shifted between {_normalize_text(previous.get('ts')) or '-'} and {_normalize_text(current.get('ts')) or '-'}.",
+                }
+            )
+
+    for index in range(1, len(http_responses)):
+        previous = http_responses[index - 1]
+        current = http_responses[index]
+        if previous.get("title") != current.get("title"):
+            items.append(
+                {
+                    "title": "Response status changed",
+                    "body": f"{previous.get('title') or '-'} -> {current.get('title') or '-'} between {_normalize_text(previous.get('ts')) or '-'} and {_normalize_text(current.get('ts')) or '-'}.",
+                }
+            )
+        elif previous.get("content_type") != current.get("content_type") and current.get("content_type"):
+            items.append(
+                {
+                    "title": "Response content type changed",
+                    "body": f"{previous.get('content_type') or '-'} -> {current.get('content_type') or '-'} between {_normalize_text(previous.get('ts')) or '-'} and {_normalize_text(current.get('ts')) or '-'}.",
+                }
+            )
+
+    for index in range(1, len(payload_snippets)):
+        previous = payload_snippets[index - 1]
+        current = payload_snippets[index]
+        if previous.get("snippet") and current.get("snippet") and previous.get("snippet") != current.get("snippet"):
+            items.append(
+                {
+                    "title": "Payload snippet changed",
+                    "body": f"Payload preview shifted between {_normalize_text(previous.get('ts')) or '-'} and {_normalize_text(current.get('ts')) or '-'}.",
+                }
+            )
+            break
+
+    return items[:6]
 
 
 def _stream_timeline_packet_event(row: dict[str, Any], *, selected_packet_id: str = "") -> dict[str, Any]:
@@ -1521,12 +1627,16 @@ def _build_stream_context(
             "requests_total": 0,
             "responses_total": 0,
             "pairs_total": 0,
+            "folded_exchanges_total": 0,
+            "conversation_diff_total": 0,
             "payload_snippets_total": 0,
             "timeline_total": 0,
             "stream_packets_total": 0,
             "stream_alerts_total": len(ascending_alerts),
             "stream_processes_total": 0,
             "request_response_pairs": [],
+            "exchanges": [],
+            "conversation_diff": [],
             "payload_snippets": [],
             "timeline": [],
             "processes": [],
@@ -1559,28 +1669,24 @@ def _build_stream_context(
                 payload_snippets.append(payload_entry)
 
     request_response_pairs: list[dict[str, Any]] = []
+    folded_exchanges: list[dict[str, Any]] = []
     pair_count = max(len(http_requests), len(http_responses))
     for index in range(pair_count):
         request = http_requests[index] if index < len(http_requests) else None
         response = http_responses[index] if index < len(http_responses) else None
+        exchange = _folded_exchange_entry(index, request, response)
         request_response_pairs.append(
             {
-                "title": request.get("title") if request else response.get("title") if response else "HTTP exchange",
-                "body": " | ".join(
-                    part
-                    for part in (
-                        f"Request: {request.get('title')}" if request else "Request: unavailable",
-                        f"Response: {response.get('title')}" if response else "Response: unavailable",
-                    )
-                    if part
-                ),
-                "status": "complete" if request and response else "partial",
-                "request_title": request.get("title") if request else None,
-                "request_body": request.get("body") if request else None,
-                "response_title": response.get("title") if response else None,
-                "response_body": response.get("body") if response else None,
+                "title": exchange.get("title") or "HTTP exchange",
+                "body": exchange.get("summary") or "Exchange summary unavailable",
+                "status": exchange.get("status") or "partial",
+                "request_title": exchange.get("request_title"),
+                "request_body": exchange.get("request_body"),
+                "response_title": exchange.get("response_title"),
+                "response_body": exchange.get("response_body"),
             }
         )
+        folded_exchanges.append(exchange)
 
     protocol = "HTTP" if http_requests or http_responses else app_protocols[0] if app_protocols else _normalize_proto(packet.get("proto"))
     notes: list[str] = []
@@ -1614,6 +1720,7 @@ def _build_stream_context(
     if len(timeline) > 12:
         notes.append(f"Timeline preview is truncated to the first 12 event(s) out of {len(timeline)} stream event(s).")
     processes = _stream_process_relationships(ascending_packets, ascending_alerts)
+    conversation_diff = _conversation_diff(http_requests, http_responses, payload_snippets)
 
     return {
         "available": bool(http_requests or http_responses or payload_snippets),
@@ -1623,12 +1730,16 @@ def _build_stream_context(
         "requests_total": len(http_requests),
         "responses_total": len(http_responses),
         "pairs_total": sum(1 for item in request_response_pairs if item.get("status") == "complete"),
+        "folded_exchanges_total": len(folded_exchanges),
+        "conversation_diff_total": len(conversation_diff),
         "payload_snippets_total": len(payload_snippets),
         "timeline_total": len(timeline),
         "stream_packets_total": len(ascending_packets),
         "stream_alerts_total": len(ascending_alerts),
         "stream_processes_total": len(processes),
         "request_response_pairs": request_response_pairs[:4],
+        "exchanges": folded_exchanges[:6],
+        "conversation_diff": conversation_diff,
         "payload_snippets": payload_snippets[:6],
         "timeline": timeline[:12],
         "processes": processes,

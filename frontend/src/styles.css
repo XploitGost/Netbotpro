@@ -829,6 +829,43 @@ td {
   border-top: 0;
 }
 
+.stream-fold {
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.stream-fold summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
+  font-weight: 600;
+}
+
+.stream-fold summary::-webkit-details-marker {
+  display: none;
+}
+
+.stream-fold-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.stream-fold-section {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stream-fold-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .inspection-narrative {
   margin-top: 10px;
   line-height: 1.6;

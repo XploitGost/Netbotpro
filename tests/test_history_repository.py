@@ -113,6 +113,21 @@ class _PartialStreamSnifferService:
         return []
 
 
+class _ConversationDiffSnifferService:
+    def recent_packets(self):
+        return [
+            {"id": "diff-6", "ts": "10:01:05", "src": "93.184.216.34", "dst": "192.168.1.90", "proto": "TCP", "sport": 443, "dport": 54000, "length": 210, "summary": "http-response-2", "remote_ip": "93.184.216.34", "direction": "INCOMING", "app_protocol": "HTTP", "http_status": 403, "http_reason": "Forbidden", "http_content_type": "text/html", "payload_ascii": "HTTP/1.1 403 Forbidden", "process_name": "browser.exe", "pid": 5001},
+            {"id": "diff-5", "ts": "10:01:04", "src": "192.168.1.90", "dst": "93.184.216.34", "proto": "TCP", "sport": 54000, "dport": 443, "length": 130, "summary": "http-request-2-body", "remote_ip": "93.184.216.34", "direction": "OUTGOING", "app_protocol": "HTTP", "payload_ascii": "admin=true", "process_name": "browser.exe", "pid": 5001},
+            {"id": "diff-4", "ts": "10:01:03", "src": "192.168.1.90", "dst": "93.184.216.34", "proto": "TCP", "sport": 54000, "dport": 443, "length": 140, "summary": "http-request-2", "remote_ip": "93.184.216.34", "direction": "OUTGOING", "app_protocol": "HTTP", "http_method": "GET", "http_host": "example.com", "http_path": "/admin", "payload_ascii": "GET /admin HTTP/1.1 Host: example.com", "process_name": "browser.exe", "pid": 5001},
+            {"id": "diff-3", "ts": "10:01:02", "src": "93.184.216.34", "dst": "192.168.1.90", "proto": "TCP", "sport": 443, "dport": 54000, "length": 220, "summary": "http-response-1", "remote_ip": "93.184.216.34", "direction": "INCOMING", "app_protocol": "HTTP", "http_status": 200, "http_reason": "OK", "http_content_type": "application/json", "payload_ascii": "HTTP/1.1 200 OK", "process_name": "browser.exe", "pid": 5001},
+            {"id": "diff-2", "ts": "10:01:01", "src": "192.168.1.90", "dst": "93.184.216.34", "proto": "TCP", "sport": 54000, "dport": 443, "length": 120, "summary": "http-request-1-body", "remote_ip": "93.184.216.34", "direction": "OUTGOING", "app_protocol": "HTTP", "payload_ascii": "username=admin", "process_name": "browser.exe", "pid": 5001},
+            {"id": "diff-1", "ts": "10:01:00", "src": "192.168.1.90", "dst": "93.184.216.34", "proto": "TCP", "sport": 54000, "dport": 443, "length": 145, "summary": "http-request-1", "remote_ip": "93.184.216.34", "direction": "OUTGOING", "app_protocol": "HTTP", "http_method": "POST", "http_host": "example.com", "http_path": "/login", "payload_ascii": "POST /login HTTP/1.1 Host: example.com", "process_name": "browser.exe", "pid": 5001},
+        ]
+
+    def recent_alerts(self):
+        return []
+
+
 class _AlertCorrelationSnifferService:
     def recent_packets(self):
         return [
@@ -402,6 +417,21 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
         self.assertEqual(context["stream_context"]["payload_snippets_total"], 2)
         self.assertEqual(context["stream_context"]["timeline_total"], 2)
         self.assertTrue(context["stream_context"]["notes"])
+
+    def test_memory_packet_flow_context_builds_folded_exchanges_and_conversation_diff(self):
+        repository = MemoryHistoryRepository(_ConversationDiffSnifferService())
+
+        context = repository.get_packet_flow_context("diff-6")
+
+        self.assertIsNotNone(context)
+        self.assertEqual(context["stream_context"]["folded_exchanges_total"], 2)
+        self.assertEqual(context["stream_context"]["conversation_diff_total"], 3)
+        self.assertEqual(context["stream_context"]["exchanges"][0]["sections"][0]["title"], "Request")
+        self.assertEqual(context["stream_context"]["exchanges"][0]["sections"][1]["title"], "Response")
+        diff_titles = {item["title"] for item in context["stream_context"]["conversation_diff"]}
+        self.assertIn("Request target changed", diff_titles)
+        self.assertIn("Response status changed", diff_titles)
+        self.assertIn("Payload snippet changed", diff_titles)
 
 
 class SQLiteHistoryRepositoryTests(unittest.TestCase):
@@ -1092,6 +1122,8 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             self.assertEqual(context["stream_context"]["requests_total"], 1)
             self.assertEqual(context["stream_context"]["responses_total"], 1)
             self.assertEqual(context["stream_context"]["pairs_total"], 1)
+            self.assertEqual(context["stream_context"]["folded_exchanges_total"], 1)
+            self.assertEqual(context["stream_context"]["conversation_diff_total"], 0)
             self.assertEqual(context["stream_context"]["request_response_pairs"][0]["response_title"], "200 OK")
             self.assertEqual(context["stream_context"]["timeline_total"], 4)
             self.assertEqual(context["stream_context"]["navigation"]["previous_packet_id"], "3")

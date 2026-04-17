@@ -169,6 +169,24 @@ function StreamActionButton({ item, actions }) {
   return null;
 }
 
+function StreamFoldSections({ sections }) {
+  const visibleSections = Array.isArray(sections) ? sections.filter((section) => cleanDisplay(section?.title) || cleanDisplay(section?.body)) : [];
+  if (!visibleSections.length) return null;
+  return (
+    <details className="stream-fold">
+      <summary>Open Exchange</summary>
+      <div className="stream-fold-body">
+        {visibleSections.map((section, index) => (
+          <div key={`${section.title || "section"}-${index}`} className="stream-fold-section">
+            <strong>{cleanDisplay(section.title || "Section")}</strong>
+            <p className="muted">{cleanDisplay(section.body)}</p>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function StreamIntelligenceSection({ rows, groups, actions }) {
   const visibleGroups = Array.isArray(groups) ? groups.filter((group) => Array.isArray(group?.items) && group.items.length) : [];
   if (!hasRows(rows) && !visibleGroups.length) return null;
@@ -201,6 +219,7 @@ function StreamIntelligenceSection({ rows, groups, actions }) {
                   <article key={`${group.title}-${index}`} className="inspection-activity-item">
                     <strong>{cleanDisplay(item.title)}</strong>
                     <p className="muted">{cleanDisplay(item.body)}</p>
+                    <StreamFoldSections sections={item.sections} />
                     <StreamActionButton item={item} actions={actions} />
                   </article>
                 ))}

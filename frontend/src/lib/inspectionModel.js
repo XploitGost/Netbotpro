@@ -1479,10 +1479,14 @@ function buildHttpRequestEntrySample(row) {
   const host = cleanText(row?.http_host) || cleanText(row?.dst) || "-";
   const snippet = cleanText(row?.payload_ascii || row?.summary).replaceAll(/\s+/g, " ").slice(0, 120).trim();
   return {
+    id: cleanText(row?.id) || null,
     title: `${method} ${path}`,
     body: `Host ${host} | ${cleanText(row?.ts) || "-"}${snippet ? ` | ${snippet}` : ""}`,
     ts: row?.ts,
     snippet,
+    method,
+    path,
+    host,
   };
 }
 
@@ -1493,10 +1497,14 @@ function buildHttpResponseEntrySample(row) {
   const contentType = cleanText(row?.http_content_type) || "-";
   const snippet = cleanText(row?.payload_ascii || row?.summary).replaceAll(/\s+/g, " ").slice(0, 120).trim();
   return {
+    id: cleanText(row?.id) || null,
     title: `${Math.trunc(status)} ${reason}`.trim(),
     body: `Content-Type ${contentType} | ${cleanText(row?.ts) || "-"}${snippet ? ` | ${snippet}` : ""}`,
     ts: row?.ts,
     snippet,
+    status_code: Math.trunc(status),
+    reason,
+    content_type: contentType,
   };
 }
 
@@ -1504,11 +1512,94 @@ function buildPayloadStreamEntrySample(row) {
   const snippet = cleanText(row?.payload_ascii).replaceAll(/\s+/g, " ").slice(0, 120).trim();
   if (!snippet) return null;
   return {
+    id: cleanText(row?.id) || null,
     title: `${formatDirection(row?.direction)} payload | ${cleanText(row?.ts) || "-"}`,
     body: snippet,
     ts: row?.ts,
     snippet,
   };
+}
+
+function buildFoldedExchangeSample(index, request, response) {
+  const sections = [];
+  if (request) {
+    sections.push({
+      title: "Request",
+      body: cleanText(request?.body) || "Request preview unavailable.",
+      packet_id: cleanText(request?.id) || null,
+      ts: request?.ts || null,
+    });
+  }
+  if (response) {
+    sections.push({
+      title: "Response",
+      body: cleanText(response?.body) || "Response preview unavailable.",
+      packet_id: cleanText(response?.id) || null,
+      ts: response?.ts || null,
+    });
+  }
+  return {
+    id: `exchange-${index + 1}`,
+    title: cleanText(request?.title) || cleanText(response?.title) || `Exchange ${index + 1}`,
+    summary: [
+      request ? `Request: ${cleanText(request.title)}` : "Request: unavailable",
+      response ? `Response: ${cleanText(response.title)}` : "Response: unavailable",
+    ].filter(Boolean).join(" | "),
+    status: request && response ? "complete" : "partial",
+    request_title: cleanText(request?.title) || null,
+    request_body: cleanText(request?.body) || null,
+    request_packet_id: cleanText(request?.id) || null,
+    response_title: cleanText(response?.title) || null,
+    response_body: cleanText(response?.body) || null,
+    response_packet_id: cleanText(response?.id) || null,
+    sections,
+  };
+}
+
+function buildConversationDiffSample(httpRequests, httpResponses, payloadSnippets) {
+  const items = [];
+  for (let index = 1; index < httpRequests.length; index += 1) {
+    const previous = httpRequests[index - 1];
+    const current = httpRequests[index];
+    if (cleanText(previous?.title) !== cleanText(current?.title)) {
+      items.push({
+        title: "Request target changed",
+        body: `${cleanText(previous?.title) || "-"} -> ${cleanText(current?.title) || "-"} between ${cleanText(previous?.ts) || "-"} and ${cleanText(current?.ts) || "-"}.`,
+      });
+    } else if (cleanText(previous?.snippet) && cleanText(current?.snippet) && cleanText(previous?.snippet) !== cleanText(current?.snippet)) {
+      items.push({
+        title: "Request preview changed",
+        body: `Captured request preview shifted between ${cleanText(previous?.ts) || "-"} and ${cleanText(current?.ts) || "-"}.`,
+      });
+    }
+  }
+  for (let index = 1; index < httpResponses.length; index += 1) {
+    const previous = httpResponses[index - 1];
+    const current = httpResponses[index];
+    if (cleanText(previous?.title) !== cleanText(current?.title)) {
+      items.push({
+        title: "Response status changed",
+        body: `${cleanText(previous?.title) || "-"} -> ${cleanText(current?.title) || "-"} between ${cleanText(previous?.ts) || "-"} and ${cleanText(current?.ts) || "-"}.`,
+      });
+    } else if (cleanText(previous?.content_type) !== cleanText(current?.content_type) && cleanText(current?.content_type)) {
+      items.push({
+        title: "Response content type changed",
+        body: `${cleanText(previous?.content_type) || "-"} -> ${cleanText(current?.content_type) || "-"} between ${cleanText(previous?.ts) || "-"} and ${cleanText(current?.ts) || "-"}.`,
+      });
+    }
+  }
+  for (let index = 1; index < payloadSnippets.length; index += 1) {
+    const previous = payloadSnippets[index - 1];
+    const current = payloadSnippets[index];
+    if (cleanText(previous?.snippet) && cleanText(current?.snippet) && cleanText(previous?.snippet) !== cleanText(current?.snippet)) {
+      items.push({
+        title: "Payload snippet changed",
+        body: `Payload preview shifted between ${cleanText(previous?.ts) || "-"} and ${cleanText(current?.ts) || "-"}.`,
+      });
+      break;
+    }
+  }
+  return items.slice(0, 6);
 }
 
 function buildStreamTimelinePacketEventSample(row, selectedPacketId = "") {
@@ -1649,12 +1740,16 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
       requests_total: 0,
       responses_total: 0,
       pairs_total: 0,
+      folded_exchanges_total: 0,
+      conversation_diff_total: 0,
       payload_snippets_total: 0,
       timeline_total: 0,
       stream_packets_total: 0,
       stream_alerts_total: ascendingAlerts.length,
       stream_processes_total: 0,
       request_response_pairs: [],
+      exchanges: [],
+      conversation_diff: [],
       payload_snippets: [],
       timeline: [],
       processes: [],
@@ -1685,19 +1780,22 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
   });
 
   const requestResponsePairs = [];
+  const exchanges = [];
   const pairCount = Math.max(httpRequests.length, httpResponses.length);
   for (let index = 0; index < pairCount; index += 1) {
     const request = httpRequests[index] || null;
     const response = httpResponses[index] || null;
+    const exchange = buildFoldedExchangeSample(index, request, response);
     requestResponsePairs.push({
-      title: request?.title || response?.title || "HTTP exchange",
-      body: [request ? `Request: ${request.title}` : "Request: unavailable", response ? `Response: ${response.title}` : "Response: unavailable"].join(" | "),
-      status: request && response ? "complete" : "partial",
-      request_title: request?.title || null,
-      request_body: request?.body || null,
-      response_title: response?.title || null,
-      response_body: response?.body || null,
+      title: exchange.title || "HTTP exchange",
+      body: exchange.summary || "Exchange summary unavailable",
+      status: exchange.status || "partial",
+      request_title: exchange.request_title || null,
+      request_body: exchange.request_body || null,
+      response_title: exchange.response_title || null,
+      response_body: exchange.response_body || null,
     });
+    exchanges.push(exchange);
   }
 
   const appProtocols = uniqueNonEmpty([...ascendingPackets.map((row) => row?.app_protocol), packet?.app_protocol]);
@@ -1733,6 +1831,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
   });
   if (timeline.length > 12) notes.push(`Timeline preview is truncated to the first 12 event(s) out of ${timeline.length} stream event(s).`);
   const processes = buildStreamProcessRelationshipsSample(ascendingPackets, ascendingAlerts);
+  const conversationDiff = buildConversationDiffSample(httpRequests, httpResponses, payloadSnippets);
 
   return {
     available: Boolean(httpRequests.length || httpResponses.length || payloadSnippets.length),
@@ -1742,12 +1841,16 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
     requests_total: httpRequests.length,
     responses_total: httpResponses.length,
     pairs_total: requestResponsePairs.filter((item) => item.status === "complete").length,
+    folded_exchanges_total: exchanges.length,
+    conversation_diff_total: conversationDiff.length,
     payload_snippets_total: payloadSnippets.length,
     timeline_total: timeline.length,
     stream_packets_total: ascendingPackets.length,
     stream_alerts_total: ascendingAlerts.length,
     stream_processes_total: processes.length,
     request_response_pairs: requestResponsePairs.slice(0, 4),
+    exchanges: exchanges.slice(0, 6),
+    conversation_diff: conversationDiff,
     payload_snippets: payloadSnippets.slice(0, 6),
     timeline: timeline.slice(0, 12),
     processes,
@@ -1766,6 +1869,8 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
 function buildStreamInspection(streamContext) {
   const stream = streamContext || {};
   const pairs = Array.isArray(stream?.request_response_pairs) ? stream.request_response_pairs : Array.isArray(stream?.requestResponsePairs) ? stream.requestResponsePairs : [];
+  const exchanges = Array.isArray(stream?.exchanges) ? stream.exchanges : [];
+  const diffItems = Array.isArray(stream?.conversation_diff) ? stream.conversation_diff : Array.isArray(stream?.conversationDiff) ? stream.conversationDiff : [];
   const snippets = Array.isArray(stream?.payload_snippets) ? stream.payload_snippets : Array.isArray(stream?.payloadSnippets) ? stream.payloadSnippets : [];
   const timeline = Array.isArray(stream?.timeline) ? stream.timeline : [];
   const processes = Array.isArray(stream?.processes) ? stream.processes : [];
@@ -1779,6 +1884,8 @@ function buildStreamInspection(streamContext) {
       { label: "Requests", value: formatNumber(Number(stream?.requests_total ?? stream?.requestsTotal ?? 0)) },
       { label: "Responses", value: formatNumber(Number(stream?.responses_total ?? stream?.responsesTotal ?? 0)) },
       { label: "Paired Exchanges", value: formatNumber(Number(stream?.pairs_total ?? stream?.pairsTotal ?? 0)) },
+      { label: "Folded Exchanges", value: formatNumber(Number(stream?.folded_exchanges_total ?? stream?.foldedExchangesTotal ?? exchanges.length)) },
+      { label: "Conversation Diffs", value: formatNumber(Number(stream?.conversation_diff_total ?? stream?.conversationDiffTotal ?? diffItems.length)) },
       { label: "Payload Snippets", value: formatNumber(Number(stream?.payload_snippets_total ?? stream?.payloadSnippetsTotal ?? 0)) },
       { label: "Timeline Events", value: formatNumber(Number(stream?.timeline_total ?? stream?.timelineTotal ?? timeline.length)) },
       { label: "Stream Packets", value: formatNumber(Number(stream?.stream_packets_total ?? stream?.streamPacketsTotal ?? 0)) },
@@ -1828,6 +1935,26 @@ function buildStreamInspection(streamContext) {
         ].filter(Boolean),
       },
       {
+        title: "Folded Exchanges",
+        items: exchanges.map((item) => ({
+          title: `${cleanText(item?.title) || "Exchange"} | ${sentenceCase(item?.status || "partial")}`,
+          body: cleanText(item?.summary) || cleanText(item?.body) || "Exchange summary unavailable",
+          sections: Array.isArray(item?.sections)
+            ? item.sections.map((section) => ({
+                title: cleanText(section?.title) || "Section",
+                body: cleanText(section?.body) || "No preview available",
+              }))
+            : [],
+        })),
+      },
+      {
+        title: "Conversation Diff",
+        items: diffItems.map((item) => ({
+          title: cleanText(item?.title) || "Conversation change",
+          body: cleanText(item?.body) || "No diff summary available",
+        })),
+      },
+      {
         title: "Stream Timeline",
         items: timeline.map((item) => ({
           title: `${cleanText(item?.title) || "Stream event"}${item?.is_current ? " | Current selection" : ""}`,
@@ -1854,7 +1981,7 @@ function buildStreamInspection(streamContext) {
       },
       {
         title: "Request / Response",
-        items: pairs.map((item) => ({
+        items: exchanges.length ? [] : pairs.map((item) => ({
           title: `${cleanText(item?.title) || "HTTP exchange"} | ${sentenceCase(item?.status || "partial")}`,
           body: [cleanText(item?.request_body), cleanText(item?.response_body)].filter(Boolean).join(" || ") || cleanText(item?.body) || "Exchange summary unavailable",
         })),
