@@ -1171,7 +1171,7 @@ export function buildPacketInspectionContext(packet, packets = [], alerts = []) 
     portCorrelation,
   });
   const behaviorLabels = behaviorEvidence.map((item) => cleanText(item?.label)).filter(Boolean);
-  const streamContext = buildStreamContextSample(packet, relatedPackets.length ? relatedPackets : [packet], flowAlerts, "");
+  const streamContext = buildStreamContextSample(packet, relatedPackets.length ? relatedPackets : [packet], flowAlerts, "", behaviorEvidence);
   const relatedFlows = buildRelatedFlowsSample(packet, packetRows);
   const { sameRemotePackets, sameRemoteAlerts } = buildSameRemoteActivitySample(packet, packetRows, alertRows);
   const alertCorrelation = buildAlertCorrelationSample(flowAlerts, peerAlerts, sameRemoteAlerts);
@@ -1280,7 +1280,8 @@ export function buildAlertInspectionContext(alert, packets = [], alerts = []) {
     anchor,
     Array.isArray(packetContext.related_packets) ? [anchor, ...packetContext.related_packets] : [anchor],
     peerAlerts.filter((row) => relatedAlertMatch(row, anchor, streamPacketIds)),
-    cleanText(alert?.id)
+    cleanText(alert?.id),
+    packetContext.behavior_evidence || []
   );
 
   return {
@@ -1602,6 +1603,189 @@ function buildConversationDiffSample(httpRequests, httpResponses, payloadSnippet
   return items.slice(0, 6);
 }
 
+const STREAM_AUTH_LIKE_TOKENS = ["login", "signin", "auth", "token", "password", "passwd", "username", "otp", "mfa"];
+const STREAM_SENSITIVE_TARGET_TOKENS = ["admin", "config", "debug", "internal", "secret", "reset", "account", "profile"];
+
+function containsStreamToken(value, tokens) {
+  const text = cleanText(value).toLowerCase();
+  return tokens.some((token) => text.includes(token));
+}
+
+function responseStatusClass(statusCode) {
+  const value = readNumber(statusCode);
+  if (value == null || value < 100) return null;
+  return Math.trunc(value / 100);
+}
+
+function isBinaryLikeStreamRow(row) {
+  if (row?.payload_binary_like === true || cleanText(row?.payload_binary_like).toLowerCase() === "true") return true;
+  const entropy = readNumber(row?.payload_entropy);
+  const printableRatio = readNumber(row?.payload_printable_ratio);
+  return entropy != null && entropy >= 6.2 && printableRatio != null && printableRatio <= 0.25;
+}
+
+function createStreamAnomaly({ type, title, severity, confidence, reason, metrics = {}, notes = [] }) {
+  return { type, title, severity, confidence, reason, metrics, notes };
+}
+
+function buildStreamAnomaliesSample({ exchanges, conversationDiff, payloadSnippets, flowPackets, flowAlerts, behaviorEvidence = [] }) {
+  const anomalies = [];
+  const failedExchanges = (Array.isArray(exchanges) ? exchanges : []).filter((exchange) => (readNumber(exchange?.response_status_code) || 0) >= 400);
+  const failedAuthExchanges = failedExchanges.filter((exchange) =>
+    containsStreamToken(exchange?.request_title, STREAM_AUTH_LIKE_TOKENS)
+    || containsStreamToken(exchange?.request_body, STREAM_AUTH_LIKE_TOKENS)
+    || containsStreamToken(exchange?.request_path, STREAM_AUTH_LIKE_TOKENS)
+  );
+  if (failedAuthExchanges.length >= 2) {
+    anomalies.push(createStreamAnomaly({
+      type: "repeated_failed_auth_like",
+      title: "Repeated failed auth-like exchanges",
+      severity: "high",
+      confidence: "high",
+      reason: `${failedAuthExchanges.length} auth-like exchange(s) ended with non-success responses inside the same stream.`,
+      metrics: {
+        failed_auth_exchanges: failedAuthExchanges.length,
+        response_codes: failedAuthExchanges.slice(0, 4).map((item) => readNumber(item?.response_status_code)),
+        stream_alerts_total: Array.isArray(flowAlerts) ? flowAlerts.length : 0,
+      },
+      notes: ["Authentication-like request targets or payloads repeatedly failed inside one conversation."],
+    }));
+  } else if (failedExchanges.length >= 2) {
+    anomalies.push(createStreamAnomaly({
+      type: "repeated_failed_exchanges",
+      title: "Repeated failed exchanges",
+      severity: "medium",
+      confidence: "high",
+      reason: `${failedExchanges.length} exchange(s) in this stream ended with non-success responses.`,
+      metrics: {
+        failed_exchanges: failedExchanges.length,
+        response_codes: failedExchanges.slice(0, 4).map((item) => readNumber(item?.response_status_code)),
+        stream_alerts_total: Array.isArray(flowAlerts) ? flowAlerts.length : 0,
+      },
+      notes: ["Repeated response failures are visible without needing broader correlation."],
+    }));
+  }
+
+  for (let index = 1; index < exchanges.length; index += 1) {
+    const previous = exchanges[index - 1];
+    const current = exchanges[index];
+    const previousClass = responseStatusClass(previous?.response_status_code);
+    const currentClass = responseStatusClass(current?.response_status_code);
+    if (previousClass == null || currentClass == null || previousClass === currentClass) continue;
+    if ((previousClass <= 3 && currentClass <= 3) || (previousClass >= 4 && currentClass >= 4)) continue;
+    anomalies.push(createStreamAnomaly({
+      type: "abrupt_response_status_change",
+      title: "Abrupt response status change",
+      severity: currentClass >= 4 ? "medium" : "low",
+      confidence: "high",
+      reason: `Response status moved from ${cleanText(previous?.response_title) || "-"} to ${cleanText(current?.response_title) || "-"} within the same stream.`,
+      metrics: {
+        previous_status: readNumber(previous?.response_status_code),
+        current_status: readNumber(current?.response_status_code),
+        exchange_index: index + 1,
+      },
+      notes: ["A sharp shift between success and failure responses often deserves manual review."],
+    }));
+    break;
+  }
+
+  for (let index = 1; index < exchanges.length; index += 1) {
+    const previous = exchanges[index - 1];
+    const current = exchanges[index];
+    const previousHost = cleanText(previous?.request_host).toLowerCase();
+    const currentHost = cleanText(current?.request_host).toLowerCase();
+    const previousPath = cleanText(previous?.request_path).toLowerCase();
+    const currentPath = cleanText(current?.request_path).toLowerCase();
+    const hostChanged = Boolean(previousHost && currentHost && previousHost !== currentHost);
+    const sensitiveShift = previousPath !== currentPath && containsStreamToken(currentPath, STREAM_SENSITIVE_TARGET_TOKENS);
+    if (!hostChanged && !sensitiveShift) continue;
+    anomalies.push(createStreamAnomaly({
+      type: "unusual_request_target_shift",
+      title: "Unusual request target shift",
+      severity: "medium",
+      confidence: "medium",
+      reason: `Request target changed from ${cleanText(previous?.request_title) || "-"} to ${cleanText(current?.request_title) || "-"} inside one stream.`,
+      metrics: {
+        previous_target: cleanText(previous?.request_title) || null,
+        current_target: cleanText(current?.request_title) || null,
+        host_changed: hostChanged,
+      },
+      notes: ["Target shifts that jump toward sensitive paths or a different host can be noteworthy in a single conversation."],
+    }));
+    break;
+  }
+
+  if ((Array.isArray(conversationDiff) ? conversationDiff : []).some((item) => cleanText(item?.title) === "Payload snippet changed")) {
+    const payloadWithAuth = (Array.isArray(payloadSnippets) ? payloadSnippets : []).some((item) => containsStreamToken(item?.snippet, STREAM_AUTH_LIKE_TOKENS));
+    if (payloadWithAuth) {
+      anomalies.push(createStreamAnomaly({
+        type: "suspicious_payload_preview_change",
+        title: "Suspicious payload preview change",
+        severity: "medium",
+        confidence: "medium",
+        reason: "Payload previews changed within the stream while auth-like content was present.",
+        metrics: {
+          payload_snippets_total: Array.isArray(payloadSnippets) ? payloadSnippets.length : 0,
+          auth_like_preview: true,
+        },
+        notes: ["Preview changes around credential-like content can indicate retries, mutation, or tampering."],
+      }));
+    }
+  }
+
+  const binaryStates = (Array.isArray(flowPackets) ? flowPackets : [])
+    .filter((row) => cleanText(row?.payload_ascii) || row?.payload_entropy != null)
+    .map((row) => isBinaryLikeStreamRow(row));
+  if (binaryStates.length && binaryStates.some(Boolean) && binaryStates.some((state) => !state)) {
+    anomalies.push(createStreamAnomaly({
+      type: "binary_shift",
+      title: "Binary or encrypted shift inside stream",
+      severity: "medium",
+      confidence: "medium",
+      reason: "Payload presentation shifted between printable and binary/encrypted-looking content inside one stream.",
+      metrics: {
+        binary_like_packets: binaryStates.filter(Boolean).length,
+        printable_packets: binaryStates.filter((state) => !state).length,
+      },
+      notes: ["This cue only appears when payload metadata clearly shows both printable and binary-like phases."],
+    }));
+  }
+
+  const timestamps = (Array.isArray(flowPackets) ? flowPackets : []).map((row) => parseTimestamp(row?.ts)).filter((value) => Number.isFinite(value));
+  const deltas = [];
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const delta = timestamps[index] - timestamps[index - 1];
+    if (delta > 0) deltas.push(delta / 1000);
+  }
+  if (deltas.length >= 3) {
+    const ordered = [...deltas].sort((left, right) => left - right);
+    const median = ordered[Math.floor(ordered.length / 2)];
+    const maxGap = Math.max(...deltas);
+    const minGap = Math.min(...deltas);
+    if (median > 0 && maxGap >= Math.max(2, median * 3) && minGap > 0 && maxGap / minGap >= 4) {
+      const notes = ["Large timing gaps can indicate retries, stalls, or operator-driven interaction changes."];
+      if ((Array.isArray(behaviorEvidence) ? behaviorEvidence : []).some((item) => cleanText(item?.id) === "beacon_like_repetition")) {
+        notes.push("Broader behavior evidence already flagged rhythmic repetition around this stream.");
+      }
+      anomalies.push(createStreamAnomaly({
+        type: "timing_irregularity",
+        title: "Timing or rhythm irregularity",
+        severity: "low",
+        confidence: "medium",
+        reason: "Packet timing inside the stream shows a sharp gap change compared with the surrounding rhythm.",
+        metrics: {
+          median_gap_s: Number(median.toFixed(3)),
+          max_gap_s: Number(maxGap.toFixed(3)),
+          min_gap_s: Number(minGap.toFixed(3)),
+        },
+        notes,
+      }));
+    }
+  }
+
+  return anomalies.slice(0, 6);
+}
+
 function buildStreamTimelinePacketEventSample(row, selectedPacketId = "") {
   const proto = normalizeProto(row?.proto) || "OTHER";
   const direction = formatDirection(row?.direction);
@@ -1716,7 +1900,7 @@ function findStreamNeighborId(items, currentId, kind, step) {
   return cleanText(scoped[nextIndex]?.id) || null;
 }
 
-function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], selectedAlertId = "") {
+function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], selectedAlertId = "", behaviorEvidence = []) {
   const ascendingPackets = [...(flowPackets || [])]
     .filter(Boolean)
     .sort((left, right) => {
@@ -1742,6 +1926,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
       pairs_total: 0,
       folded_exchanges_total: 0,
       conversation_diff_total: 0,
+      anomalies_total: 0,
       payload_snippets_total: 0,
       timeline_total: 0,
       stream_packets_total: 0,
@@ -1750,6 +1935,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
       request_response_pairs: [],
       exchanges: [],
       conversation_diff: [],
+      anomalies: [],
       payload_snippets: [],
       timeline: [],
       processes: [],
@@ -1832,6 +2018,14 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
   if (timeline.length > 12) notes.push(`Timeline preview is truncated to the first 12 event(s) out of ${timeline.length} stream event(s).`);
   const processes = buildStreamProcessRelationshipsSample(ascendingPackets, ascendingAlerts);
   const conversationDiff = buildConversationDiffSample(httpRequests, httpResponses, payloadSnippets);
+  const anomalies = buildStreamAnomaliesSample({
+    exchanges,
+    conversationDiff,
+    payloadSnippets,
+    flowPackets: ascendingPackets,
+    flowAlerts: ascendingAlerts,
+    behaviorEvidence,
+  });
 
   return {
     available: Boolean(httpRequests.length || httpResponses.length || payloadSnippets.length),
@@ -1843,6 +2037,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
     pairs_total: requestResponsePairs.filter((item) => item.status === "complete").length,
     folded_exchanges_total: exchanges.length,
     conversation_diff_total: conversationDiff.length,
+    anomalies_total: anomalies.length,
     payload_snippets_total: payloadSnippets.length,
     timeline_total: timeline.length,
     stream_packets_total: ascendingPackets.length,
@@ -1851,6 +2046,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
     request_response_pairs: requestResponsePairs.slice(0, 4),
     exchanges: exchanges.slice(0, 6),
     conversation_diff: conversationDiff,
+    anomalies,
     payload_snippets: payloadSnippets.slice(0, 6),
     timeline: timeline.slice(0, 12),
     processes,
@@ -1871,6 +2067,7 @@ function buildStreamInspection(streamContext) {
   const pairs = Array.isArray(stream?.request_response_pairs) ? stream.request_response_pairs : Array.isArray(stream?.requestResponsePairs) ? stream.requestResponsePairs : [];
   const exchanges = Array.isArray(stream?.exchanges) ? stream.exchanges : [];
   const diffItems = Array.isArray(stream?.conversation_diff) ? stream.conversation_diff : Array.isArray(stream?.conversationDiff) ? stream.conversationDiff : [];
+  const anomalyItems = Array.isArray(stream?.anomalies) ? stream.anomalies : [];
   const snippets = Array.isArray(stream?.payload_snippets) ? stream.payload_snippets : Array.isArray(stream?.payloadSnippets) ? stream.payloadSnippets : [];
   const timeline = Array.isArray(stream?.timeline) ? stream.timeline : [];
   const processes = Array.isArray(stream?.processes) ? stream.processes : [];
@@ -1886,6 +2083,7 @@ function buildStreamInspection(streamContext) {
       { label: "Paired Exchanges", value: formatNumber(Number(stream?.pairs_total ?? stream?.pairsTotal ?? 0)) },
       { label: "Folded Exchanges", value: formatNumber(Number(stream?.folded_exchanges_total ?? stream?.foldedExchangesTotal ?? exchanges.length)) },
       { label: "Conversation Diffs", value: formatNumber(Number(stream?.conversation_diff_total ?? stream?.conversationDiffTotal ?? diffItems.length)) },
+      { label: "Anomalies", value: formatNumber(Number(stream?.anomalies_total ?? stream?.anomaliesTotal ?? anomalyItems.length)) },
       { label: "Payload Snippets", value: formatNumber(Number(stream?.payload_snippets_total ?? stream?.payloadSnippetsTotal ?? 0)) },
       { label: "Timeline Events", value: formatNumber(Number(stream?.timeline_total ?? stream?.timelineTotal ?? timeline.length)) },
       { label: "Stream Packets", value: formatNumber(Number(stream?.stream_packets_total ?? stream?.streamPacketsTotal ?? 0)) },
@@ -1933,6 +2131,28 @@ function buildStreamInspection(streamContext) {
               }
             : null,
         ].filter(Boolean),
+      },
+      {
+        title: "Stream Anomalies",
+        items: anomalyItems.map((item) => ({
+          title: `${cleanText(item?.title) || cleanText(item?.type) || "Stream anomaly"} | ${sentenceCase(item?.severity || "low")} | ${sentenceCase(item?.confidence || "medium")} confidence`,
+          body: [
+            cleanText(item?.reason) || "Stream anomaly evidence available.",
+            Object.entries(item?.metrics || {})
+              .slice(0, 3)
+              .map(([key, value]) => `${sentenceCase(String(key).replaceAll("_", " "))}: ${Array.isArray(value) ? value.filter(Boolean).join(", ") : cleanText(value)}`)
+              .filter((entry) => !entry.endsWith(":"))
+              .join(" | "),
+          ].filter(Boolean).join(" | "),
+          sections: Array.isArray(item?.notes) && item.notes.length
+            ? [
+                {
+                  title: "Analyst Notes",
+                  body: item.notes.map((note) => cleanText(note)).filter(Boolean).join(" | "),
+                },
+              ]
+            : [],
+        })),
       },
       {
         title: "Folded Exchanges",

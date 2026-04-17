@@ -617,6 +617,15 @@ def _build_packet_flow_context(packet: dict[str, Any], packet_rows: list[dict[st
         sorted_flow_alerts,
         selected_packet_id=selected_packet_id,
     )
+    stream_context["anomalies"] = _stream_anomalies(
+        exchanges=list(stream_context.get("exchanges") or []),
+        conversation_diff=list(stream_context.get("conversation_diff") or []),
+        payload_snippets=list(stream_context.get("payload_snippets") or []),
+        flow_packets=list(reversed(sorted_flow_packets)),
+        flow_alerts=sorted_flow_alerts,
+        behavior_evidence=behavior_evidence,
+    )
+    stream_context["anomalies_total"] = len(stream_context["anomalies"])
 
     return {
         "source": source,
@@ -1417,9 +1426,13 @@ def _folded_exchange_entry(index: int, request: dict[str, Any] | None, response:
         "request_title": request.get("title") if request else None,
         "request_body": request.get("body") if request else None,
         "request_packet_id": request.get("id") if request else None,
+        "request_path": request.get("path") if request else None,
+        "request_host": request.get("host") if request else None,
         "response_title": response.get("title") if response else None,
         "response_body": response.get("body") if response else None,
         "response_packet_id": response.get("id") if response else None,
+        "response_status_code": response.get("status_code") if response else None,
+        "response_content_type": response.get("content_type") if response else None,
         "sections": sections,
     }
 
@@ -1475,6 +1488,229 @@ def _conversation_diff(http_requests: list[dict[str, Any]], http_responses: list
             break
 
     return items[:6]
+
+
+_AUTH_LIKE_TOKENS = {"login", "signin", "auth", "token", "password", "passwd", "username", "otp", "mfa"}
+_SENSITIVE_TARGET_TOKENS = {"admin", "config", "debug", "internal", "secret", "reset", "account", "profile"}
+
+
+def _contains_stream_token(value: Any, tokens: set[str]) -> bool:
+    text = _normalize_text(value).lower()
+    return any(token in text for token in tokens)
+
+
+def _response_status_class(status_code: Any) -> int | None:
+    value = _safe_int(status_code)
+    if value is None or value < 100:
+        return None
+    return value // 100
+
+
+def _stream_binary_like(row: dict[str, Any]) -> bool:
+    binary_like = _bool_or_none(row.get("payload_binary_like"))
+    if binary_like is True:
+        return True
+    entropy = _safe_float(row.get("payload_entropy"))
+    printable_ratio = _safe_float(row.get("payload_printable_ratio"))
+    return entropy is not None and entropy >= 6.2 and printable_ratio is not None and printable_ratio <= 0.25
+
+
+def _stream_anomaly(
+    anomaly_type: str,
+    *,
+    title: str,
+    severity: str,
+    confidence: str,
+    reason: str,
+    metrics: dict[str, Any],
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": anomaly_type,
+        "title": title,
+        "severity": severity,
+        "confidence": confidence,
+        "reason": reason,
+        "metrics": metrics,
+        "notes": notes or [],
+    }
+
+
+def _stream_anomalies(
+    *,
+    exchanges: list[dict[str, Any]],
+    conversation_diff: list[dict[str, Any]],
+    payload_snippets: list[dict[str, Any]],
+    flow_packets: list[dict[str, Any]],
+    flow_alerts: list[dict[str, Any]],
+    behavior_evidence: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    anomalies: list[dict[str, Any]] = []
+    behavior_evidence = behavior_evidence or []
+
+    failed_exchanges = [
+        exchange
+        for exchange in exchanges
+        if (_safe_int(exchange.get("response_status_code")) or 0) >= 400
+    ]
+    failed_auth_exchanges = [
+        exchange
+        for exchange in failed_exchanges
+        if _contains_stream_token(exchange.get("request_title"), _AUTH_LIKE_TOKENS)
+        or _contains_stream_token(exchange.get("request_body"), _AUTH_LIKE_TOKENS)
+        or _contains_stream_token(exchange.get("request_path"), _AUTH_LIKE_TOKENS)
+    ]
+    if len(failed_auth_exchanges) >= 2:
+        anomalies.append(
+            _stream_anomaly(
+                "repeated_failed_auth_like",
+                title="Repeated failed auth-like exchanges",
+                severity="high",
+                confidence="high",
+                reason=f"{len(failed_auth_exchanges)} auth-like exchange(s) ended with non-success responses inside the same stream.",
+                metrics={
+                    "failed_auth_exchanges": len(failed_auth_exchanges),
+                    "response_codes": [_safe_int(item.get('response_status_code')) for item in failed_auth_exchanges[:4]],
+                    "stream_alerts_total": len(flow_alerts),
+                },
+                notes=["Authentication-like request targets or payloads repeatedly failed inside one conversation."],
+            )
+        )
+    elif len(failed_exchanges) >= 2:
+        anomalies.append(
+            _stream_anomaly(
+                "repeated_failed_exchanges",
+                title="Repeated failed exchanges",
+                severity="medium",
+                confidence="high",
+                reason=f"{len(failed_exchanges)} exchange(s) in this stream ended with non-success responses.",
+                metrics={
+                    "failed_exchanges": len(failed_exchanges),
+                    "response_codes": [_safe_int(item.get('response_status_code')) for item in failed_exchanges[:4]],
+                    "stream_alerts_total": len(flow_alerts),
+                },
+                notes=["Repeated response failures are visible without needing broader correlation."],
+            )
+        )
+
+    for index in range(1, len(exchanges)):
+        previous = exchanges[index - 1]
+        current = exchanges[index]
+        previous_class = _response_status_class(previous.get("response_status_code"))
+        current_class = _response_status_class(current.get("response_status_code"))
+        if previous_class is None or current_class is None or previous_class == current_class:
+            continue
+        if {previous_class, current_class}.issubset({2, 3}) or {previous_class, current_class}.issubset({4, 5}):
+            continue
+        anomalies.append(
+            _stream_anomaly(
+                "abrupt_response_status_change",
+                title="Abrupt response status change",
+                severity="medium" if current_class and current_class >= 4 else "low",
+                confidence="high",
+                reason=f"Response status moved from {previous.get('response_title') or '-'} to {current.get('response_title') or '-'} within the same stream.",
+                metrics={
+                    "previous_status": _safe_int(previous.get("response_status_code")),
+                    "current_status": _safe_int(current.get("response_status_code")),
+                    "exchange_index": index + 1,
+                },
+                notes=["A sharp shift between success and failure responses often deserves manual review."],
+            )
+        )
+        break
+
+    for index in range(1, len(exchanges)):
+        previous = exchanges[index - 1]
+        current = exchanges[index]
+        previous_host = _normalize_text(previous.get("request_host")).lower()
+        current_host = _normalize_text(current.get("request_host")).lower()
+        previous_path = _normalize_text(previous.get("request_path")).lower()
+        current_path = _normalize_text(current.get("request_path")).lower()
+        host_changed = bool(previous_host and current_host and previous_host != current_host)
+        sensitive_shift = previous_path != current_path and _contains_stream_token(current_path, _SENSITIVE_TARGET_TOKENS)
+        if not host_changed and not sensitive_shift:
+            continue
+        anomalies.append(
+            _stream_anomaly(
+                "unusual_request_target_shift",
+                title="Unusual request target shift",
+                severity="medium",
+                confidence="medium",
+                reason=f"Request target changed from {previous.get('request_title') or '-'} to {current.get('request_title') or '-'} inside one stream.",
+                metrics={
+                    "previous_target": previous.get("request_title"),
+                    "current_target": current.get("request_title"),
+                    "host_changed": host_changed,
+                },
+                notes=["Target shifts that jump toward sensitive paths or a different host can be noteworthy in a single conversation."],
+            )
+        )
+        break
+
+    if any(item.get("title") == "Payload snippet changed" for item in conversation_diff):
+        payload_with_auth = any(_contains_stream_token(item.get("snippet"), _AUTH_LIKE_TOKENS) for item in payload_snippets)
+        if payload_with_auth:
+            anomalies.append(
+                _stream_anomaly(
+                    "suspicious_payload_preview_change",
+                    title="Suspicious payload preview change",
+                    severity="medium",
+                    confidence="medium",
+                    reason="Payload previews changed within the stream while auth-like content was present.",
+                    metrics={
+                        "payload_snippets_total": len(payload_snippets),
+                        "auth_like_preview": True,
+                    },
+                    notes=["Preview changes around credential-like content can indicate retries, mutation, or tampering."],
+                )
+            )
+
+    binary_states = [_stream_binary_like(row) for row in flow_packets if _normalize_text(row.get("payload_ascii")) or row.get("payload_entropy") not in (None, "")]
+    if binary_states and any(binary_states) and not all(binary_states):
+        anomalies.append(
+            _stream_anomaly(
+                "binary_shift",
+                title="Binary or encrypted shift inside stream",
+                severity="medium",
+                confidence="medium",
+                reason="Payload presentation shifted between printable and binary/encrypted-looking content inside one stream.",
+                metrics={
+                    "binary_like_packets": sum(1 for state in binary_states if state),
+                    "printable_packets": sum(1 for state in binary_states if not state),
+                },
+                notes=["This cue only appears when payload metadata clearly shows both printable and binary-like phases."],
+            )
+        )
+
+    timestamps = [_parse_timestamp_seconds(row.get("ts")) for row in flow_packets]
+    timestamps = [value for value in timestamps if value is not None]
+    deltas = [timestamps[index] - timestamps[index - 1] for index in range(1, len(timestamps)) if timestamps[index] - timestamps[index - 1] > 0]
+    if len(deltas) >= 3:
+        ordered = sorted(deltas)
+        median = ordered[len(ordered) // 2]
+        max_delta = max(deltas)
+        min_delta = min(deltas)
+        if median > 0 and max_delta >= max(2.0, median * 3.0) and min_delta > 0 and max_delta / min_delta >= 4.0:
+            notes = ["Large timing gaps can indicate retries, stalls, or operator-driven interaction changes."]
+            if any(_normalize_text(item.get("id")) == "beacon_like_repetition" for item in behavior_evidence):
+                notes.append("Broader behavior evidence already flagged rhythmic repetition around this stream.")
+            anomalies.append(
+                _stream_anomaly(
+                    "timing_irregularity",
+                    title="Timing or rhythm irregularity",
+                    severity="low",
+                    confidence="medium",
+                    reason="Packet timing inside the stream shows a sharp gap change compared with the surrounding rhythm.",
+                    metrics={
+                        "median_gap_s": round(median, 3),
+                        "max_gap_s": round(max_delta, 3),
+                        "min_gap_s": round(min_delta, 3),
+                    },
+                    notes=notes,
+                )
+            )
+
+    return anomalies[:6]
 
 
 def _stream_timeline_packet_event(row: dict[str, Any], *, selected_packet_id: str = "") -> dict[str, Any]:
@@ -1629,6 +1865,7 @@ def _build_stream_context(
             "pairs_total": 0,
             "folded_exchanges_total": 0,
             "conversation_diff_total": 0,
+            "anomalies_total": 0,
             "payload_snippets_total": 0,
             "timeline_total": 0,
             "stream_packets_total": 0,
@@ -1637,6 +1874,7 @@ def _build_stream_context(
             "request_response_pairs": [],
             "exchanges": [],
             "conversation_diff": [],
+            "anomalies": [],
             "payload_snippets": [],
             "timeline": [],
             "processes": [],
@@ -1829,6 +2067,15 @@ def _build_alert_investigation_context(
         selected_packet_id=_normalize_text(linked_packet.get("id")) if linked_packet else "",
         selected_alert_id=selected_alert_id,
     )
+    stream_context["anomalies"] = _stream_anomalies(
+        exchanges=list(stream_context.get("exchanges") or []),
+        conversation_diff=list(stream_context.get("conversation_diff") or []),
+        payload_snippets=list(stream_context.get("payload_snippets") or []),
+        flow_packets=list(reversed(_sort_rows_by_time([dict(row) for row in flow_packets]))),
+        flow_alerts=list(reversed(sorted_flow_alerts)),
+        behavior_evidence=list(flow_context.get("behavior_evidence") or []),
+    )
+    stream_context["anomalies_total"] = len(stream_context["anomalies"])
 
     return {
         **flow_context,

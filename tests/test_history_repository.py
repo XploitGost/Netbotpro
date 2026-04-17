@@ -128,6 +128,21 @@ class _ConversationDiffSnifferService:
         return []
 
 
+class _StreamAnomalySnifferService:
+    def recent_packets(self):
+        return [
+            {"id": "anom-4", "ts": "10:02:06", "src": "93.184.216.34", "dst": "192.168.1.91", "proto": "TCP", "sport": 443, "dport": 54100, "length": 180, "summary": "auth-response-2", "remote_ip": "93.184.216.34", "direction": "INCOMING", "app_protocol": "HTTP", "http_status": 403, "http_reason": "Forbidden", "http_content_type": "text/html", "payload_ascii": "HTTP/1.1 403 Forbidden", "process_name": "browser.exe", "pid": 5002},
+            {"id": "anom-3", "ts": "10:02:05", "src": "192.168.1.91", "dst": "93.184.216.34", "proto": "TCP", "sport": 54100, "dport": 443, "length": 145, "summary": "auth-request-2", "remote_ip": "93.184.216.34", "direction": "OUTGOING", "app_protocol": "HTTP", "http_method": "POST", "http_host": "example.com", "http_path": "/login", "payload_ascii": "POST /login HTTP/1.1 username=admin", "process_name": "browser.exe", "pid": 5002},
+            {"id": "anom-2", "ts": "10:02:01", "src": "93.184.216.34", "dst": "192.168.1.91", "proto": "TCP", "sport": 443, "dport": 54100, "length": 180, "summary": "auth-response-1", "remote_ip": "93.184.216.34", "direction": "INCOMING", "app_protocol": "HTTP", "http_status": 401, "http_reason": "Unauthorized", "http_content_type": "text/html", "payload_ascii": "HTTP/1.1 401 Unauthorized", "process_name": "browser.exe", "pid": 5002},
+            {"id": "anom-1", "ts": "10:02:00", "src": "192.168.1.91", "dst": "93.184.216.34", "proto": "TCP", "sport": 54100, "dport": 443, "length": 145, "summary": "auth-request-1", "remote_ip": "93.184.216.34", "direction": "OUTGOING", "app_protocol": "HTTP", "http_method": "POST", "http_host": "example.com", "http_path": "/login", "payload_ascii": "POST /login HTTP/1.1 password=guess", "process_name": "browser.exe", "pid": 5002},
+        ]
+
+    def recent_alerts(self):
+        return [
+            {"id": "anom-alert-1", "ts": "10:02:06", "src": "93.184.216.34", "dst": "192.168.1.91", "proto": "TCP", "sport": 443, "dport": 54100, "direction": "INCOMING", "attack_type": "Auth Failure Burst", "score": 0.81, "detail": "Repeated auth failures in stream", "severity": "HIGH", "engine": "RULE", "packet_id": "anom-4", "remote_ip": "93.184.216.34", "process_name": "browser.exe", "pid": 5002},
+        ]
+
+
 class _AlertCorrelationSnifferService:
     def recent_packets(self):
         return [
@@ -416,6 +431,7 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
         self.assertEqual(context["stream_context"]["pairs_total"], 0)
         self.assertEqual(context["stream_context"]["payload_snippets_total"], 2)
         self.assertEqual(context["stream_context"]["timeline_total"], 2)
+        self.assertEqual(context["stream_context"]["anomalies_total"], 0)
         self.assertTrue(context["stream_context"]["notes"])
 
     def test_memory_packet_flow_context_builds_folded_exchanges_and_conversation_diff(self):
@@ -432,6 +448,33 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
         self.assertIn("Request target changed", diff_titles)
         self.assertIn("Response status changed", diff_titles)
         self.assertIn("Payload snippet changed", diff_titles)
+        anomaly_titles = {item["title"] for item in context["stream_context"]["anomalies"]}
+        self.assertIn("Abrupt response status change", anomaly_titles)
+        self.assertIn("Unusual request target shift", anomaly_titles)
+        self.assertIn("Suspicious payload preview change", anomaly_titles)
+
+    def test_memory_packet_flow_context_detects_stream_anomaly_cues(self):
+        repository = MemoryHistoryRepository(_StreamAnomalySnifferService())
+
+        context = repository.get_packet_flow_context("anom-4")
+
+        self.assertIsNotNone(context)
+        self.assertGreaterEqual(context["stream_context"]["anomalies_total"], 2)
+        anomaly_types = {item["type"] for item in context["stream_context"]["anomalies"]}
+        self.assertIn("repeated_failed_auth_like", anomaly_types)
+        self.assertIn("timing_irregularity", anomaly_types)
+        auth_item = next(item for item in context["stream_context"]["anomalies"] if item["type"] == "repeated_failed_auth_like")
+        self.assertEqual(auth_item["severity"], "high")
+        self.assertEqual(auth_item["confidence"], "high")
+
+    def test_memory_alert_context_keeps_stream_anomaly_interpretation(self):
+        repository = MemoryHistoryRepository(_StreamAnomalySnifferService())
+
+        context = repository.get_alert_context("anom-alert-1")
+
+        self.assertIsNotNone(context)
+        self.assertGreaterEqual(context["stream_context"]["anomalies_total"], 2)
+        self.assertTrue(any(item["type"] == "repeated_failed_auth_like" for item in context["stream_context"]["anomalies"]))
 
 
 class SQLiteHistoryRepositoryTests(unittest.TestCase):
@@ -1128,6 +1171,64 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             self.assertEqual(context["stream_context"]["timeline_total"], 4)
             self.assertEqual(context["stream_context"]["navigation"]["previous_packet_id"], "3")
             self.assertEqual(context["stream_context"]["navigation"]["next_packet_id"], None)
+
+    def test_sqlite_packet_flow_context_preserves_stream_anomaly_parity(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "history.db"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE packets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts TEXT,
+                        src TEXT,
+                        dst TEXT,
+                        proto TEXT,
+                        sport INTEGER,
+                        dport INTEGER,
+                        direction TEXT,
+                        length INTEGER,
+                        summary TEXT,
+                        remote_ip TEXT,
+                        app_protocol TEXT,
+                        http_method TEXT,
+                        http_host TEXT,
+                        http_path TEXT,
+                        http_status INTEGER,
+                        http_reason TEXT,
+                        http_content_type TEXT,
+                        payload_ascii TEXT
+                    )
+                    """
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO packets (
+                        ts, src, dst, proto, sport, dport, direction, length, summary, remote_ip,
+                        app_protocol, http_method, http_host, http_path, http_status, http_reason,
+                        http_content_type, payload_ascii
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        ("10:02:00", "192.168.1.91", "93.184.216.34", "TCP", 54100, 443, "OUTGOING", 145, "auth-request-1", "93.184.216.34", "HTTP", "POST", "example.com", "/login", None, None, None, "POST /login HTTP/1.1 password=guess"),
+                        ("10:02:01", "93.184.216.34", "192.168.1.91", "TCP", 443, 54100, "INCOMING", 180, "auth-response-1", "93.184.216.34", "HTTP", None, None, None, 401, "Unauthorized", "text/html", "HTTP/1.1 401 Unauthorized"),
+                        ("10:02:05", "192.168.1.91", "93.184.216.34", "TCP", 54100, 443, "OUTGOING", 145, "auth-request-2", "93.184.216.34", "HTTP", "POST", "example.com", "/login", None, None, None, "POST /login HTTP/1.1 username=admin"),
+                        ("10:02:06", "93.184.216.34", "192.168.1.91", "TCP", 443, 54100, "INCOMING", 180, "auth-response-2", "93.184.216.34", "HTTP", None, None, None, 403, "Forbidden", "text/html", "HTTP/1.1 403 Forbidden"),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            repository = SQLiteHistoryRepository(db_path=str(db_path))
+            context = repository.get_packet_flow_context("4")
+
+            self.assertEqual(context["stream_context"]["anomalies_total"], 2)
+            anomaly_types = {item["type"] for item in context["stream_context"]["anomalies"]}
+            self.assertIn("repeated_failed_auth_like", anomaly_types)
+            self.assertIn("timing_irregularity", anomaly_types)
 
     def test_sqlite_history_detail_rehydrates_protocol_evidence(self):
         with tempfile.TemporaryDirectory() as td:
