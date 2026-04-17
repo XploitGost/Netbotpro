@@ -69,6 +69,7 @@ export function useApiClient(localToken) {
     getReports: () => request("/reports"),
     runTraceroute: (payload) => request("/traceroute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
     exportSession: (payload) => request("/exports/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    exportInvestigation: (payload) => request("/exports/investigation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
     downloadExport: async (exportPath) => {
       const res = await fetch(`${apiBase}/exports/download?path=${encodeURIComponent(exportPath)}`, {
         headers: buildAuthHeaders(localToken),

@@ -17,12 +17,15 @@ import { TraceroutePanel } from "./components/TraceroutePanel";
 import { PAGE_SIZE, useDashboardController } from "./hooks/useDashboardController";
 import { buildAlertInspectionContext, buildAlertInspectionModel, buildCaptureInspectionContext, buildPacketInspectionContext, buildPacketInspectionModel } from "./lib/inspectionModel";
 
-function PageSection({ title, subtitle, children, wide = false, fullWidth = false }) {
+function PageSection({ title, subtitle, children, wide = false, fullWidth = false, actions = null }) {
   return (
     <section className={`card page-card ${wide ? "page-card-wide" : ""} ${fullWidth ? "page-card-full" : ""}`}>
-      <div className="page-card-head">
-        <h2>{title}</h2>
-        {subtitle ? <p className="muted">{subtitle}</p> : null}
+      <div className={`page-card-head ${actions ? "page-card-head-with-actions" : ""}`}>
+        <div>
+          <h2>{title}</h2>
+          {subtitle ? <p className="muted">{subtitle}</p> : null}
+        </div>
+        {actions ? <div className="page-card-head-actions">{actions}</div> : null}
       </div>
       {children}
     </section>
@@ -49,6 +52,19 @@ function normalizeInspectCopy(value) {
     .replaceAll("\u00e2\u20ac\u00a2", "|")
     .replaceAll("\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a2", "|")
     .trim();
+}
+
+function createInvestigationExportPayload({ kind, id, model }) {
+  return {
+    format: "html",
+    kind,
+    id,
+    headline: model?.headline || `${kind} investigation`,
+    summary_text: model?.summaryText || model?.interpretedSummary || "",
+    interpreted_summary: model?.interpretedSummary || model?.summaryText || "",
+    analyst_cards: Array.isArray(model?.analystCards) ? model.analystCards : [],
+    model,
+  };
 }
 
 function App() {
@@ -109,6 +125,7 @@ function App() {
     saveSettings,
     runTraceroute,
     exportSession,
+    exportInvestigation,
     downloadExport,
     runOfflineAnalysis,
     loadPacketDetail,
@@ -212,6 +229,28 @@ function App() {
             tone: selectedAlert ? "warning" : "neutral",
           },
         ];
+  const canExportPacket = Boolean(selectedPacketId) && !packetInspection.empty;
+  const canExportAlert = Boolean(selectedAlertId) && !alertInspection.empty;
+  const inspectActions = (
+    <div className="actions-row">
+      <button
+        type="button"
+        className="secondary"
+        disabled={!canExportPacket}
+        onClick={() => exportInvestigation(createInvestigationExportPayload({ kind: "packet", id: selectedPacketId, model: packetInspection }))}
+      >
+        Export Packet Report
+      </button>
+      <button
+        type="button"
+        className="secondary"
+        disabled={!canExportAlert}
+        onClick={() => exportInvestigation(createInvestigationExportPayload({ kind: "alert", id: selectedAlertId, model: alertInspection }))}
+      >
+        Export Alert Report
+      </button>
+    </div>
+  );
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -266,7 +305,7 @@ function App() {
 
   const inspectPage = (
     <section className="page-grid page-grid-inspect">
-      <PageSection title="Analyst Summary" subtitle="Fast answers for the packet or alert you are inspecting" fullWidth>
+      <PageSection title="Analyst Summary" subtitle="Fast answers for the packet or alert you are inspecting" fullWidth actions={inspectActions}>
         <div className="inspect-summary-grid">
           {inspectSummaryCards.map((card) => (
             <InspectSummaryCard

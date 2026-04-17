@@ -13,6 +13,7 @@ export function ExportPanel({ error, exportInfo, onDownload, onExport }) {
           <div className="export-box">
             <p className="muted">Last export</p>
             <p>{exportInfo.path}</p>
+            <p className="muted">{exportInfo.kind ? `${exportInfo.kind} report` : `${exportInfo.format} export`}</p>
             <button className="secondary" onClick={() => onDownload(exportInfo.path)}>Download generated file</button>
           </div>
         ) : null}

@@ -431,6 +431,7 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
         self.assertEqual(context["stream_context"]["pairs_total"], 0)
         self.assertEqual(context["stream_context"]["payload_snippets_total"], 2)
         self.assertEqual(context["stream_context"]["timeline_total"], 2)
+        self.assertEqual(context["stream_context"]["exchange_clusters_total"], 0)
         self.assertEqual(context["stream_context"]["anomalies_total"], 0)
         self.assertTrue(context["stream_context"]["notes"])
 
@@ -441,9 +442,13 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
 
         self.assertIsNotNone(context)
         self.assertEqual(context["stream_context"]["folded_exchanges_total"], 2)
+        self.assertEqual(context["stream_context"]["exchange_clusters_total"], 2)
         self.assertEqual(context["stream_context"]["conversation_diff_total"], 3)
         self.assertEqual(context["stream_context"]["exchanges"][0]["sections"][0]["title"], "Request")
         self.assertEqual(context["stream_context"]["exchanges"][0]["sections"][1]["title"], "Response")
+        cluster_titles = {item["title"] for item in context["stream_context"]["exchange_clusters"]}
+        self.assertIn("POST example.com/login -> 2xx", cluster_titles)
+        self.assertIn("GET example.com/admin -> 4xx", cluster_titles)
         diff_titles = {item["title"] for item in context["stream_context"]["conversation_diff"]}
         self.assertIn("Request target changed", diff_titles)
         self.assertIn("Response status changed", diff_titles)
@@ -460,12 +465,14 @@ class MemoryHistoryRepositoryTests(unittest.TestCase):
 
         self.assertIsNotNone(context)
         self.assertGreaterEqual(context["stream_context"]["anomalies_total"], 2)
+        self.assertEqual(context["stream_context"]["exchange_clusters_total"], 1)
         anomaly_types = {item["type"] for item in context["stream_context"]["anomalies"]}
         self.assertIn("repeated_failed_auth_like", anomaly_types)
         self.assertIn("timing_irregularity", anomaly_types)
         auth_item = next(item for item in context["stream_context"]["anomalies"] if item["type"] == "repeated_failed_auth_like")
         self.assertEqual(auth_item["severity"], "high")
         self.assertEqual(auth_item["confidence"], "high")
+        self.assertIn("/login", str(auth_item["metrics"].get("cluster_target")))
 
     def test_memory_alert_context_keeps_stream_anomaly_interpretation(self):
         repository = MemoryHistoryRepository(_StreamAnomalySnifferService())
@@ -1166,8 +1173,10 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             self.assertEqual(context["stream_context"]["responses_total"], 1)
             self.assertEqual(context["stream_context"]["pairs_total"], 1)
             self.assertEqual(context["stream_context"]["folded_exchanges_total"], 1)
+            self.assertEqual(context["stream_context"]["exchange_clusters_total"], 1)
             self.assertEqual(context["stream_context"]["conversation_diff_total"], 0)
             self.assertEqual(context["stream_context"]["request_response_pairs"][0]["response_title"], "200 OK")
+            self.assertEqual(context["stream_context"]["exchange_clusters"][0]["title"], "POST example.com/login -> 2xx")
             self.assertEqual(context["stream_context"]["timeline_total"], 4)
             self.assertEqual(context["stream_context"]["navigation"]["previous_packet_id"], "3")
             self.assertEqual(context["stream_context"]["navigation"]["next_packet_id"], None)
@@ -1226,6 +1235,7 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             context = repository.get_packet_flow_context("4")
 
             self.assertEqual(context["stream_context"]["anomalies_total"], 2)
+            self.assertEqual(context["stream_context"]["exchange_clusters_total"], 1)
             anomaly_types = {item["type"] for item in context["stream_context"]["anomalies"]}
             self.assertIn("repeated_failed_auth_like", anomaly_types)
             self.assertIn("timing_irregularity", anomaly_types)

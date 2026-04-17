@@ -299,6 +299,19 @@ button:hover {
   margin-bottom: 12px;
 }
 
+.page-card-head-with-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.page-card-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .accordion-panel {
   overflow: hidden;
   background: var(--panel-strong);
@@ -1218,9 +1231,14 @@ button:disabled {
   .hero-side,
   .app-nav,
   .panel-toolbar,
-  .focus-header {
+  .focus-header,
+  .page-card-head-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .page-card-head-with-actions {
+    grid-template-columns: 1fr;
   }
 
   .shell {

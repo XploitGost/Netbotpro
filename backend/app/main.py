@@ -32,6 +32,7 @@ from backend.app.security import (
 from backend.app.services.event_bus import EventBus
 from backend.app.services.export_service import ExportService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
+from backend.app.services.investigation_export_service import InvestigationExportService
 from backend.app.services.report_service import ReportService
 from backend.app.services.settings_service import get_settings, update_settings
 from backend.app.services.sniffer_service import CaptureStartUnavailableError, SnifferService
@@ -48,6 +49,7 @@ capture_provider = SystemCaptureProvider()
 sniffer_service = SnifferService(event_bus, capture_provider=capture_provider)
 traceroute_service = TracerouteService()
 export_service = ExportService()
+investigation_export_service = InvestigationExportService()
 history_service = HistoryService(sniffer_service)
 report_service = ReportService()
 logger = logging.getLogger("netbotpro.api")
@@ -407,6 +409,20 @@ def api_export_session(
             alert_rows=sniffer_service.recent_alerts(),
             traceroute_rows=(history[0].get("hops", []) if history else []),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/exports/investigation")
+def api_export_investigation(
+    payload: dict[str, Any],
+    request: Request,
+    _: None = Depends(require_loopback),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    enforce_rate_limit(request, "export_investigation", limit=20, window_sec=60)
+    try:
+        return investigation_export_service.export_report(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

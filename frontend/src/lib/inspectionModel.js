@@ -1550,11 +1550,91 @@ function buildFoldedExchangeSample(index, request, response) {
     request_title: cleanText(request?.title) || null,
     request_body: cleanText(request?.body) || null,
     request_packet_id: cleanText(request?.id) || null,
+    request_path: cleanText(request?.path) || null,
+    request_host: cleanText(request?.host) || null,
     response_title: cleanText(response?.title) || null,
     response_body: cleanText(response?.body) || null,
     response_packet_id: cleanText(response?.id) || null,
+    response_status_code: readNumber(response?.status_code),
+    response_content_type: cleanText(response?.content_type) || null,
     sections,
   };
+}
+
+function buildStreamExchangeClustersSample(exchanges) {
+  const clusters = new Map();
+  (Array.isArray(exchanges) ? exchanges : []).forEach((exchange) => {
+    const requestHost = cleanText(exchange?.request_host).toLowerCase();
+    const requestPath = cleanText(exchange?.request_path);
+    const requestTitle = cleanText(exchange?.request_title);
+    const requestMethod = requestTitle.includes(" ") ? requestTitle.split(" ", 1)[0].toUpperCase() : "";
+    const statusCode = readNumber(exchange?.response_status_code);
+    const statusClass = statusCode != null && statusCode >= 100 ? `${Math.trunc(statusCode / 100)}xx` : "partial";
+    const key = `${requestMethod}|${requestHost}|${requestPath}|${statusClass}`;
+    if (!clusters.has(key)) {
+      clusters.set(key, {
+        id: `cluster-${clusters.size + 1}`,
+        request_method: requestMethod || null,
+        request_host: requestHost || null,
+        request_path: requestPath || null,
+        status_class: statusClass,
+        response_codes: [],
+        exchanges_total: 0,
+        failed_exchanges_total: 0,
+        auth_like: false,
+        example_request: requestTitle || null,
+      });
+    }
+    const cluster = clusters.get(key);
+    cluster.exchanges_total += 1;
+    cluster.auth_like = cluster.auth_like
+      || containsStreamToken(requestTitle, STREAM_AUTH_LIKE_TOKENS)
+      || containsStreamToken(requestPath, STREAM_AUTH_LIKE_TOKENS)
+      || containsStreamToken(exchange?.request_body, STREAM_AUTH_LIKE_TOKENS);
+    if (statusCode != null) {
+      if (!cluster.response_codes.includes(statusCode)) cluster.response_codes.push(statusCode);
+      if (statusCode >= 400) cluster.failed_exchanges_total += 1;
+    }
+  });
+
+  return [...clusters.values()]
+    .sort((left, right) => {
+      const failedDelta = Number(right?.failed_exchanges_total || 0) - Number(left?.failed_exchanges_total || 0);
+      if (failedDelta) return failedDelta;
+      return Number(right?.exchanges_total || 0) - Number(left?.exchanges_total || 0);
+    })
+    .slice(0, 6)
+    .map((cluster) => {
+      const target = cleanText(cluster?.request_path) || cleanText(cluster?.example_request) || "request target unavailable";
+      const hostPrefix = cleanText(cluster?.request_host);
+      const targetLabel = hostPrefix && target.startsWith("/") ? `${hostPrefix}${target}` : target || hostPrefix || "stream target";
+      const requestLabel = `${cleanText(cluster?.request_method)} ${targetLabel}`.trim();
+      const responseCodes = (Array.isArray(cluster?.response_codes) ? cluster.response_codes : []).filter((value) => value != null).slice().sort((left, right) => left - right);
+      const codesLabel = responseCodes.length ? responseCodes.slice(0, 4).join(", ") : "none";
+      return {
+        id: cleanText(cluster?.id) || null,
+        title: `${requestLabel} -> ${cleanText(cluster?.status_class) || "partial"}`,
+        body: `${formatNumber(Number(cluster?.exchanges_total || 0))} exchange(s) | failed ${formatNumber(Number(cluster?.failed_exchanges_total || 0))} | response codes ${codesLabel}`,
+        request_method: cleanText(cluster?.request_method) || null,
+        request_host: hostPrefix || null,
+        request_path: cleanText(cluster?.request_path) || null,
+        status_class: cleanText(cluster?.status_class) || "partial",
+        response_codes: responseCodes.slice(0, 6),
+        exchanges_total: Number(cluster?.exchanges_total || 0),
+        failed_exchanges_total: Number(cluster?.failed_exchanges_total || 0),
+        auth_like: Boolean(cluster?.auth_like),
+        sections: [
+          {
+            title: "Cluster Scope",
+            body: `Target: ${targetLabel} | Status class: ${cleanText(cluster?.status_class) || "partial"} | Exchanges: ${formatNumber(Number(cluster?.exchanges_total || 0))}`,
+          },
+          {
+            title: "Response Evidence",
+            body: `Observed response codes: ${codesLabel}`,
+          },
+        ],
+      };
+    });
 }
 
 function buildConversationDiffSample(httpRequests, httpResponses, payloadSnippets) {
@@ -1628,38 +1708,37 @@ function createStreamAnomaly({ type, title, severity, confidence, reason, metric
   return { type, title, severity, confidence, reason, metrics, notes };
 }
 
-function buildStreamAnomaliesSample({ exchanges, conversationDiff, payloadSnippets, flowPackets, flowAlerts, behaviorEvidence = [] }) {
+function buildStreamAnomaliesSample({ exchanges, exchangeClusters, conversationDiff, payloadSnippets, flowPackets, flowAlerts, behaviorEvidence = [] }) {
   const anomalies = [];
   const failedExchanges = (Array.isArray(exchanges) ? exchanges : []).filter((exchange) => (readNumber(exchange?.response_status_code) || 0) >= 400);
-  const failedAuthExchanges = failedExchanges.filter((exchange) =>
-    containsStreamToken(exchange?.request_title, STREAM_AUTH_LIKE_TOKENS)
-    || containsStreamToken(exchange?.request_body, STREAM_AUTH_LIKE_TOKENS)
-    || containsStreamToken(exchange?.request_path, STREAM_AUTH_LIKE_TOKENS)
-  );
-  if (failedAuthExchanges.length >= 2) {
+  const failedCluster = (Array.isArray(exchangeClusters) ? exchangeClusters : []).find((cluster) => Number(cluster?.failed_exchanges_total || 0) >= 2);
+  const failedAuthCluster = (Array.isArray(exchangeClusters) ? exchangeClusters : []).find((cluster) => cluster?.auth_like && Number(cluster?.failed_exchanges_total || 0) >= 2);
+  if (failedAuthCluster) {
     anomalies.push(createStreamAnomaly({
       type: "repeated_failed_auth_like",
       title: "Repeated failed auth-like exchanges",
       severity: "high",
       confidence: "high",
-      reason: `${failedAuthExchanges.length} auth-like exchange(s) ended with non-success responses inside the same stream.`,
+      reason: `${Number(failedAuthCluster?.failed_exchanges_total || 0)} auth-like exchange(s) repeated against the same request target inside this stream.`,
       metrics: {
-        failed_auth_exchanges: failedAuthExchanges.length,
-        response_codes: failedAuthExchanges.slice(0, 4).map((item) => readNumber(item?.response_status_code)),
+        failed_auth_exchanges: Number(failedAuthCluster?.failed_exchanges_total || 0),
+        cluster_target: cleanText(failedAuthCluster?.title) || null,
+        response_codes: (Array.isArray(failedAuthCluster?.response_codes) ? failedAuthCluster.response_codes : []).slice(0, 4),
         stream_alerts_total: Array.isArray(flowAlerts) ? flowAlerts.length : 0,
       },
       notes: ["Authentication-like request targets or payloads repeatedly failed inside one conversation."],
     }));
-  } else if (failedExchanges.length >= 2) {
+  } else if (failedCluster) {
     anomalies.push(createStreamAnomaly({
       type: "repeated_failed_exchanges",
       title: "Repeated failed exchanges",
       severity: "medium",
       confidence: "high",
-      reason: `${failedExchanges.length} exchange(s) in this stream ended with non-success responses.`,
+      reason: `${Number(failedCluster?.failed_exchanges_total || 0)} exchange(s) repeated on the same clustered request target with non-success responses.`,
       metrics: {
-        failed_exchanges: failedExchanges.length,
-        response_codes: failedExchanges.slice(0, 4).map((item) => readNumber(item?.response_status_code)),
+        failed_exchanges: Number(failedCluster?.failed_exchanges_total || failedExchanges.length),
+        cluster_target: cleanText(failedCluster?.title) || null,
+        response_codes: (Array.isArray(failedCluster?.response_codes) ? failedCluster.response_codes : []).slice(0, 4),
         stream_alerts_total: Array.isArray(flowAlerts) ? flowAlerts.length : 0,
       },
       notes: ["Repeated response failures are visible without needing broader correlation."],
@@ -1925,6 +2004,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
       responses_total: 0,
       pairs_total: 0,
       folded_exchanges_total: 0,
+      exchange_clusters_total: 0,
       conversation_diff_total: 0,
       anomalies_total: 0,
       payload_snippets_total: 0,
@@ -1934,6 +2014,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
       stream_processes_total: 0,
       request_response_pairs: [],
       exchanges: [],
+      exchange_clusters: [],
       conversation_diff: [],
       anomalies: [],
       payload_snippets: [],
@@ -2018,8 +2099,10 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
   if (timeline.length > 12) notes.push(`Timeline preview is truncated to the first 12 event(s) out of ${timeline.length} stream event(s).`);
   const processes = buildStreamProcessRelationshipsSample(ascendingPackets, ascendingAlerts);
   const conversationDiff = buildConversationDiffSample(httpRequests, httpResponses, payloadSnippets);
+  const exchangeClusters = buildStreamExchangeClustersSample(exchanges);
   const anomalies = buildStreamAnomaliesSample({
     exchanges,
+    exchangeClusters,
     conversationDiff,
     payloadSnippets,
     flowPackets: ascendingPackets,
@@ -2036,6 +2119,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
     responses_total: httpResponses.length,
     pairs_total: requestResponsePairs.filter((item) => item.status === "complete").length,
     folded_exchanges_total: exchanges.length,
+    exchange_clusters_total: exchangeClusters.length,
     conversation_diff_total: conversationDiff.length,
     anomalies_total: anomalies.length,
     payload_snippets_total: payloadSnippets.length,
@@ -2045,6 +2129,7 @@ function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], sel
     stream_processes_total: processes.length,
     request_response_pairs: requestResponsePairs.slice(0, 4),
     exchanges: exchanges.slice(0, 6),
+    exchange_clusters: exchangeClusters.slice(0, 6),
     conversation_diff: conversationDiff,
     anomalies,
     payload_snippets: payloadSnippets.slice(0, 6),
@@ -2066,6 +2151,7 @@ function buildStreamInspection(streamContext) {
   const stream = streamContext || {};
   const pairs = Array.isArray(stream?.request_response_pairs) ? stream.request_response_pairs : Array.isArray(stream?.requestResponsePairs) ? stream.requestResponsePairs : [];
   const exchanges = Array.isArray(stream?.exchanges) ? stream.exchanges : [];
+  const exchangeClusters = Array.isArray(stream?.exchange_clusters) ? stream.exchange_clusters : Array.isArray(stream?.exchangeClusters) ? stream.exchangeClusters : [];
   const diffItems = Array.isArray(stream?.conversation_diff) ? stream.conversation_diff : Array.isArray(stream?.conversationDiff) ? stream.conversationDiff : [];
   const anomalyItems = Array.isArray(stream?.anomalies) ? stream.anomalies : [];
   const snippets = Array.isArray(stream?.payload_snippets) ? stream.payload_snippets : Array.isArray(stream?.payloadSnippets) ? stream.payloadSnippets : [];
@@ -2082,6 +2168,7 @@ function buildStreamInspection(streamContext) {
       { label: "Responses", value: formatNumber(Number(stream?.responses_total ?? stream?.responsesTotal ?? 0)) },
       { label: "Paired Exchanges", value: formatNumber(Number(stream?.pairs_total ?? stream?.pairsTotal ?? 0)) },
       { label: "Folded Exchanges", value: formatNumber(Number(stream?.folded_exchanges_total ?? stream?.foldedExchangesTotal ?? exchanges.length)) },
+      { label: "Exchange Clusters", value: formatNumber(Number(stream?.exchange_clusters_total ?? stream?.exchangeClustersTotal ?? exchangeClusters.length)) },
       { label: "Conversation Diffs", value: formatNumber(Number(stream?.conversation_diff_total ?? stream?.conversationDiffTotal ?? diffItems.length)) },
       { label: "Anomalies", value: formatNumber(Number(stream?.anomalies_total ?? stream?.anomaliesTotal ?? anomalyItems.length)) },
       { label: "Payload Snippets", value: formatNumber(Number(stream?.payload_snippets_total ?? stream?.payloadSnippetsTotal ?? 0)) },
@@ -2163,6 +2250,19 @@ function buildStreamInspection(streamContext) {
             ? item.sections.map((section) => ({
                 title: cleanText(section?.title) || "Section",
                 body: cleanText(section?.body) || "No preview available",
+              }))
+            : [],
+        })),
+      },
+      {
+        title: "Request / Response Clusters",
+        items: exchangeClusters.map((item) => ({
+          title: cleanText(item?.title) || "Clustered request target",
+          body: cleanText(item?.body) || "Cluster summary unavailable",
+          sections: Array.isArray(item?.sections)
+            ? item.sections.map((section) => ({
+                title: cleanText(section?.title) || "Section",
+                body: cleanText(section?.body) || "No cluster detail available",
               }))
             : [],
         })),

@@ -619,6 +619,7 @@ def _build_packet_flow_context(packet: dict[str, Any], packet_rows: list[dict[st
     )
     stream_context["anomalies"] = _stream_anomalies(
         exchanges=list(stream_context.get("exchanges") or []),
+        exchange_clusters=list(stream_context.get("exchange_clusters") or []),
         conversation_diff=list(stream_context.get("conversation_diff") or []),
         payload_snippets=list(stream_context.get("payload_snippets") or []),
         flow_packets=list(reversed(sorted_flow_packets)),
@@ -1437,6 +1438,74 @@ def _folded_exchange_entry(index: int, request: dict[str, Any] | None, response:
     }
 
 
+def _stream_exchange_clusters(exchanges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clusters: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for exchange in exchanges:
+        request_host = _normalize_text(exchange.get("request_host")).lower()
+        request_path = _normalize_text(exchange.get("request_path"))
+        request_title = _normalize_text(exchange.get("request_title"))
+        request_method = request_title.split(" ", 1)[0].upper() if " " in request_title else ""
+        status_code = _safe_int(exchange.get("response_status_code"))
+        status_class = f"{status_code // 100}xx" if status_code and status_code >= 100 else "partial"
+        key = (request_method, request_host, request_path, status_class)
+        cluster = clusters.setdefault(
+            key,
+            {
+                "id": f"cluster-{len(clusters) + 1}",
+                "request_method": request_method or None,
+                "request_host": request_host or None,
+                "request_path": request_path or None,
+                "status_class": status_class,
+                "response_codes": set(),
+                "exchanges_total": 0,
+                "failed_exchanges_total": 0,
+                "auth_like": False,
+                "example_request": request_title or None,
+            },
+        )
+        cluster["exchanges_total"] += 1
+        cluster["auth_like"] = bool(cluster["auth_like"]) or _contains_stream_token(request_title, _AUTH_LIKE_TOKENS) or _contains_stream_token(request_path, _AUTH_LIKE_TOKENS) or _contains_stream_token(exchange.get("request_body"), _AUTH_LIKE_TOKENS)
+        if status_code is not None:
+            cluster["response_codes"].add(status_code)
+            if status_code >= 400:
+                cluster["failed_exchanges_total"] += 1
+
+    items: list[dict[str, Any]] = []
+    for cluster in sorted(clusters.values(), key=lambda item: (item["failed_exchanges_total"], item["exchanges_total"]), reverse=True)[:6]:
+        target = cluster["request_path"] or cluster["example_request"] or "request target unavailable"
+        host_prefix = cluster["request_host"] or ""
+        target_label = f"{host_prefix}{target}" if host_prefix and target.startswith("/") else target or host_prefix or "stream target"
+        request_label = f"{cluster['request_method']} {target_label}".strip()
+        response_codes = sorted(cluster["response_codes"])
+        codes_label = ", ".join(str(code) for code in response_codes[:4]) or "none"
+        items.append(
+            {
+                "id": cluster["id"],
+                "title": f"{request_label} -> {cluster['status_class']}",
+                "body": f"{cluster['exchanges_total']} exchange(s) | failed {cluster['failed_exchanges_total']} | response codes {codes_label}",
+                "request_method": cluster["request_method"],
+                "request_host": cluster["request_host"],
+                "request_path": cluster["request_path"],
+                "status_class": cluster["status_class"],
+                "response_codes": response_codes[:6],
+                "exchanges_total": cluster["exchanges_total"],
+                "failed_exchanges_total": cluster["failed_exchanges_total"],
+                "auth_like": bool(cluster["auth_like"]),
+                "sections": [
+                    {
+                        "title": "Cluster Scope",
+                        "body": f"Target: {target_label} | Status class: {cluster['status_class']} | Exchanges: {cluster['exchanges_total']}",
+                    },
+                    {
+                        "title": "Response Evidence",
+                        "body": f"Observed response codes: {codes_label}",
+                    },
+                ],
+            }
+        )
+    return items
+
+
 def _conversation_diff(http_requests: list[dict[str, Any]], http_responses: list[dict[str, Any]], payload_snippets: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for index in range(1, len(http_requests)):
@@ -1539,6 +1608,7 @@ def _stream_anomaly(
 def _stream_anomalies(
     *,
     exchanges: list[dict[str, Any]],
+    exchange_clusters: list[dict[str, Any]],
     conversation_diff: list[dict[str, Any]],
     payload_snippets: list[dict[str, Any]],
     flow_packets: list[dict[str, Any]],
@@ -1548,45 +1618,45 @@ def _stream_anomalies(
     anomalies: list[dict[str, Any]] = []
     behavior_evidence = behavior_evidence or []
 
-    failed_exchanges = [
-        exchange
-        for exchange in exchanges
-        if (_safe_int(exchange.get("response_status_code")) or 0) >= 400
-    ]
-    failed_auth_exchanges = [
-        exchange
-        for exchange in failed_exchanges
-        if _contains_stream_token(exchange.get("request_title"), _AUTH_LIKE_TOKENS)
-        or _contains_stream_token(exchange.get("request_body"), _AUTH_LIKE_TOKENS)
-        or _contains_stream_token(exchange.get("request_path"), _AUTH_LIKE_TOKENS)
-    ]
-    if len(failed_auth_exchanges) >= 2:
+    failed_exchanges = [exchange for exchange in exchanges if (_safe_int(exchange.get("response_status_code")) or 0) >= 400]
+    failed_cluster = next((cluster for cluster in exchange_clusters if (_safe_int(cluster.get("failed_exchanges_total")) or 0) >= 2), None)
+    failed_auth_cluster = next(
+        (
+            cluster
+            for cluster in exchange_clusters
+            if cluster.get("auth_like") and (_safe_int(cluster.get("failed_exchanges_total")) or 0) >= 2
+        ),
+        None,
+    )
+    if failed_auth_cluster is not None:
         anomalies.append(
             _stream_anomaly(
                 "repeated_failed_auth_like",
                 title="Repeated failed auth-like exchanges",
                 severity="high",
                 confidence="high",
-                reason=f"{len(failed_auth_exchanges)} auth-like exchange(s) ended with non-success responses inside the same stream.",
+                reason=f"{_safe_int(failed_auth_cluster.get('failed_exchanges_total'))} auth-like exchange(s) repeated against the same request target inside this stream.",
                 metrics={
-                    "failed_auth_exchanges": len(failed_auth_exchanges),
-                    "response_codes": [_safe_int(item.get('response_status_code')) for item in failed_auth_exchanges[:4]],
+                    "failed_auth_exchanges": _safe_int(failed_auth_cluster.get("failed_exchanges_total")) or 0,
+                    "cluster_target": failed_auth_cluster.get("title"),
+                    "response_codes": list(failed_auth_cluster.get("response_codes") or [])[:4],
                     "stream_alerts_total": len(flow_alerts),
                 },
                 notes=["Authentication-like request targets or payloads repeatedly failed inside one conversation."],
             )
         )
-    elif len(failed_exchanges) >= 2:
+    elif failed_cluster is not None:
         anomalies.append(
             _stream_anomaly(
                 "repeated_failed_exchanges",
                 title="Repeated failed exchanges",
                 severity="medium",
                 confidence="high",
-                reason=f"{len(failed_exchanges)} exchange(s) in this stream ended with non-success responses.",
+                reason=f"{_safe_int(failed_cluster.get('failed_exchanges_total'))} exchange(s) repeated on the same clustered request target with non-success responses.",
                 metrics={
-                    "failed_exchanges": len(failed_exchanges),
-                    "response_codes": [_safe_int(item.get('response_status_code')) for item in failed_exchanges[:4]],
+                    "failed_exchanges": _safe_int(failed_cluster.get("failed_exchanges_total")) or len(failed_exchanges),
+                    "cluster_target": failed_cluster.get("title"),
+                    "response_codes": list(failed_cluster.get("response_codes") or [])[:4],
                     "stream_alerts_total": len(flow_alerts),
                 },
                 notes=["Repeated response failures are visible without needing broader correlation."],
@@ -1864,6 +1934,7 @@ def _build_stream_context(
             "responses_total": 0,
             "pairs_total": 0,
             "folded_exchanges_total": 0,
+            "exchange_clusters_total": 0,
             "conversation_diff_total": 0,
             "anomalies_total": 0,
             "payload_snippets_total": 0,
@@ -1873,6 +1944,7 @@ def _build_stream_context(
             "stream_processes_total": 0,
             "request_response_pairs": [],
             "exchanges": [],
+            "exchange_clusters": [],
             "conversation_diff": [],
             "anomalies": [],
             "payload_snippets": [],
@@ -1959,6 +2031,7 @@ def _build_stream_context(
         notes.append(f"Timeline preview is truncated to the first 12 event(s) out of {len(timeline)} stream event(s).")
     processes = _stream_process_relationships(ascending_packets, ascending_alerts)
     conversation_diff = _conversation_diff(http_requests, http_responses, payload_snippets)
+    exchange_clusters = _stream_exchange_clusters(folded_exchanges)
 
     return {
         "available": bool(http_requests or http_responses or payload_snippets),
@@ -1969,6 +2042,7 @@ def _build_stream_context(
         "responses_total": len(http_responses),
         "pairs_total": sum(1 for item in request_response_pairs if item.get("status") == "complete"),
         "folded_exchanges_total": len(folded_exchanges),
+        "exchange_clusters_total": len(exchange_clusters),
         "conversation_diff_total": len(conversation_diff),
         "payload_snippets_total": len(payload_snippets),
         "timeline_total": len(timeline),
@@ -1977,6 +2051,7 @@ def _build_stream_context(
         "stream_processes_total": len(processes),
         "request_response_pairs": request_response_pairs[:4],
         "exchanges": folded_exchanges[:6],
+        "exchange_clusters": exchange_clusters[:6],
         "conversation_diff": conversation_diff,
         "payload_snippets": payload_snippets[:6],
         "timeline": timeline[:12],
@@ -2069,6 +2144,7 @@ def _build_alert_investigation_context(
     )
     stream_context["anomalies"] = _stream_anomalies(
         exchanges=list(stream_context.get("exchanges") or []),
+        exchange_clusters=list(stream_context.get("exchange_clusters") or []),
         conversation_diff=list(stream_context.get("conversation_diff") or []),
         payload_snippets=list(stream_context.get("payload_snippets") or []),
         flow_packets=list(reversed(_sort_rows_by_time([dict(row) for row in flow_packets]))),

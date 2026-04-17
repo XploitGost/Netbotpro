@@ -634,6 +634,22 @@ export function useDashboardController() {
     }
   }
 
+  async function exportInvestigation(payload) {
+    setError("");
+    try {
+      const data = await api.exportInvestigation(payload);
+      setExportInfo(data);
+      await loadReports();
+      setStatusMessage(`Investigation export created: ${data.path}`);
+      return data;
+    } catch (err) {
+      const message = String(err);
+      setError(message);
+      setStatusMessage(message);
+      throw err;
+    }
+  }
+
   async function downloadExport(path) {
     if (!path || typeof window === "undefined") {
       return;
@@ -888,6 +904,7 @@ export function useDashboardController() {
     saveSettings,
     runTraceroute,
     exportSession,
+    exportInvestigation,
     downloadExport,
     runOfflineAnalysis,
     loadPacketDetail,

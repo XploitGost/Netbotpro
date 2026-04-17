@@ -54,6 +54,11 @@ class LocalTokenSecurityTests(unittest.TestCase):
         dependencies = {dependency.call for dependency in route.dependant.dependencies}
         self.assertIn(main.require_local_token, dependencies)
 
+    def test_investigation_export_route_declares_local_token_dependency(self):
+        route = self._route("/api/exports/investigation", method="POST")
+        dependencies = {dependency.call for dependency in route.dependant.dependencies}
+        self.assertIn(main.require_local_token, dependencies)
+
 
 if __name__ == "__main__":
     unittest.main()
