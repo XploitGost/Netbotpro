@@ -8,6 +8,7 @@ export function PacketsPanel({
   selectedPacketId,
   focusedTarget,
   liveFollow,
+  isLoading = false,
   onPacketQueryChange,
   onApplyPacketFilters,
   onPaginatePackets,
@@ -20,7 +21,15 @@ export function PacketsPanel({
     enabled: packets.length > 40,
     rowHeight: 76,
     containerHeight: 520,
+    resetKey: JSON.stringify({ offset: packetMeta.offset, total: packetMeta.total, query: packetQuery }),
   });
+  const emptyMessage = isLoading
+    ? "Loading packet history..."
+    : focusedTarget?.ip
+      ? `No packet rows matched the current focus on ${focusedTarget.ip}.`
+      : packetMeta.total > 0
+        ? "This page is empty. Try the previous page or loosen the filters."
+        : "No packet traffic is visible yet. Start capture or relax the filters.";
 
   return (
     <div className="panel-body">
@@ -46,19 +55,20 @@ export function PacketsPanel({
           <input type="checkbox" checked={Boolean(packetQuery.only_remote)} onChange={(event) => onPacketQueryChange("only_remote", event.target.checked)} />
           <span>Only remote traffic</span>
         </label>
-        <button className="secondary" onClick={onApplyPacketFilters}>Apply Packet Filters</button>
+        <button className="secondary" onClick={onApplyPacketFilters} disabled={isLoading}>Apply Packet Filters</button>
       </div>
       <div className="actions-row inline-actions">
-        <button className="secondary" onClick={() => onToggleFollow(!liveFollow)}>
+        <button className="secondary" onClick={() => onToggleFollow(!liveFollow)} disabled={isLoading}>
           {liveFollow ? "Pause Auto Follow" : "Resume Auto Follow"}
         </button>
+        {isLoading ? <span className="table-status">Refreshing packet rows...</span> : null}
       </div>
       <div className="table-head">
         <p className="meta-line">Rows: {packetMeta.total} from {packetMeta.source}</p>
         <div className="pager">
-          <button className="secondary" onClick={() => onPaginatePackets(-1)} disabled={packetMeta.offset <= 0}>Prev</button>
+          <button className="secondary" onClick={() => onPaginatePackets(-1)} disabled={isLoading || packetMeta.offset <= 0}>Prev</button>
           <span>{packetMeta.offset + 1}-{Math.min(packetMeta.offset + packets.length, packetMeta.total || packets.length)}</span>
-          <button className="secondary" onClick={() => onPaginatePackets(1)} disabled={packetMeta.offset + pageSize >= packetMeta.total}>Next</button>
+          <button className="secondary" onClick={() => onPaginatePackets(1)} disabled={isLoading || packetMeta.offset + pageSize >= packetMeta.total}>Next</button>
         </div>
       </div>
       <div className={`table-wrap ${isWindowed ? "table-wrap-windowed" : ""}`} onScroll={onScroll}>
@@ -76,7 +86,7 @@ export function PacketsPanel({
           </thead>
           <tbody>
             {packets.length === 0 ? (
-              <tr><td colSpan="7" className="muted">No packets yet</td></tr>
+              <tr><td colSpan="7" className="table-empty">{emptyMessage}</td></tr>
             ) : topSpacerHeight > 0 ? (
               <tr className="spacer-row" aria-hidden="true"><td colSpan="7" style={{ height: `${topSpacerHeight}px` }} /></tr>
             ) : null}

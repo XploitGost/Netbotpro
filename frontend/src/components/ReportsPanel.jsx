@@ -1,7 +1,8 @@
-export function ReportsPanel({ onDownload, reports }) {
+export function ReportsPanel({ isLoading = false, onDownload, reports }) {
   return (
     <div className="panel-body">
       <p className="eyebrow">Generated Reports</p>
+      {isLoading ? <p className="table-status">Refreshing generated reports...</p> : null}
       <div className="table-wrap">
         <table>
           <thead>
@@ -13,7 +14,7 @@ export function ReportsPanel({ onDownload, reports }) {
           </thead>
           <tbody>
             {reports.length === 0 ? (
-              <tr><td colSpan="3" className="muted">No reports yet</td></tr>
+              <tr><td colSpan="3" className="table-empty">{isLoading ? "Loading report archive..." : "No reports yet. Generate an export or investigation report to populate this archive."}</td></tr>
             ) : reports.map((report) => (
               <tr key={report.path}>
                 <td>{report.name}</td>

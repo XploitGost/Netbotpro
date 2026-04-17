@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+import json
 
 from scripts.qa import packaged_backend_smoke
 from scripts.release import stage_backend_runtime
@@ -49,6 +50,16 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
                 packaged_backend_smoke.validate_status_payload({"ok": True, "project_root": "C:/secret"})
             with self.assertRaises(AssertionError):
                 packaged_backend_smoke.validate_interfaces_payload({"items": [], "degraded": True, "source": "fallback"})
+
+    def test_desktop_package_supports_cross_platform_dist_scripts(self):
+        package_json = Path(__file__).resolve().parents[1] / "desktop" / "electron" / "package.json"
+        data = json.loads(package_json.read_text(encoding="utf-8"))
+
+        scripts = data.get("scripts", {})
+        self.assertIn("dist:win", scripts)
+        self.assertIn("dist:linux", scripts)
+        self.assertNotIn("electronDist", data.get("build", {}))
+        self.assertEqual(data.get("build", {}).get("linux", {}).get("target"), ["AppImage", "deb"])
 
 
 if __name__ == "__main__":

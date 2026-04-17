@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 
 const OVERSCAN_ROWS = 5;
 
-export function useWindowedRows(items, { enabled, rowHeight, containerHeight }) {
+export function useWindowedRows(items, { enabled, rowHeight, containerHeight, resetKey = "" }) {
   const [scrollTop, setScrollTop] = useState(0);
 
   useEffect(() => {
     setScrollTop(0);
-  }, [items]);
+  }, [resetKey]);
 
   const windowState = useMemo(() => {
     if (!enabled) {
@@ -32,7 +32,14 @@ export function useWindowedRows(items, { enabled, rowHeight, containerHeight }) 
 
   return {
     ...windowState,
-    onScroll: enabled ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined,
+    onScroll: enabled ? (event) => {
+      const nextScrollTop = event.currentTarget.scrollTop;
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => setScrollTop(nextScrollTop));
+        return;
+      }
+      setScrollTop(nextScrollTop);
+    } : undefined,
     isWindowed: enabled,
   };
 }

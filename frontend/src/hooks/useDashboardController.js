@@ -8,6 +8,7 @@ export const PAGE_SIZE = 25;
 const TIMELINE_BUCKETS = 30;
 const TIMELINE_BUCKET_MS = 2_000;
 const HISTORY_CACHE_TTL_MS = 5_000;
+const DETAIL_CACHE_TTL_MS = 12_000;
 
 const defaultSettings = {
   iface: "iface=default",
@@ -134,6 +135,12 @@ function blockingCaptureDetail(preflight) {
   return String(blocking?.detail || "").trim();
 }
 
+function normalizeErrorMessage(error, fallback = "Request failed") {
+  const text = String(error ?? "").trim();
+  if (!text) return fallback;
+  return text.replace(/^Error:\s*/i, "").trim() || fallback;
+}
+
 export function useDashboardController() {
   const { localToken, setLocalToken, managedLocalToken } = useLocalAuth();
   const api = useApiClient(localToken);
@@ -167,6 +174,19 @@ export function useDashboardController() {
   const [statusMessage, setStatusMessage] = useState("Connecting to local backend...");
   const [observability, setObservability] = useState({});
   const [error, setError] = useState("");
+  const [loadingState, setLoadingState] = useState({
+    bootstrap: true,
+    packets: false,
+    alerts: false,
+    packetDetail: false,
+    alertDetail: false,
+    exports: false,
+    reports: false,
+    traceroute: false,
+    offlineAnalysis: false,
+    settings: false,
+    snifferAction: false,
+  });
   const [localTokenRequired, setLocalTokenRequired] = useState(false);
   const [liveFollow, setLiveFollow] = useState(true);
   const [focusedTarget, setFocusedTarget] = useState(null);
@@ -176,10 +196,22 @@ export function useDashboardController() {
   const focusQuerySnapshotRef = useRef(null);
   const packetHistoryCacheRef = useRef(new Map());
   const alertHistoryCacheRef = useRef(new Map());
+  const packetDetailCacheRef = useRef(new Map());
+  const alertDetailCacheRef = useRef(new Map());
+  const packetHistoryRequestRef = useRef(0);
+  const alertHistoryRequestRef = useRef(0);
+  const packetDetailRequestRef = useRef(0);
+  const alertDetailRequestRef = useRef(0);
 
   function clearHistoryCaches() {
     packetHistoryCacheRef.current.clear();
     alertHistoryCacheRef.current.clear();
+    packetDetailCacheRef.current.clear();
+    alertDetailCacheRef.current.clear();
+  }
+
+  function setLoading(key, value) {
+    setLoadingState((current) => (current[key] === value ? current : { ...current, [key]: value }));
   }
 
   function readCache(cacheRef, key) {
@@ -193,6 +225,19 @@ export function useDashboardController() {
 
   function writeCache(cacheRef, key, data) {
     cacheRef.current.set(key, { data, expiresAt: Date.now() + HISTORY_CACHE_TTL_MS });
+  }
+
+  function readDetailCache(cacheRef, key) {
+    const entry = cacheRef.current.get(key);
+    if (!entry || entry.expiresAt <= Date.now()) {
+      cacheRef.current.delete(key);
+      return null;
+    }
+    return entry.data;
+  }
+
+  function writeDetailCache(cacheRef, key, data) {
+    cacheRef.current.set(key, { data, expiresAt: Date.now() + DETAIL_CACHE_TTL_MS });
   }
 
   function mergeObservability(next) {
@@ -219,6 +264,8 @@ export function useDashboardController() {
     let active = true;
 
     async function loadInitial() {
+      setLoading("bootstrap", true);
+      setLoading("reports", true);
       try {
         const statusData = await api.getStatus();
         if (!active) return;
@@ -233,6 +280,8 @@ export function useDashboardController() {
           setPacketMeta({ total: 0, source: "memory", offset: 0, limit: PAGE_SIZE });
           setAlertMeta({ total: 0, source: "memory", offset: 0, limit: PAGE_SIZE });
           setStatusMessage("Enter the local token to unlock dashboard data");
+          setLoading("bootstrap", false);
+          setLoading("reports", false);
           return;
         }
 
@@ -265,8 +314,12 @@ export function useDashboardController() {
         setStatusMessage("Dashboard synced");
       } catch (err) {
         if (!active) return;
-        setError(String(err));
+        setError(normalizeErrorMessage(err, "Unable to load initial data"));
         setStatusMessage("Unable to load initial data");
+      } finally {
+        if (!active) return;
+        setLoading("bootstrap", false);
+        setLoading("reports", false);
       }
     }
 
@@ -277,6 +330,8 @@ export function useDashboardController() {
   }, [localToken]);
 
   async function loadPacketHistory(customQuery = packetQuery, offset = packetMeta.offset) {
+    const requestId = packetHistoryRequestRef.current + 1;
+    packetHistoryRequestRef.current = requestId;
     const params = new URLSearchParams();
     Object.entries(customQuery).forEach(([key, value]) => {
       if (typeof value === "boolean") {
@@ -289,22 +344,36 @@ export function useDashboardController() {
     params.set("offset", String(offset));
     const cacheKey = buildHistoryCacheKey(customQuery, offset);
     const cached = readCache(packetHistoryCacheRef, cacheKey);
-    const data = cached || await api.getPackets(params);
-    if (!cached) writeCache(packetHistoryCacheRef, cacheKey, data);
-    mergeObservability(data.observability || {});
-    setPackets(data.items || []);
-    setPacketMeta({ total: data.total || 0, source: data.source || "memory", offset: data.offset || 0, limit: data.limit || PAGE_SIZE });
-    if (!(inspectionPinned.kind === "packet" && inspectionPinned.id)) {
-      setSelectedPacket(null);
-      setSelectedPacketContext(null);
-      setSelectedPacketId("");
-    }
-    if (data.query_ms != null) {
-      setStatusMessage(`Packet history loaded in ${data.query_ms} ms`);
+    try {
+      if (!cached) {
+        setLoading("packets", true);
+      }
+      const data = cached || await api.getPackets(params);
+      if (packetHistoryRequestRef.current !== requestId) {
+        return;
+      }
+      if (!cached) writeCache(packetHistoryCacheRef, cacheKey, data);
+      mergeObservability(data.observability || {});
+      setPackets(data.items || []);
+      setPacketMeta({ total: data.total || 0, source: data.source || "memory", offset: data.offset || 0, limit: data.limit || PAGE_SIZE });
+      if (!(inspectionPinned.kind === "packet" && inspectionPinned.id)) {
+        setSelectedPacket(null);
+        setSelectedPacketContext(null);
+        setSelectedPacketId("");
+      }
+      if (data.query_ms != null) {
+        setStatusMessage(`Packet history loaded in ${data.query_ms} ms`);
+      }
+    } finally {
+      if (packetHistoryRequestRef.current === requestId) {
+        setLoading("packets", false);
+      }
     }
   }
 
   async function loadAlertHistory(customQuery = alertQuery, offset = alertMeta.offset) {
+    const requestId = alertHistoryRequestRef.current + 1;
+    alertHistoryRequestRef.current = requestId;
     const params = new URLSearchParams();
     Object.entries(customQuery).forEach(([key, value]) => {
       if (typeof value === "boolean") {
@@ -317,53 +386,106 @@ export function useDashboardController() {
     params.set("offset", String(offset));
     const cacheKey = buildHistoryCacheKey(customQuery, offset);
     const cached = readCache(alertHistoryCacheRef, cacheKey);
-    const data = cached || await api.getAlerts(params);
-    if (!cached) writeCache(alertHistoryCacheRef, cacheKey, data);
-    mergeObservability(data.observability || {});
-    setAlerts(data.items || []);
-    setAlertMeta({ total: data.total || 0, source: data.source || "memory", offset: data.offset || 0, limit: data.limit || PAGE_SIZE });
-    if (!(inspectionPinned.kind === "alert" && inspectionPinned.id)) {
-      setSelectedAlert(null);
-      setSelectedAlertContext(null);
-      setSelectedAlertId("");
-    }
-    if (data.query_ms != null) {
-      setStatusMessage(`Alert history loaded in ${data.query_ms} ms`);
+    try {
+      if (!cached) {
+        setLoading("alerts", true);
+      }
+      const data = cached || await api.getAlerts(params);
+      if (alertHistoryRequestRef.current !== requestId) {
+        return;
+      }
+      if (!cached) writeCache(alertHistoryCacheRef, cacheKey, data);
+      mergeObservability(data.observability || {});
+      setAlerts(data.items || []);
+      setAlertMeta({ total: data.total || 0, source: data.source || "memory", offset: data.offset || 0, limit: data.limit || PAGE_SIZE });
+      if (!(inspectionPinned.kind === "alert" && inspectionPinned.id)) {
+        setSelectedAlert(null);
+        setSelectedAlertContext(null);
+        setSelectedAlertId("");
+      }
+      if (data.query_ms != null) {
+        setStatusMessage(`Alert history loaded in ${data.query_ms} ms`);
+      }
+    } finally {
+      if (alertHistoryRequestRef.current === requestId) {
+        setLoading("alerts", false);
+      }
     }
   }
 
   async function loadReports() {
-    const data = await api.getReports();
-    setReports(data || []);
+    setLoading("reports", true);
+    try {
+      const data = await api.getReports();
+      setReports(data || []);
+    } finally {
+      setLoading("reports", false);
+    }
   }
 
   async function loadPacketDetail(packet, index) {
+    const requestId = packetDetailRequestRef.current + 1;
+    packetDetailRequestRef.current = requestId;
     try {
       setActivePage("inspect");
       const packetId = getPacketId(packet, index, packetMeta.offset);
       setSelectedPacketId(packetId);
       setSelectedPacketContext(null);
-      const [detail, context] = await Promise.all([api.getPacketDetail(packetId), api.getPacketContext(packetId).catch(() => null)]);
+      const cached = readDetailCache(packetDetailCacheRef, packetId);
+      if (!cached) {
+        setLoading("packetDetail", true);
+      }
+      const [detail, context] = cached || await Promise.all([api.getPacketDetail(packetId), api.getPacketContext(packetId).catch(() => null)]);
+      if (packetDetailRequestRef.current !== requestId) {
+        return;
+      }
+      if (!cached) {
+        writeDetailCache(packetDetailCacheRef, packetId, [detail, context]);
+      }
       setSelectedPacket(detail);
       setSelectedPacketContext(context);
       setInspectionPinned((current) => (current.kind === "packet" ? { kind: "packet", id: packetId } : current));
     } catch (err) {
-      setError(String(err));
+      if (packetDetailRequestRef.current === requestId) {
+        setError(normalizeErrorMessage(err, "Unable to load packet detail"));
+      }
+    } finally {
+      if (packetDetailRequestRef.current === requestId) {
+        setLoading("packetDetail", false);
+      }
     }
   }
 
   async function loadAlertDetail(alert, index) {
+    const requestId = alertDetailRequestRef.current + 1;
+    alertDetailRequestRef.current = requestId;
     try {
       setActivePage("inspect");
       const alertId = getAlertId(alert, index, alertMeta.offset);
       setSelectedAlertId(alertId);
       setSelectedAlertContext(null);
-      const [detail, context] = await Promise.all([api.getAlertDetail(alertId), api.getAlertContext(alertId).catch(() => null)]);
+      const cached = readDetailCache(alertDetailCacheRef, alertId);
+      if (!cached) {
+        setLoading("alertDetail", true);
+      }
+      const [detail, context] = cached || await Promise.all([api.getAlertDetail(alertId), api.getAlertContext(alertId).catch(() => null)]);
+      if (alertDetailRequestRef.current !== requestId) {
+        return;
+      }
+      if (!cached) {
+        writeDetailCache(alertDetailCacheRef, alertId, [detail, context]);
+      }
       setSelectedAlert(detail);
       setSelectedAlertContext(context);
       setInspectionPinned((current) => (current.kind === "alert" ? { kind: "alert", id: alertId } : current));
     } catch (err) {
-      setError(String(err));
+      if (alertDetailRequestRef.current === requestId) {
+        setError(normalizeErrorMessage(err, "Unable to load alert detail"));
+      }
+    } finally {
+      if (alertDetailRequestRef.current === requestId) {
+        setLoading("alertDetail", false);
+      }
     }
   }
 
@@ -378,16 +500,34 @@ export function useDashboardController() {
       await loadPacketDetail(packets[existingIndex], existingIndex);
       return;
     }
+    const requestId = packetDetailRequestRef.current + 1;
+    packetDetailRequestRef.current = requestId;
     try {
       setActivePage("inspect");
       setSelectedPacketId(targetId);
       setSelectedPacketContext(null);
-      const [detail, context] = await Promise.all([api.getPacketDetail(targetId), api.getPacketContext(targetId).catch(() => null)]);
+      const cached = readDetailCache(packetDetailCacheRef, targetId);
+      if (!cached) {
+        setLoading("packetDetail", true);
+      }
+      const [detail, context] = cached || await Promise.all([api.getPacketDetail(targetId), api.getPacketContext(targetId).catch(() => null)]);
+      if (packetDetailRequestRef.current !== requestId) {
+        return;
+      }
+      if (!cached) {
+        writeDetailCache(packetDetailCacheRef, targetId, [detail, context]);
+      }
       setSelectedPacket(detail);
       setSelectedPacketContext(context);
       setInspectionPinned((current) => (current.kind === "packet" ? { kind: "packet", id: targetId } : current));
     } catch (err) {
-      setError(String(err));
+      if (packetDetailRequestRef.current === requestId) {
+        setError(normalizeErrorMessage(err, "Unable to open packet detail"));
+      }
+    } finally {
+      if (packetDetailRequestRef.current === requestId) {
+        setLoading("packetDetail", false);
+      }
     }
   }
 
@@ -399,16 +539,34 @@ export function useDashboardController() {
       await loadAlertDetail(alerts[existingIndex], existingIndex);
       return;
     }
+    const requestId = alertDetailRequestRef.current + 1;
+    alertDetailRequestRef.current = requestId;
     try {
       setActivePage("inspect");
       setSelectedAlertId(targetId);
       setSelectedAlertContext(null);
-      const [detail, context] = await Promise.all([api.getAlertDetail(targetId), api.getAlertContext(targetId).catch(() => null)]);
+      const cached = readDetailCache(alertDetailCacheRef, targetId);
+      if (!cached) {
+        setLoading("alertDetail", true);
+      }
+      const [detail, context] = cached || await Promise.all([api.getAlertDetail(targetId), api.getAlertContext(targetId).catch(() => null)]);
+      if (alertDetailRequestRef.current !== requestId) {
+        return;
+      }
+      if (!cached) {
+        writeDetailCache(alertDetailCacheRef, targetId, [detail, context]);
+      }
       setSelectedAlert(detail);
       setSelectedAlertContext(context);
       setInspectionPinned((current) => (current.kind === "alert" ? { kind: "alert", id: targetId } : current));
     } catch (err) {
-      setError(String(err));
+      if (alertDetailRequestRef.current === requestId) {
+        setError(normalizeErrorMessage(err, "Unable to open alert detail"));
+      }
+    } finally {
+      if (alertDetailRequestRef.current === requestId) {
+        setLoading("alertDetail", false);
+      }
     }
   }
 
@@ -447,7 +605,7 @@ export function useDashboardController() {
     try {
       await Promise.all([loadPacketHistory(nextPacketQuery, 0), loadAlertHistory(nextAlertQuery, 0)]);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to lock the current focus target"));
     }
   }
 
@@ -463,7 +621,7 @@ export function useDashboardController() {
     try {
       await Promise.all([loadPacketHistory(snapshot.packetQuery, 0), loadAlertHistory(snapshot.alertQuery, 0)]);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to restore the live focus view"));
     }
   }
 
@@ -502,7 +660,7 @@ export function useDashboardController() {
     try {
       await Promise.all([loadPacketHistory(nextPacketQuery, 0), loadAlertHistory(nextAlertQuery, 0)]);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to filter traffic by process"));
     }
   }
 
@@ -544,10 +702,12 @@ export function useDashboardController() {
 
   async function startSniffer() {
     setError("");
+    setLoading("snifferAction", true);
     const unavailableDetail = blockingCaptureDetail(capturePreflight);
     if (capturePreflight && !capturePreflight.ready && unavailableDetail) {
       setError(unavailableDetail);
       setStatusMessage(unavailableDetail);
+      setLoading("snifferAction", false);
       return;
     }
     try {
@@ -555,24 +715,30 @@ export function useDashboardController() {
       setDashboard((current) => ({ ...(current || {}), state: data }));
       setStatusMessage("Live capture started");
     } catch (err) {
-      const message = String(err);
+      const message = normalizeErrorMessage(err, "Unable to start live capture");
       setError(message);
       setStatusMessage(message);
+    } finally {
+      setLoading("snifferAction", false);
     }
   }
 
   async function stopSniffer() {
     setError("");
+    setLoading("snifferAction", true);
     try {
       const data = await api.stopSniffer();
       setDashboard((current) => ({ ...(current || {}), state: data }));
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to stop live capture"));
+    } finally {
+      setLoading("snifferAction", false);
     }
   }
 
   async function saveSettings() {
     setError("");
+    setLoading("settings", true);
     try {
       const data = await api.putSettings({
         iface: settings.iface || "iface=default",
@@ -586,7 +752,9 @@ export function useDashboardController() {
       setSettings((current) => ({ ...current, ...data, iface: data.iface || current.iface || "iface=default" }));
       setStatusMessage("Settings saved");
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to save settings"));
+    } finally {
+      setLoading("settings", false);
     }
   }
 
@@ -595,7 +763,7 @@ export function useDashboardController() {
     try {
       await loadPacketHistory(packetQuery, 0);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to load packet history"));
     }
   }
 
@@ -604,12 +772,13 @@ export function useDashboardController() {
     try {
       await loadAlertHistory(alertQuery, 0);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to load alert history"));
     }
   }
 
   async function runTraceroute() {
     setError("");
+    setLoading("traceroute", true);
     try {
       const data = await api.runTraceroute({
         target: tracerouteTarget,
@@ -618,24 +787,30 @@ export function useDashboardController() {
       });
       setTracerouteResult(data);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Traceroute failed"));
+    } finally {
+      setLoading("traceroute", false);
     }
   }
 
   async function exportSession(format) {
     setError("");
+    setLoading("exports", true);
     try {
       const data = await api.exportSession({ format });
       setExportInfo(data);
       await loadReports();
       setStatusMessage(`Export created: ${data.format}`);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to create session export"));
+    } finally {
+      setLoading("exports", false);
     }
   }
 
   async function exportInvestigation(payload) {
     setError("");
+    setLoading("exports", true);
     try {
       const data = await api.exportInvestigation(payload);
       setExportInfo(data);
@@ -643,10 +818,12 @@ export function useDashboardController() {
       setStatusMessage(`Investigation export created: ${data.path}`);
       return data;
     } catch (err) {
-      const message = String(err);
+      const message = normalizeErrorMessage(err, "Unable to create investigation export");
       setError(message);
       setStatusMessage(message);
       throw err;
+    } finally {
+      setLoading("exports", false);
     }
   }
 
@@ -655,6 +832,7 @@ export function useDashboardController() {
       return;
     }
     setError("");
+    setLoading("exports", true);
     try {
       const { blob, filename } = await api.downloadExport(path);
       const objectUrl = window.URL.createObjectURL(blob);
@@ -668,9 +846,11 @@ export function useDashboardController() {
       window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0);
       setStatusMessage(`Downloaded ${filename}`);
     } catch (err) {
-      const message = String(err);
+      const message = normalizeErrorMessage(err, "Export download failed");
       setError(message);
       setStatusMessage(message);
+    } finally {
+      setLoading("exports", false);
     }
   }
 
@@ -680,17 +860,21 @@ export function useDashboardController() {
       return;
     }
     setError("");
+    setLoading("offlineAnalysis", true);
     try {
       const data = await api.analyzePcap(offlineFile);
       setOfflineResult(data);
       setStatusMessage("Offline PCAP analysis complete");
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Offline PCAP analysis failed"));
+    } finally {
+      setLoading("offlineAnalysis", false);
     }
   }
 
   async function resetSessionData() {
     setError("");
+    setLoading("snifferAction", true);
     try {
       const state = await api.resetSession();
       clearHistoryCaches();
@@ -720,7 +904,9 @@ export function useDashboardController() {
       setTimeline(createTimeline());
       setStatusMessage("Live session data cleared");
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to reset live session data"));
+    } finally {
+      setLoading("snifferAction", false);
     }
   }
 
@@ -730,7 +916,7 @@ export function useDashboardController() {
     try {
       await loadPacketHistory(packetQuery, nextOffset);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to paginate packet history"));
     }
   }
 
@@ -740,7 +926,7 @@ export function useDashboardController() {
     try {
       await loadAlertHistory(alertQuery, nextOffset);
     } catch (err) {
-      setError(String(err));
+      setError(normalizeErrorMessage(err, "Unable to paginate alert history"));
     }
   }
 
@@ -882,6 +1068,7 @@ export function useDashboardController() {
     statusMessage,
     observability,
     error,
+    loadingState,
     localTokenRequired,
     managedLocalToken,
     canStartSniffer,

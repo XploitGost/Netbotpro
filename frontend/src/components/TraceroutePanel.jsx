@@ -1,10 +1,11 @@
-export function TraceroutePanel({ tracerouteResult, tracerouteTarget, onTargetChange, onRunTraceroute }) {
+export function TraceroutePanel({ tracerouteResult, tracerouteTarget, isBusy = false, onTargetChange, onRunTraceroute }) {
   return (
     <div className="panel-body">
       <p className="eyebrow">Traceroute</p>
       <div className="stack">
-        <input value={tracerouteTarget} onChange={(event) => onTargetChange(event.target.value)} placeholder="8.8.8.8 or example.com" />
-        <button className="secondary" onClick={onRunTraceroute}>Run Traceroute</button>
+        <input value={tracerouteTarget} onChange={(event) => onTargetChange(event.target.value)} placeholder="8.8.8.8 or example.com" disabled={isBusy} />
+        <button className="secondary" onClick={onRunTraceroute} disabled={isBusy}>Run Traceroute</button>
+        {isBusy ? <p className="table-status">Tracing route...</p> : null}
         <div className="table-wrap compact-table">
           <table>
             <thead>
@@ -16,7 +17,7 @@ export function TraceroutePanel({ tracerouteResult, tracerouteTarget, onTargetCh
             </thead>
             <tbody>
               {(tracerouteResult?.hops || []).length === 0 ? (
-                <tr><td colSpan="3" className="muted">No traceroute results yet</td></tr>
+                <tr><td colSpan="3" className="table-empty">{isBusy ? "Waiting for traceroute hops..." : "No traceroute results yet."}</td></tr>
               ) : tracerouteResult.hops.map((hop, index) => (
                 <tr key={`${hop.ip || "hop"}-${index}`}>
                   <td>{hop.hop ?? "-"}</td>

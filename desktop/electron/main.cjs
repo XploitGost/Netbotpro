@@ -12,6 +12,7 @@ let mainWindow = null;
 let backendProcess = null;
 let shuttingDown = false;
 let desktopLocalToken = "";
+let backendKillTimer = null;
 
 function appendDesktopLog(paths, channel, text) {
   if (!paths?.logDir || !text) return;
@@ -227,6 +228,10 @@ async function startBackend(paths) {
   backendProcess.stderr?.on("data", (chunk) => appendDesktopLog(paths, "stderr", chunk));
 
   backendProcess.on("exit", async (code) => {
+    if (backendKillTimer) {
+      clearTimeout(backendKillTimer);
+      backendKillTimer = null;
+    }
     const crashed = !shuttingDown && code !== 0;
     appendDesktopLog(paths, "exit", `code=${code}`);
     backendProcess = null;
@@ -242,7 +247,22 @@ async function stopBackend() {
   }
   const child = backendProcess;
   backendProcess = null;
-  child.kill();
+  if (backendKillTimer) {
+    clearTimeout(backendKillTimer);
+    backendKillTimer = null;
+  }
+  try {
+    child.kill("SIGTERM");
+  } catch (_error) {
+    return;
+  }
+  backendKillTimer = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch (_error) {
+    }
+    backendKillTimer = null;
+  }, 4000);
 }
 
 async function createWindow() {
@@ -260,6 +280,8 @@ async function createWindow() {
     minWidth: 1100,
     minHeight: 760,
     title: "Netbotpro",
+    show: false,
+    backgroundColor: "#0c1117",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -280,6 +302,9 @@ async function createWindow() {
   } else {
     await mainWindow.loadFile(path.join(isPackagedApp() ? process.resourcesPath : repoRoot(), isPackagedApp() ? "frontend" : path.join("frontend", "dist"), "app.html"));
   }
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -313,6 +338,15 @@ async function bootstrap() {
     app.quit();
     return;
   }
+  app.on("second-instance", () => {
+    if (!mainWindow) {
+      return;
+    }
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+  });
   setupAppLifecycle();
   registerRuntimeBridge();
   await app.whenReady();

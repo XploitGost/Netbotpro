@@ -12,6 +12,7 @@ export function HeroPanel({
   captureUnavailableDetail,
   canStartSniffer,
   error,
+  isBusy = false,
   onTokenChange,
   onStartSniffer,
   onStopSniffer,
@@ -62,11 +63,12 @@ export function HeroPanel({
         {capturePreflight?.requires_elevation ? (
           <p className="muted">Run the desktop app as Administrator if you want live capture and firewall actions.</p>
         ) : null}
+        {isBusy ? <p className="table-status">Applying desktop action...</p> : null}
         {error ? <p className="error">{error}</p> : null}
         <div className="hero-actions">
-          <button className="primary" onClick={onStartSniffer} disabled={!canStartSniffer}>Start Sniffer</button>
-          <button className="secondary" onClick={onStopSniffer}>Stop Sniffer</button>
-          <button className="secondary" onClick={onResetData}>Reset Data</button>
+          <button className="primary" onClick={onStartSniffer} disabled={isBusy || !canStartSniffer}>Start Sniffer</button>
+          <button className="secondary" onClick={onStopSniffer} disabled={isBusy}>Stop Sniffer</button>
+          <button className="secondary" onClick={onResetData} disabled={isBusy}>Reset Data</button>
         </div>
       </div>
     </section>

@@ -129,6 +129,53 @@ class HistoryServiceTests(unittest.TestCase):
         self.assertTrue(any(call[0] == "aget_alert_context" for call in sqlite_repo.calls))
         self.assertEqual(memory_repo.calls, [])
 
+    @patch("backend.app.services.history_service.is_persist_enabled", return_value=False)
+    def test_packet_detail_requests_are_cached(self, _mock_persist):
+        memory_repo = _FakeRepository("memory")
+        service = HistoryService(object(), memory_repository=memory_repo)
+
+        first = service.get_packet_detail("packet-1")
+        second = service.get_packet_detail("packet-1")
+
+        self.assertEqual(first["source"], "memory")
+        self.assertEqual(second["source"], "memory")
+        self.assertEqual(
+            [call for call in memory_repo.calls if call[0] == "get_packet_detail"],
+            [("get_packet_detail", "packet-1")],
+        )
+
+    @patch("backend.app.services.history_service.is_persist_enabled", return_value=True)
+    def test_packet_lists_are_cached_per_query(self, _mock_persist):
+        sqlite_repo = _FakeRepository("sqlite")
+        service = HistoryService(object(), sqlite_repository=sqlite_repo)
+
+        first = service.get_packets({"src": "1.1.1.1"})
+        second = service.get_packets({"src": "1.1.1.1"})
+        third = service.get_packets({"src": "8.8.8.8"})
+
+        self.assertEqual(first["source"], "sqlite")
+        self.assertEqual(second["source"], "sqlite")
+        self.assertEqual(third["source"], "sqlite")
+        self.assertEqual(
+            [call[0] for call in sqlite_repo.calls if call[0] == "list_packets"],
+            ["list_packets", "list_packets"],
+        )
+
+    @patch("backend.app.services.history_service.is_persist_enabled", return_value=True)
+    def test_async_alert_context_requests_are_cached(self, _mock_persist):
+        sqlite_repo = _FakeRepository("sqlite")
+        service = HistoryService(object(), sqlite_repository=sqlite_repo)
+
+        first = asyncio.run(service.aget_alert_context("alert-9"))
+        second = asyncio.run(service.aget_alert_context("alert-9"))
+
+        self.assertEqual(first["source"], "sqlite")
+        self.assertEqual(second["source"], "sqlite")
+        self.assertEqual(
+            [call for call in sqlite_repo.calls if call[0] == "aget_alert_context"],
+            [("aget_alert_context", "alert-9")],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

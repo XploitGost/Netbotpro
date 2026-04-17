@@ -37,7 +37,7 @@ function TimelineTable({ timeline }) {
   );
 }
 
-export function OfflineAnalysisPanel({ offlineResult, onFileChange, onRunAnalysis }) {
+export function OfflineAnalysisPanel({ offlineResult, isBusy = false, onFileChange, onRunAnalysis }) {
   const summary = offlineResult?.summary || {};
   const alerts = offlineResult?.alerts || [];
   const suspicious = Boolean(summary.suspicious);
@@ -46,10 +46,11 @@ export function OfflineAnalysisPanel({ offlineResult, onFileChange, onRunAnalysi
     <div className="panel-body">
       <p className="eyebrow">Offline PCAP Analysis</p>
       <div className="stack">
-        <input type="file" accept=".pcap,.pcapng" onChange={(event) => onFileChange(event.target.files?.[0] || null)} />
-        <button className="secondary" onClick={onRunAnalysis}>Analyze PCAP</button>
+        <input type="file" accept=".pcap,.pcapng" onChange={(event) => onFileChange(event.target.files?.[0] || null)} disabled={isBusy} />
+        <button className="secondary" onClick={onRunAnalysis} disabled={isBusy}>Analyze PCAP</button>
+        {isBusy ? <p className="table-status">Analyzing PCAP...</p> : null}
 
-        {!offlineResult ? <p className="muted">No offline analysis yet</p> : null}
+        {!offlineResult ? <p className="table-empty">{isBusy ? "Reading packets and building the offline summary..." : "No offline analysis yet."}</p> : null}
 
         {offlineResult ? (
           <>

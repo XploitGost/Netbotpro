@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { AppNav } from "./components/AppNav";
 import { DetailPanel } from "./components/DetailPanel";
@@ -104,6 +104,7 @@ function App() {
     statusMessage,
     observability,
     error,
+    loadingState,
     localTokenRequired,
     managedLocalToken,
     canStartSniffer,
@@ -149,20 +150,29 @@ function App() {
     resumeLiveFollow,
   } = useDashboardController();
 
-  const captureContext = buildCaptureInspectionContext({
+  const captureContext = useMemo(() => buildCaptureInspectionContext({
     packetMeta,
     settings,
     interfaces,
     capturePreflight,
     sniffer,
-  });
-  const packetInspectionContext = selectedPacketContext || buildPacketInspectionContext(selectedPacket, packets, alerts);
-  const alertInspectionContext = selectedAlertContext || buildAlertInspectionContext(selectedAlert, packets, alerts);
-  const packetInspection = buildPacketInspectionModel(selectedPacket, {
+  }), [packetMeta, settings, interfaces, capturePreflight, sniffer]);
+  const packetInspectionContext = useMemo(
+    () => selectedPacketContext || buildPacketInspectionContext(selectedPacket, packets, alerts),
+    [selectedPacketContext, selectedPacket, packets, alerts]
+  );
+  const alertInspectionContext = useMemo(
+    () => selectedAlertContext || buildAlertInspectionContext(selectedAlert, packets, alerts),
+    [selectedAlertContext, selectedAlert, packets, alerts]
+  );
+  const packetInspection = useMemo(() => buildPacketInspectionModel(selectedPacket, {
     context: packetInspectionContext,
     capture: captureContext,
-  });
-  const alertInspection = buildAlertInspectionModel(selectedAlert, { context: alertInspectionContext });
+  }), [selectedPacket, packetInspectionContext, captureContext]);
+  const alertInspection = useMemo(
+    () => buildAlertInspectionModel(selectedAlert, { context: alertInspectionContext }),
+    [selectedAlert, alertInspectionContext]
+  );
   const selectedPacketIndex = packets.findIndex((packet, index) => String(packet?.id ?? packetMeta.offset + index) === selectedPacketId);
   const selectedAlertIndex = alerts.findIndex((alert, index) => String(alert?.id ?? alertMeta.offset + index) === selectedAlertId);
   const packetNavigation = {
@@ -236,7 +246,7 @@ function App() {
       <button
         type="button"
         className="secondary"
-        disabled={!canExportPacket}
+        disabled={loadingState.exports || !canExportPacket}
         onClick={() => exportInvestigation(createInvestigationExportPayload({ kind: "packet", id: selectedPacketId, model: packetInspection }))}
       >
         Export Packet Report
@@ -244,7 +254,7 @@ function App() {
       <button
         type="button"
         className="secondary"
-        disabled={!canExportAlert}
+        disabled={loadingState.exports || !canExportAlert}
         onClick={() => exportInvestigation(createInvestigationExportPayload({ kind: "alert", id: selectedAlertId, model: alertInspection }))}
       >
         Export Alert Report
@@ -274,6 +284,7 @@ function App() {
           selectedPacketId={selectedPacketId}
           focusedTarget={focusedTarget}
           liveFollow={liveFollow}
+          isLoading={loadingState.packets}
           onPacketQueryChange={handlePacketQueryChange}
           onApplyPacketFilters={applyPacketFilters}
           onPaginatePackets={paginatePackets}
@@ -291,6 +302,7 @@ function App() {
           selectedAlertId={selectedAlertId}
           focusedTarget={focusedTarget}
           liveFollow={liveFollow}
+          isLoading={loadingState.alerts}
           onAlertQueryChange={handleAlertQueryChange}
           onApplyAlertFilters={applyAlertFilters}
           onPaginateAlerts={paginateAlerts}
@@ -324,7 +336,7 @@ function App() {
           model={packetInspection}
           selectionKey={selectedPacketId}
           navigation={packetNavigation}
-          emptyMessage="Select a packet from Monitor to open the inspection view."
+          emptyMessage={loadingState.packetDetail ? "Loading packet inspection..." : "Select a packet from Monitor to open the inspection view."}
         />
       </PageSection>
       <PageSection title="Alert Detail" subtitle="Detection context and scoring without the monitor scroll" wide>
@@ -333,7 +345,7 @@ function App() {
           model={alertInspection}
           selectionKey={selectedAlertId}
           navigation={alertNavigation}
-          emptyMessage="Select an alert from Monitor to inspect its detection metadata."
+          emptyMessage={loadingState.alertDetail ? "Loading alert inspection..." : "Select an alert from Monitor to inspect its detection metadata."}
         />
       </PageSection>
       <PageSection title="Pinned Target" subtitle="Lock onto one IP without the view jumping" fullWidth>
@@ -372,6 +384,7 @@ function App() {
           interfaceOptions={interfaces}
           recommendedInterface={recommendedInterface}
           recommendedInterfaceLabel={recommendedInterfaceLabel}
+          isBusy={loadingState.settings}
           onChange={handleSettingsChange}
           onSave={saveSettings}
         />
@@ -385,6 +398,7 @@ function App() {
         <TraceroutePanel
           tracerouteResult={tracerouteResult}
           tracerouteTarget={tracerouteTarget}
+          isBusy={loadingState.traceroute}
           onTargetChange={setTracerouteTarget}
           onRunTraceroute={runTraceroute}
         />
@@ -395,7 +409,7 @@ function App() {
   const exportsPage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Exports" subtitle="Session exports separated from monitoring" wide>
-        <ExportPanel error={error} exportInfo={exportInfo} onDownload={downloadExport} onExport={exportSession} />
+        <ExportPanel error={error} exportInfo={exportInfo} isBusy={loadingState.exports} onDownload={downloadExport} onExport={exportSession} />
       </PageSection>
     </section>
   );
@@ -403,7 +417,7 @@ function App() {
   const reportsPage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Reports" subtitle="Generated report archive" wide>
-        <ReportsPanel onDownload={downloadExport} reports={reports} />
+        <ReportsPanel isLoading={loadingState.reports} onDownload={downloadExport} reports={reports} />
       </PageSection>
     </section>
   );
@@ -411,7 +425,7 @@ function App() {
   const offlinePage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Offline Analysis" subtitle="Analyze PCAP files in a dedicated workspace" wide>
-        <OfflineAnalysisPanel offlineResult={offlineResult} onFileChange={setOfflineFile} onRunAnalysis={runOfflineAnalysis} />
+        <OfflineAnalysisPanel offlineResult={offlineResult} isBusy={loadingState.offlineAnalysis} onFileChange={setOfflineFile} onRunAnalysis={runOfflineAnalysis} />
       </PageSection>
     </section>
   );
@@ -442,6 +456,7 @@ function App() {
         captureUnavailableDetail={captureUnavailableDetail}
         canStartSniffer={canStartSniffer}
         error={error}
+        isBusy={loadingState.snifferAction}
         onTokenChange={setLocalToken}
         onStartSniffer={startSniffer}
         onStopSniffer={stopSniffer}

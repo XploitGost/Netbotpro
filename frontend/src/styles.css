@@ -578,6 +578,17 @@ td {
   color: var(--muted);
 }
 
+.table-status {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.table-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 22px 0;
+}
+
 .detail-panel {
   min-height: 220px;
   display: grid;

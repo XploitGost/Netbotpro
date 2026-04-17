@@ -9,7 +9,9 @@
     "dev": "electron .",
     "build:frontend": "npm --prefix ../../frontend run build",
     "dist:dir": "npm run build:frontend && electron-builder --dir",
-    "dist": "npm run build:frontend && electron-builder"
+    "dist": "npm run build:frontend && electron-builder",
+    "dist:win": "npm run build:frontend && electron-builder --win",
+    "dist:linux": "npm run build:frontend && electron-builder --linux"
   },
   "devDependencies": {
     "electron": "36.3.1",
@@ -18,7 +20,6 @@
   "build": {
     "appId": "com.netbotpro.desktop",
     "productName": "Netbotpro",
-    "electronDist": "../../.tools/electron-v36.3.1-win32-x64",
     "directories": {
       "output": "dist",
       "buildResources": "build-resources"

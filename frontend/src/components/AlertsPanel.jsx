@@ -8,6 +8,7 @@ export function AlertsPanel({
   selectedAlertId,
   focusedTarget,
   liveFollow,
+  isLoading = false,
   onAlertQueryChange,
   onApplyAlertFilters,
   onPaginateAlerts,
@@ -20,7 +21,15 @@ export function AlertsPanel({
     enabled: alerts.length > 40,
     rowHeight: 60,
     containerHeight: 520,
+    resetKey: JSON.stringify({ offset: alertMeta.offset, total: alertMeta.total, query: alertQuery }),
   });
+  const emptyMessage = isLoading
+    ? "Loading alert history..."
+    : focusedTarget?.ip
+      ? `No alert rows matched the current focus on ${focusedTarget.ip}.`
+      : alertMeta.total > 0
+        ? "This page is empty. Try the previous page or widen the alert filters."
+        : "No alerts are visible yet. Live detections will appear here.";
 
   return (
     <div className="panel-body">
@@ -43,19 +52,20 @@ export function AlertsPanel({
           <input type="checkbox" checked={Boolean(alertQuery.only_remote)} onChange={(event) => onAlertQueryChange("only_remote", event.target.checked)} />
           <span>Only remote traffic</span>
         </label>
-        <button className="secondary" onClick={onApplyAlertFilters}>Apply Alert Filters</button>
+        <button className="secondary" onClick={onApplyAlertFilters} disabled={isLoading}>Apply Alert Filters</button>
       </div>
       <div className="actions-row inline-actions">
-        <button className="secondary" onClick={() => onToggleFollow(!liveFollow)}>
+        <button className="secondary" onClick={() => onToggleFollow(!liveFollow)} disabled={isLoading}>
           {liveFollow ? "Pause Auto Follow" : "Resume Auto Follow"}
         </button>
+        {isLoading ? <span className="table-status">Refreshing alert rows...</span> : null}
       </div>
       <div className="table-head">
         <p className="meta-line">Rows: {alertMeta.total} from {alertMeta.source}</p>
         <div className="pager">
-          <button className="secondary" onClick={() => onPaginateAlerts(-1)} disabled={alertMeta.offset <= 0}>Prev</button>
+          <button className="secondary" onClick={() => onPaginateAlerts(-1)} disabled={isLoading || alertMeta.offset <= 0}>Prev</button>
           <span>{alertMeta.offset + 1}-{Math.min(alertMeta.offset + alerts.length, alertMeta.total || alerts.length)}</span>
-          <button className="secondary" onClick={() => onPaginateAlerts(1)} disabled={alertMeta.offset + pageSize >= alertMeta.total}>Next</button>
+          <button className="secondary" onClick={() => onPaginateAlerts(1)} disabled={isLoading || alertMeta.offset + pageSize >= alertMeta.total}>Next</button>
         </div>
       </div>
       <div className={`table-wrap ${isWindowed ? "table-wrap-windowed" : ""}`} onScroll={onScroll}>
@@ -74,7 +84,7 @@ export function AlertsPanel({
           </thead>
           <tbody>
             {alerts.length === 0 ? (
-              <tr><td colSpan="8" className="muted">No alerts yet</td></tr>
+              <tr><td colSpan="8" className="table-empty">{emptyMessage}</td></tr>
             ) : topSpacerHeight > 0 ? (
               <tr className="spacer-row" aria-hidden="true"><td colSpan="8" style={{ height: `${topSpacerHeight}px` }} /></tr>
             ) : null}
