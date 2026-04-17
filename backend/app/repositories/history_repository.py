@@ -488,6 +488,7 @@ def _root_cause_groups(
     process_correlation: dict[str, Any],
     alert_correlation: dict[str, Any],
     behavior_labels: list[str],
+    behavior_evidence: list[dict[str, Any]] | None = None,
     related_flows: list[dict[str, Any]],
     linked_packet: dict[str, Any] | None = None,
     alert: dict[str, Any] | None = None,
@@ -521,7 +522,15 @@ def _root_cause_groups(
                 "body": f"{process_correlation.get('label') or 'Process'} appears in {process_correlation.get('sessions_total') or 0} sessions and {process_correlation.get('alerts_total') or 0} alert(s).",
             }
         )
-    if behavior_labels:
+    if behavior_evidence:
+        top_behavior = behavior_evidence[0]
+        groups.append(
+            {
+                "title": "Behavior Pattern",
+                "body": f"{top_behavior.get('label') or 'Behavior'}: {top_behavior.get('reason') or ', '.join(behavior_labels)}",
+            }
+        )
+    elif behavior_labels:
         groups.append(
             {
                 "title": "Behavior Pattern",
@@ -581,14 +590,32 @@ def _build_packet_flow_context(packet: dict[str, Any], packet_rows: list[dict[st
         duration_ms = int(max(0.0, (max(timestamps) - min(timestamps)) * 1000.0))
 
     process_correlation = _process_correlation(packet, packet_rows, alert_rows)
-    behavior_labels = _behavior_labels(packet, packet_rows, selected_identity, sorted_flow_packets)
+    host_correlation = _host_correlation(packet, packet_rows)
+    port_correlation = _port_correlation(packet, packet_rows)
+    behavior_evidence = _behavior_evidence(
+        packet,
+        packet_rows,
+        selected_identity,
+        sorted_flow_packets,
+        process_correlation=process_correlation,
+        host_correlation=host_correlation,
+        port_correlation=port_correlation,
+    )
+    behavior_labels = [str(item.get("label")) for item in behavior_evidence if _normalize_text(item.get("label"))]
     related_flows = _related_flows(selected_identity, packet_rows)
     alert_correlation = _alert_correlation_summary(sorted_flow_alerts, pair_alerts, same_remote_alerts)
     root_cause_groups = _root_cause_groups(
         process_correlation=process_correlation,
         alert_correlation=alert_correlation,
         behavior_labels=behavior_labels,
+        behavior_evidence=behavior_evidence,
         related_flows=related_flows,
+    )
+    stream_context = _build_stream_context(
+        packet,
+        sorted_flow_packets,
+        sorted_flow_alerts,
+        selected_packet_id=selected_packet_id,
     )
 
     return {
@@ -614,15 +641,17 @@ def _build_packet_flow_context(packet: dict[str, Any], packet_rows: list[dict[st
         "sample_alerts": len(alert_rows),
         "related_packets": related_packets,
         "related_alerts": related_alerts,
+        "stream_context": stream_context,
         "same_remote_packets": same_remote_packets,
         "same_remote_alerts": same_remote_alerts,
         "related_flows": related_flows,
         "alert_correlation": alert_correlation,
         "root_cause_groups": root_cause_groups,
         "behavior_labels": behavior_labels,
+        "behavior_evidence": behavior_evidence,
         "process_correlation": process_correlation,
-        "host_correlation": _host_correlation(packet, packet_rows),
-        "port_correlation": _port_correlation(packet, packet_rows),
+        "host_correlation": host_correlation,
+        "port_correlation": port_correlation,
         "conversation_clusters": _conversation_clusters(packet, packet_rows),
     }
 
@@ -666,6 +695,99 @@ def _context_where_clause(identity: dict[str, Any], *, include_remote_column: bo
     return f"({' OR '.join(clauses)})", params
 
 
+def _build_session_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sessions: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        identity = _flow_identity(row)
+        flow_id = _normalize_text(identity.get("flow_id"))
+        if not flow_id:
+            continue
+        record = sessions.setdefault(
+            flow_id,
+            {
+                "flow_id": flow_id,
+                "conversation_key": identity.get("conversation_key"),
+                "direction": identity.get("direction"),
+                "local_ip": identity.get("local_ip"),
+                "remote_ip": identity.get("remote_ip"),
+                "proto": identity.get("proto"),
+                "local_port": identity.get("local_port"),
+                "remote_port": identity.get("remote_port"),
+                "packets_total": 0,
+                "bytes_total": 0,
+                "first_seen": row.get("ts"),
+                "last_seen": row.get("ts"),
+                "first_ts": None,
+                "last_ts": None,
+            },
+        )
+        record["packets_total"] += 1
+        record["bytes_total"] += _safe_int(row.get("length")) or 0
+        ts_value = _parse_timestamp_seconds(row.get("ts"))
+        if ts_value is None:
+            continue
+        first_ts = record.get("first_ts")
+        last_ts = record.get("last_ts")
+        if first_ts is None or ts_value < first_ts:
+            record["first_ts"] = ts_value
+            record["first_seen"] = row.get("ts")
+        if last_ts is None or ts_value > last_ts:
+            record["last_ts"] = ts_value
+            record["last_seen"] = row.get("ts")
+
+    items = []
+    for record in sessions.values():
+        first_ts = record.get("first_ts")
+        last_ts = record.get("last_ts")
+        if first_ts is not None and last_ts is not None:
+            record["duration_sec"] = max(0.0, last_ts - first_ts)
+        else:
+            record["duration_sec"] = 0.0
+        items.append(record)
+    return sorted(items, key=lambda item: (item.get("first_ts") is None, item.get("first_ts") or 0.0))
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[middle])
+    return float((ordered[middle - 1] + ordered[middle]) / 2.0)
+
+
+def _behavior_item(
+    item_id: str,
+    *,
+    label: str,
+    scope: str,
+    severity: str,
+    confidence: str,
+    reason: str,
+    evidence: list[str],
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "label": label,
+        "scope": scope,
+        "severity": severity,
+        "confidence": confidence,
+        "reason": reason,
+        "evidence": [str(entry).strip() for entry in evidence if str(entry or "").strip()],
+        "metrics": metrics or {},
+    }
+
+
+def _target_port_for_identity(identity: dict[str, Any], direction: str) -> int | None:
+    if direction == "INCOMING":
+        return identity.get("local_port")
+    if direction == "OUTGOING":
+        return identity.get("remote_port")
+    return identity.get("remote_port") or identity.get("local_port")
+
+
 def _process_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     pid, process_name = _process_key(packet)
     attribution_confidence = _normalize_text(_first_present(packet, "attribution_confidence")) or "unavailable"
@@ -707,6 +829,7 @@ def _process_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any
     rows = [dict(row) for row in packet_rows if same_process(row)]
     process_alerts = [dict(row) for row in (alert_rows or []) if same_process(row)]
     identities = [_flow_identity(row) for row in rows]
+    sessions = _build_session_records(rows)
     sessions_total = len({identity["flow_id"] for identity in identities})
     unique_ports = _unique_non_empty([identity["local_port"] for identity in identities] + [identity["remote_port"] for identity in identities])
     remote_hosts = _unique_non_empty([identity["remote_ip"] for identity in identities])
@@ -745,6 +868,11 @@ def _process_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any
         "ports_total": len(unique_ports),
         "remote_hosts_total": len(remote_hosts),
         "pattern": pattern,
+        "short_sessions_total": sum(
+            1
+            for session in sessions
+            if int(session.get("packets_total") or 0) <= 3 and float(session.get("duration_sec") or 0.0) <= 15.0
+        ),
         "flow_samples": flow_samples,
         "related_packets": related_packets,
         "related_alerts": related_alerts,
@@ -755,10 +883,13 @@ def _host_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any]])
     selected_identity = _flow_identity(packet)
     host_packets = [dict(row) for row in packet_rows if _flow_identity(row)["local_ip"] == selected_identity["local_ip"]]
     identities = [_flow_identity(row) for row in host_packets]
+    sessions = _build_session_records(host_packets)
     unique_remotes = _unique_non_empty([identity["remote_ip"] for identity in identities])
     unique_sessions = {identity["flow_id"] for identity in identities}
     unique_remote_ports = _unique_non_empty([identity["remote_port"] for identity in identities])
     selected_remote_sessions = len({identity["flow_id"] for identity in identities if identity["remote_ip"] == selected_identity["remote_ip"]})
+    outgoing_remote_hosts = _unique_non_empty([identity["remote_ip"] for identity in identities if identity.get("direction") == "OUTGOING"])
+    incoming_remote_hosts = _unique_non_empty([identity["remote_ip"] for identity in identities if identity.get("direction") == "INCOMING"])
 
     timestamps = [_parse_timestamp_seconds(row.get("ts")) for row in host_packets]
     timestamps = [value for value in timestamps if value is not None]
@@ -768,20 +899,29 @@ def _host_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any]])
         burst_packets = sum(1 for value in timestamps if latest - value <= 10.0)
 
     pattern = "Focused host activity"
-    if len(unique_remotes) >= 5:
+    if len(outgoing_remote_hosts) >= 5 and len(unique_sessions) >= 6:
         pattern = "Fan-out pattern observed"
-    elif burst_packets >= 6:
+    elif len(incoming_remote_hosts) >= 5 and len(unique_sessions) >= 6:
+        pattern = "Fan-in pattern observed"
+    elif burst_packets >= 8:
         pattern = "Burst pattern observed"
-    elif selected_remote_sessions >= 3:
+    elif selected_remote_sessions >= 4:
         pattern = "Remote peer appears across multiple sessions"
 
     return {
         "local_ip": selected_identity["local_ip"],
         "remote_hosts_total": len(unique_remotes),
+        "outgoing_remote_hosts_total": len(outgoing_remote_hosts),
+        "incoming_remote_hosts_total": len(incoming_remote_hosts),
         "sessions_total": len(unique_sessions),
         "remote_ports_total": len(unique_remote_ports),
         "selected_remote_sessions_total": selected_remote_sessions,
         "burst_packets_10s": burst_packets,
+        "short_sessions_total": sum(
+            1
+            for session in sessions
+            if int(session.get("packets_total") or 0) <= 3 and float(session.get("duration_sec") or 0.0) <= 15.0
+        ),
         "pattern": pattern,
     }
 
@@ -794,6 +934,7 @@ def _port_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any]])
         if _flow_identity(row)["local_ip"] == selected_identity["local_ip"] and _flow_identity(row)["proto"] == selected_identity["proto"]
     ]
     identities = [_flow_identity(row) for row in host_packets]
+    sessions = _build_session_records(host_packets)
     local_port = selected_identity["local_port"]
     remote_port = selected_identity["remote_port"]
 
@@ -803,18 +944,35 @@ def _port_correlation(packet: dict[str, Any], packet_rows: list[dict[str, Any]])
     local_port_remotes = len({identity["remote_ip"] for identity in same_local_port})
     remote_port_sessions = len({identity["flow_id"] for identity in same_remote_port})
     remote_port_remotes = len({identity["remote_ip"] for identity in same_remote_port})
+    same_remote_host_sessions = [
+        session
+        for session in sessions
+        if _normalize_text(session.get("remote_ip")) == _normalize_text(selected_identity.get("remote_ip"))
+    ]
+    same_remote_target_ports = _unique_non_empty(
+        [_target_port_for_identity(session, _normalize_text(selected_identity.get("direction")).upper()) for session in same_remote_host_sessions]
+    )
+    same_remote_span_sec = 0.0
+    same_remote_times = [float(session.get("first_ts")) for session in same_remote_host_sessions if session.get("first_ts") is not None]
+    if same_remote_times:
+        same_remote_span_sec = max(0.0, max(same_remote_times) - min(same_remote_times))
 
     pattern = "Port usage stays narrow"
-    if remote_port_remotes >= 4:
+    if len(same_remote_target_ports) >= 6 and len(same_remote_host_sessions) >= 6 and same_remote_span_sec <= 60.0:
+        pattern = "Simple port-scan candidate"
+    elif remote_port_remotes >= 4 and remote_port_sessions >= 4:
         pattern = "Sweep pattern candidate"
-    elif local_port_sessions >= 3:
+    elif local_port_sessions >= 4:
         pattern = "Local port reuse across sessions"
-    elif remote_port_sessions >= 3:
+    elif remote_port_sessions >= 4:
         pattern = "Remote service reuse across sessions"
 
     return {
         "local_port": local_port,
         "remote_port": remote_port,
+        "same_remote_target_ports_total": len(same_remote_target_ports),
+        "same_remote_sessions_total": len(same_remote_host_sessions),
+        "same_remote_span_sec": int(round(same_remote_span_sec)),
         "local_port_sessions_total": local_port_sessions,
         "local_port_remote_hosts_total": local_port_remotes,
         "remote_port_sessions_total": remote_port_sessions,
@@ -858,22 +1016,632 @@ def _conversation_clusters(packet: dict[str, Any], packet_rows: list[dict[str, A
     return items
 
 
-def _behavior_labels(packet: dict[str, Any], packet_rows: list[dict[str, Any]], selected_identity: dict[str, Any], flow_packets: list[dict[str, Any]]) -> list[str]:
-    labels: list[str] = []
+def _behavior_evidence(
+    packet: dict[str, Any],
+    packet_rows: list[dict[str, Any]],
+    selected_identity: dict[str, Any],
+    flow_packets: list[dict[str, Any]],
+    *,
+    process_correlation: dict[str, Any] | None = None,
+    host_correlation: dict[str, Any] | None = None,
+    port_correlation: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     host = _host_correlation(packet, packet_rows)
     port = _port_correlation(packet, packet_rows)
     process = _process_correlation(packet, packet_rows)
-    if host.get("pattern") and host["pattern"] not in {"Focused host activity"}:
-        labels.append(str(host["pattern"]))
-    if port.get("pattern") and port["pattern"] not in {"Port usage stays narrow"}:
-        labels.append(str(port["pattern"]))
+    if process_correlation is not None:
+        process = process_correlation
+    if host_correlation is not None:
+        host = host_correlation
+    if port_correlation is not None:
+        port = port_correlation
+
+    flow_sessions = _build_session_records(flow_packets)
+    peer_service_sessions = [
+        session
+        for session in _build_session_records(packet_rows)
+        if _normalize_text(session.get("local_ip")) == _normalize_text(selected_identity.get("local_ip"))
+        and _normalize_text(session.get("remote_ip")) == _normalize_text(selected_identity.get("remote_ip"))
+        and _normalize_text(session.get("proto")) == _normalize_text(selected_identity.get("proto"))
+        and (
+            selected_identity.get("remote_port") is None
+            or session.get("remote_port") == selected_identity.get("remote_port")
+        )
+    ]
+    short_sessions = [
+        session
+        for session in peer_service_sessions
+        if int(session.get("packets_total") or 0) <= 3 and float(session.get("duration_sec") or 0.0) <= 15.0
+    ]
+    if len(short_sessions) >= 4 and len(short_sessions) >= max(4, int(len(peer_service_sessions) * 0.8)):
+        items.append(
+            _behavior_item(
+                "repeated_short_connections",
+                label="Repeated short connections observed",
+                scope="flow",
+                severity="medium",
+                confidence="medium",
+                reason=(
+                    f"{len(short_sessions)} short-lived session(s) were observed to "
+                    f"{selected_identity.get('remote_ip') or '-'} on port {selected_identity.get('remote_port') or '-'}."
+                ),
+                evidence=[
+                    f"{len(short_sessions)} short session(s)",
+                    f"durations <= 15s",
+                    f"packets per session <= 3",
+                ],
+                metrics={
+                    "sessions_total": len(peer_service_sessions),
+                    "short_sessions_total": len(short_sessions),
+                },
+            )
+        )
+        short_starts = [float(session.get("first_ts")) for session in short_sessions if session.get("first_ts") is not None]
+        intervals = [later - earlier for earlier, later in zip(short_starts, short_starts[1:]) if later - earlier > 0]
+        median_interval = _median(intervals) if len(intervals) >= 3 else None
+        if median_interval is not None:
+            max_jitter = max(abs(value - median_interval) for value in intervals)
+            if 5.0 <= median_interval <= 900.0 and max_jitter <= max(2.0, median_interval * 0.2):
+                items.append(
+                    _behavior_item(
+                        "beacon_like_repetition",
+                        label="Beacon-like repetition observed",
+                        scope="flow",
+                        severity="medium",
+                        confidence="medium",
+                        reason=(
+                            f"Repeated short sessions recur at a near-regular cadence "
+                            f"(median interval {int(round(median_interval))}s, jitter {int(round(max_jitter))}s)."
+                        ),
+                        evidence=[
+                            f"{len(short_sessions)} repeated short session(s)",
+                            f"median interval {int(round(median_interval))}s",
+                            f"max jitter {int(round(max_jitter))}s",
+                        ],
+                        metrics={
+                            "sessions_total": len(short_sessions),
+                            "median_interval_sec": round(median_interval, 2),
+                            "max_jitter_sec": round(max_jitter, 2),
+                        },
+                    )
+                )
+
+    if flow_sessions:
+        flow_packet_total = sum(int(session.get("packets_total") or 0) for session in flow_sessions)
+        flow_times = [float(session.get("first_ts")) for session in flow_sessions if session.get("first_ts") is not None]
+        flow_end_times = [float(session.get("last_ts")) for session in flow_sessions if session.get("last_ts") is not None]
+        if flow_packet_total >= 8 and flow_times and flow_end_times and max(flow_end_times) - min(flow_times) <= 15.0:
+            items.append(
+                _behavior_item(
+                    "burst_traffic",
+                    label="Burst pattern observed",
+                    scope="flow",
+                    severity="medium",
+                    confidence="medium",
+                    reason=f"{flow_packet_total} packet(s) were clustered into a short {int(round(max(flow_end_times) - min(flow_times)))}s burst on the active flow.",
+                    evidence=[
+                        f"{flow_packet_total} packet(s) in flow",
+                        f"duration <= 15s",
+                    ],
+                    metrics={
+                        "flow_packets_total": flow_packet_total,
+                        "duration_sec": round(max(flow_end_times) - min(flow_times), 2),
+                    },
+                )
+            )
+
+    host_pattern = _normalize_text(host.get("pattern"))
+    if host_pattern == "Fan-out pattern observed":
+        items.append(
+            _behavior_item(
+                "fan_out",
+                label=host_pattern,
+                scope="host",
+                severity="medium",
+                confidence="medium",
+                reason=(
+                    f"Local host {host.get('local_ip') or '-'} touched "
+                    f"{host.get('outgoing_remote_hosts_total') or host.get('remote_hosts_total') or 0} remote host(s) "
+                    f"across {host.get('sessions_total') or 0} session(s)."
+                ),
+                evidence=[
+                    f"{host.get('outgoing_remote_hosts_total') or host.get('remote_hosts_total') or 0} outbound remote host(s)",
+                    f"{host.get('sessions_total') or 0} session(s)",
+                ],
+                metrics=host,
+            )
+        )
+    elif host_pattern == "Fan-in pattern observed":
+        items.append(
+            _behavior_item(
+                "fan_in",
+                label=host_pattern,
+                scope="host",
+                severity="medium",
+                confidence="medium",
+                reason=(
+                    f"Multiple remote peer(s) converged on local host {host.get('local_ip') or '-'} "
+                    f"across {host.get('sessions_total') or 0} session(s)."
+                ),
+                evidence=[
+                    f"{host.get('incoming_remote_hosts_total') or host.get('remote_hosts_total') or 0} inbound remote host(s)",
+                    f"{host.get('sessions_total') or 0} session(s)",
+                ],
+                metrics=host,
+            )
+        )
+    elif host_pattern == "Burst pattern observed":
+        items.append(
+            _behavior_item(
+                "host_burst",
+                label=host_pattern,
+                scope="host",
+                severity="low",
+                confidence="medium",
+                reason=f"{host.get('burst_packets_10s') or 0} packet(s) were seen for the local host inside the latest 10s window.",
+                evidence=[
+                    f"{host.get('burst_packets_10s') or 0} packet(s) in 10s",
+                ],
+                metrics=host,
+            )
+        )
+    elif host_pattern == "Remote peer appears across multiple sessions":
+        items.append(
+            _behavior_item(
+                "peer_recurrence",
+                label=host_pattern,
+                scope="host",
+                severity="low",
+                confidence="medium",
+                reason=(
+                    f"Remote peer {selected_identity.get('remote_ip') or '-'} appears in "
+                    f"{host.get('selected_remote_sessions_total') or 0} distinct session(s) for the local host."
+                ),
+                evidence=[
+                    f"{host.get('selected_remote_sessions_total') or 0} selected remote session(s)",
+                ],
+                metrics=host,
+            )
+        )
+
+    port_pattern = _normalize_text(port.get("pattern"))
+    if port_pattern and port_pattern != "Port usage stays narrow":
+        if port_pattern == "Simple port-scan candidate":
+            reason = (
+                f"{port.get('same_remote_target_ports_total') or 0} target port(s) were touched against "
+                f"{selected_identity.get('remote_ip') or '-'} inside {port.get('same_remote_span_sec') or 0}s."
+            )
+            evidence = [
+                f"{port.get('same_remote_target_ports_total') or 0} target port(s)",
+                f"{port.get('same_remote_sessions_total') or 0} session(s)",
+                f"span {port.get('same_remote_span_sec') or 0}s",
+            ]
+            severity = "high"
+        elif port_pattern == "Sweep pattern candidate":
+            reason = (
+                f"Remote service port {port.get('remote_port') or '-'} appears across "
+                f"{port.get('remote_port_remote_hosts_total') or 0} remote host(s)."
+            )
+            evidence = [
+                f"{port.get('remote_port_remote_hosts_total') or 0} remote host(s) on same service",
+                f"{port.get('remote_port_sessions_total') or 0} session(s)",
+            ]
+            severity = "medium"
+        elif port_pattern == "Local port reuse across sessions":
+            reason = f"Local port {port.get('local_port') or '-'} is reused across {port.get('local_port_sessions_total') or 0} session(s)."
+            evidence = [
+                f"{port.get('local_port_sessions_total') or 0} local-port session(s)",
+                f"{port.get('local_port_remote_hosts_total') or 0} remote host(s)",
+            ]
+            severity = "low"
+        else:
+            reason = f"Remote service port {port.get('remote_port') or '-'} is reused across {port.get('remote_port_sessions_total') or 0} session(s)."
+            evidence = [
+                f"{port.get('remote_port_sessions_total') or 0} remote-port session(s)",
+                f"{port.get('remote_port_remote_hosts_total') or 0} remote host(s)",
+            ]
+            severity = "low"
+        items.append(
+            _behavior_item(
+                f"port_{port_pattern.lower().replace(' ', '_').replace('-', '_')}",
+                label=port_pattern,
+                scope="port",
+                severity=severity,
+                confidence="medium",
+                reason=reason,
+                evidence=evidence,
+                metrics=port,
+            )
+        )
+
     if process.get("available") and process.get("pattern") and process["pattern"] not in {"Single-session process activity"}:
-        labels.append(str(process["pattern"]))
-    duration_candidates = [_parse_timestamp_seconds(row.get("ts")) for row in flow_packets]
-    duration_candidates = [value for value in duration_candidates if value is not None]
-    if len(flow_packets) >= 6 and duration_candidates and max(duration_candidates) - min(duration_candidates) <= 30.0:
-        labels.append("Burst pattern observed")
-    return labels[:5]
+        items.append(
+            _behavior_item(
+                f"process_{_normalize_text(process['pattern']).lower().replace(' ', '_').replace('-', '_')}",
+                label=str(process["pattern"]),
+                scope="process",
+                severity="low",
+                confidence=str(process.get("attribution_confidence") or "medium"),
+                reason=(
+                    f"{process.get('label') or 'Process'} appears across {process.get('sessions_total') or 0} session(s), "
+                    f"{process.get('ports_total') or 0} port(s), and {process.get('remote_hosts_total') or 0} remote host(s)."
+                ),
+                evidence=[
+                    f"{process.get('sessions_total') or 0} session(s)",
+                    f"{process.get('ports_total') or 0} port(s)",
+                    f"{process.get('remote_hosts_total') or 0} remote host(s)",
+                ],
+                metrics=process,
+            )
+        )
+
+    unique_items: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for item in items:
+        label = _normalize_text(item.get("label"))
+        if not label or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        unique_items.append(item)
+    return unique_items[:6]
+
+
+def _behavior_labels(
+    packet: dict[str, Any],
+    packet_rows: list[dict[str, Any]],
+    selected_identity: dict[str, Any],
+    flow_packets: list[dict[str, Any]],
+    *,
+    process_correlation: dict[str, Any] | None = None,
+    host_correlation: dict[str, Any] | None = None,
+    port_correlation: dict[str, Any] | None = None,
+) -> list[str]:
+    labels = [
+        _normalize_text(item.get("label"))
+        for item in _behavior_evidence(
+            packet,
+            packet_rows,
+            selected_identity,
+            flow_packets,
+            process_correlation=process_correlation,
+            host_correlation=host_correlation,
+            port_correlation=port_correlation,
+        )
+    ]
+    return [label for label in labels if label][:6]
+
+
+def _stream_snippet(value: Any, *, limit: int = 120) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    cleaned = "".join(ch if ch.isprintable() else " " for ch in text.replace("\x00", " "))
+    compact = " ".join(cleaned.split())
+    return compact[:limit].strip()
+
+
+def _http_request_entry(row: dict[str, Any]) -> dict[str, Any] | None:
+    method = _normalize_text(row.get("http_method")).upper()
+    if not method:
+        return None
+    path = _normalize_text(row.get("http_path")) or "/"
+    host = _normalize_text(row.get("http_host")) or _normalize_text(row.get("dst")) or "-"
+    snippet = _stream_snippet(_first_present(row, "payload_ascii", "summary"))
+    body = f"Host {host} | {_normalize_text(row.get('ts')) or '-'}"
+    if snippet:
+        body = f"{body} | {snippet}"
+    return {
+        "title": f"{method} {path}",
+        "body": body,
+        "ts": row.get("ts"),
+        "snippet": snippet,
+    }
+
+
+def _http_response_entry(row: dict[str, Any]) -> dict[str, Any] | None:
+    status = _safe_int(row.get("http_status"))
+    if status is None:
+        return None
+    reason = _normalize_text(row.get("http_reason")) or "-"
+    content_type = _normalize_text(row.get("http_content_type")) or "-"
+    snippet = _stream_snippet(_first_present(row, "payload_ascii", "summary"))
+    body = f"Content-Type {content_type} | {_normalize_text(row.get('ts')) or '-'}"
+    if snippet:
+        body = f"{body} | {snippet}"
+    return {
+        "title": f"{status} {reason}".strip(),
+        "body": body,
+        "ts": row.get("ts"),
+        "snippet": snippet,
+    }
+
+
+def _stream_payload_entry(row: dict[str, Any]) -> dict[str, Any] | None:
+    snippet = _stream_snippet(row.get("payload_ascii"))
+    if not snippet:
+        return None
+    identity = _flow_identity(row)
+    direction = _normalize_text(identity.get("direction")).title() or "Unknown"
+    return {
+        "title": f"{direction} payload | {_normalize_text(row.get('ts')) or '-'}",
+        "body": snippet,
+        "ts": row.get("ts"),
+        "snippet": snippet,
+    }
+
+
+def _stream_timeline_packet_event(row: dict[str, Any], *, selected_packet_id: str = "") -> dict[str, Any]:
+    proto = _normalize_proto(row.get("proto"))
+    direction = _normalize_text(row.get("direction")).title() or "Unknown"
+    sport = _normalize_text(row.get("sport")) or "-"
+    dport = _normalize_text(row.get("dport")) or "-"
+    title = f"{_normalize_text(row.get('ts')) or '-'} | {direction} {proto} {sport}->{dport}"
+    parts = [_normalize_text(row.get("summary")) or "Packet observed in this stream."]
+    process_name = _normalize_text(row.get("process_name"))
+    pid = _normalize_text(row.get("pid"))
+    if process_name or pid:
+        label = process_name or f"PID {pid}"
+        if process_name and pid:
+            label = f"{process_name} ({pid})"
+        parts.append(f"Process: {label}")
+    length = _safe_int(row.get("length"))
+    if length is not None:
+        parts.append(f"Length: {length} bytes")
+    return {
+        "kind": "packet",
+        "id": row.get("id"),
+        "ts": row.get("ts"),
+        "title": title,
+        "body": " | ".join(part for part in parts if part),
+        "process_name": row.get("process_name"),
+        "pid": row.get("pid"),
+        "is_current": _normalize_text(row.get("id")) == selected_packet_id if selected_packet_id else False,
+    }
+
+
+def _stream_timeline_alert_event(row: dict[str, Any], *, selected_alert_id: str = "") -> dict[str, Any]:
+    severity = _normalize_text(row.get("severity")).title() or "Alert"
+    title = f"{_normalize_text(row.get('ts')) or '-'} | Alert {severity} | {_normalize_text(row.get('attack_type')) or 'Detection'}"
+    parts = [
+        _normalize_text(row.get("detail")) or "Alert tied to this stream.",
+        f"Engine: {_normalize_text(row.get('engine')) or '-'}",
+    ]
+    linked_packet = _normalize_text(row.get("packet_id"))
+    if linked_packet:
+        parts.append(f"Linked packet: {linked_packet}")
+    process_name = _normalize_text(row.get("process_name"))
+    pid = _normalize_text(row.get("pid"))
+    if process_name or pid:
+        label = process_name or f"PID {pid}"
+        if process_name and pid:
+            label = f"{process_name} ({pid})"
+        parts.append(f"Process: {label}")
+    return {
+        "kind": "alert",
+        "id": row.get("id"),
+        "packet_id": row.get("packet_id"),
+        "ts": row.get("ts"),
+        "title": title,
+        "body": " | ".join(part for part in parts if part),
+        "process_name": row.get("process_name"),
+        "pid": row.get("pid"),
+        "is_current": _normalize_text(row.get("id")) == selected_alert_id if selected_alert_id else False,
+    }
+
+
+def _stream_process_relationships(flow_packets: list[dict[str, Any]], flow_alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def ensure_bucket(row: dict[str, Any]) -> dict[str, Any] | None:
+        key = _process_key(row)
+        if not any(key):
+            return None
+        bucket = buckets.setdefault(
+            key,
+            {
+                "label": _normalize_text(row.get("process_name")) or (f"PID {_normalize_text(row.get('pid'))}" if _normalize_text(row.get("pid")) else "Unknown process"),
+                "process_name": row.get("process_name"),
+                "pid": row.get("pid"),
+                "parent_pid": row.get("parent_pid"),
+                "parent_process_name": row.get("parent_process_name"),
+                "executable_path": row.get("executable_path"),
+                "attribution_confidence": row.get("attribution_confidence"),
+                "packets_total": 0,
+                "alerts_total": 0,
+                "first_seen": row.get("ts"),
+                "last_seen": row.get("ts"),
+            },
+        )
+        return bucket
+
+    for row in flow_packets:
+        bucket = ensure_bucket(row)
+        if bucket is None:
+            continue
+        bucket["packets_total"] += 1
+        bucket["first_seen"] = bucket["first_seen"] or row.get("ts")
+        bucket["last_seen"] = row.get("ts") or bucket["last_seen"]
+
+    for row in flow_alerts:
+        bucket = ensure_bucket(row)
+        if bucket is None:
+            continue
+        bucket["alerts_total"] += 1
+        bucket["first_seen"] = bucket["first_seen"] or row.get("ts")
+        bucket["last_seen"] = row.get("ts") or bucket["last_seen"]
+
+    relationships = list(buckets.values())
+    relationships.sort(
+        key=lambda item: (
+            -int(item.get("packets_total") or 0),
+            -int(item.get("alerts_total") or 0),
+            _normalize_text(item.get("label")),
+        )
+    )
+    return relationships[:4]
+
+
+def _timeline_sort_key(item: dict[str, Any]) -> tuple[float, int, str]:
+    ts_value = _parse_timestamp_seconds(item.get("ts"))
+    numeric_ts = ts_value if ts_value is not None else float("-inf")
+    kind_rank = 0 if _normalize_text(item.get("kind")) == "packet" else 1
+    return (numeric_ts, kind_rank, _normalize_text(item.get("id")))
+
+
+def _stream_neighbor_id(events: list[dict[str, Any]], current_id: str, *, kind: str, step: int) -> str | None:
+    if not current_id:
+        return None
+    scoped = [event for event in events if _normalize_text(event.get("kind")) == kind and _normalize_text(event.get("id"))]
+    current_index = next((index for index, event in enumerate(scoped) if _normalize_text(event.get("id")) == current_id), -1)
+    if current_index < 0:
+        return None
+    next_index = current_index + step
+    if next_index < 0 or next_index >= len(scoped):
+        return None
+    return _normalize_text(scoped[next_index].get("id")) or None
+
+
+def _build_stream_context(
+    packet: dict[str, Any],
+    flow_packets: list[dict[str, Any]],
+    flow_alerts: list[dict[str, Any]] | None = None,
+    *,
+    selected_packet_id: str = "",
+    selected_alert_id: str = "",
+) -> dict[str, Any]:
+    ascending_packets = list(reversed(_sort_rows_by_time([dict(row) for row in flow_packets])))
+    ascending_alerts = list(reversed(_sort_rows_by_time([dict(row) for row in (flow_alerts or [])])))
+    if not ascending_packets:
+        return {
+            "available": False,
+            "status": "fallback",
+            "protocol": _normalize_proto(packet.get("proto")),
+            "summary": "No flow packets available for stream reconstruction.",
+            "requests_total": 0,
+            "responses_total": 0,
+            "pairs_total": 0,
+            "payload_snippets_total": 0,
+            "timeline_total": 0,
+            "stream_packets_total": 0,
+            "stream_alerts_total": len(ascending_alerts),
+            "stream_processes_total": 0,
+            "request_response_pairs": [],
+            "payload_snippets": [],
+            "timeline": [],
+            "processes": [],
+            "navigation": {
+                "current_packet_id": selected_packet_id or None,
+                "current_alert_id": selected_alert_id or None,
+                "previous_packet_id": None,
+                "next_packet_id": None,
+                "previous_alert_id": None,
+                "next_alert_id": None,
+            },
+            "notes": ["Falling back to flow-level evidence because no stream packets were available."],
+        }
+
+    http_requests: list[dict[str, Any]] = []
+    http_responses: list[dict[str, Any]] = []
+    payload_snippets: list[dict[str, Any]] = []
+    app_protocols = _unique_non_empty([row.get("app_protocol") for row in ascending_packets] + [packet.get("app_protocol")])
+
+    for row in ascending_packets:
+        request_entry = _http_request_entry(row)
+        response_entry = _http_response_entry(row)
+        if request_entry is not None:
+            http_requests.append(request_entry)
+        if response_entry is not None:
+            http_responses.append(response_entry)
+        if request_entry is None and response_entry is None:
+            payload_entry = _stream_payload_entry(row)
+            if payload_entry is not None:
+                payload_snippets.append(payload_entry)
+
+    request_response_pairs: list[dict[str, Any]] = []
+    pair_count = max(len(http_requests), len(http_responses))
+    for index in range(pair_count):
+        request = http_requests[index] if index < len(http_requests) else None
+        response = http_responses[index] if index < len(http_responses) else None
+        request_response_pairs.append(
+            {
+                "title": request.get("title") if request else response.get("title") if response else "HTTP exchange",
+                "body": " | ".join(
+                    part
+                    for part in (
+                        f"Request: {request.get('title')}" if request else "Request: unavailable",
+                        f"Response: {response.get('title')}" if response else "Response: unavailable",
+                    )
+                    if part
+                ),
+                "status": "complete" if request and response else "partial",
+                "request_title": request.get("title") if request else None,
+                "request_body": request.get("body") if request else None,
+                "response_title": response.get("title") if response else None,
+                "response_body": response.get("body") if response else None,
+            }
+        )
+
+    protocol = "HTTP" if http_requests or http_responses else app_protocols[0] if app_protocols else _normalize_proto(packet.get("proto"))
+    notes: list[str] = []
+    status = "fallback"
+    summary = "Flow-level evidence only; no stream reconstruction markers were available."
+
+    if http_requests or http_responses:
+        complete_pairs = sum(1 for item in request_response_pairs if item.get("status") == "complete")
+        status = "complete" if complete_pairs and len(http_requests) == len(http_responses) else "partial"
+        summary = (
+            f"{status.title()} HTTP stream: {len(http_requests)} request marker(s), "
+            f"{len(http_responses)} response marker(s), {complete_pairs} paired exchange(s)."
+        )
+        if len(http_requests) != len(http_responses):
+            notes.append("HTTP metadata is present, but request/response pairing is partial in the current flow sample.")
+        if payload_snippets:
+            notes.append(f"{len(payload_snippets)} payload snippet(s) were captured outside explicit HTTP markers.")
+    elif payload_snippets:
+        status = "partial"
+        summary = f"Captured {len(payload_snippets)} payload snippet(s) across {len(ascending_packets)} packet(s) in this {protocol} conversation."
+        notes.append("No full application request/response markers were available, so stream context falls back to payload snippets.")
+    else:
+        if len(ascending_packets) <= 1:
+            notes.append("Only one packet is available for this flow, so stream reconstruction is not possible.")
+        else:
+            notes.append("Payload previews are empty or unavailable for the current flow sample.")
+
+    timeline = [_stream_timeline_packet_event(row, selected_packet_id=selected_packet_id) for row in ascending_packets]
+    timeline.extend(_stream_timeline_alert_event(row, selected_alert_id=selected_alert_id) for row in ascending_alerts)
+    timeline.sort(key=_timeline_sort_key)
+    if len(timeline) > 12:
+        notes.append(f"Timeline preview is truncated to the first 12 event(s) out of {len(timeline)} stream event(s).")
+    processes = _stream_process_relationships(ascending_packets, ascending_alerts)
+
+    return {
+        "available": bool(http_requests or http_responses or payload_snippets),
+        "status": status,
+        "protocol": protocol,
+        "summary": summary,
+        "requests_total": len(http_requests),
+        "responses_total": len(http_responses),
+        "pairs_total": sum(1 for item in request_response_pairs if item.get("status") == "complete"),
+        "payload_snippets_total": len(payload_snippets),
+        "timeline_total": len(timeline),
+        "stream_packets_total": len(ascending_packets),
+        "stream_alerts_total": len(ascending_alerts),
+        "stream_processes_total": len(processes),
+        "request_response_pairs": request_response_pairs[:4],
+        "payload_snippets": payload_snippets[:6],
+        "timeline": timeline[:12],
+        "processes": processes,
+        "navigation": {
+            "current_packet_id": selected_packet_id or None,
+            "current_alert_id": selected_alert_id or None,
+            "previous_packet_id": _stream_neighbor_id(timeline, selected_packet_id, kind="packet", step=-1),
+            "next_packet_id": _stream_neighbor_id(timeline, selected_packet_id, kind="packet", step=1),
+            "previous_alert_id": _stream_neighbor_id(timeline, selected_alert_id, kind="alert", step=-1),
+            "next_alert_id": _stream_neighbor_id(timeline, selected_alert_id, kind="alert", step=1),
+        },
+        "notes": notes[:4],
+    }
 
 
 def _find_linked_packet(alert: dict[str, Any], packet_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -937,9 +1705,18 @@ def _build_alert_investigation_context(
         process_correlation=process_correlation,
         alert_correlation=alert_correlation,
         behavior_labels=list(flow_context.get("behavior_labels") or []),
+        behavior_evidence=list(flow_context.get("behavior_evidence") or []),
         related_flows=related_flows,
         linked_packet=linked_packet,
         alert=alert,
+    )
+
+    stream_context = _build_stream_context(
+        anchor,
+        flow_packets,
+        sorted_flow_alerts,
+        selected_packet_id=_normalize_text(linked_packet.get("id")) if linked_packet else "",
+        selected_alert_id=selected_alert_id,
     )
 
     return {
@@ -951,6 +1728,7 @@ def _build_alert_investigation_context(
         "linked_packet_summary": _packet_preview(linked_packet) if linked_packet else None,
         "related_packets": related_packets,
         "related_alerts": related_alerts,
+        "stream_context": stream_context,
         "same_remote_packets": same_remote_packets,
         "same_remote_alerts": same_remote_alerts,
         "alert_correlation": alert_correlation,
@@ -1639,6 +2417,8 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         return [self._normalize_packet_row(row) for row in rows]
 
     def _fetch_context_alerts(self, conn: sqlite3.Connection, identity: dict[str, Any]) -> list[dict[str, Any]]:
+        if not self._table_columns(conn, "alerts"):
+            return []
         where, params = _context_where_clause(identity)
         cur = conn.cursor()
         cur.execute(
@@ -1648,6 +2428,8 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         return [self._normalize_alert_row(row) for row in cur.fetchall()]
 
     async def _fetch_context_alerts_async(self, conn: aiosqlite.Connection, identity: dict[str, Any]) -> list[dict[str, Any]]:
+        if not await self._table_columns_async(conn, "alerts"):
+            return []
         where, params = _context_where_clause(identity)
         rows = await self._fetch_rows_async(
             conn,

@@ -549,6 +549,86 @@ function uniqueNonEmpty(values) {
   return [...new Set((values || []).map((value) => cleanText(value)).filter((value) => value && value !== "-"))].sort();
 }
 
+function buildSessionRecordsSample(rows = []) {
+  const sessions = new Map();
+  rows.forEach((row) => {
+    const identity = packetFlowIdentity(row);
+    if (!identity.flowId) return;
+    if (!sessions.has(identity.flowId)) {
+      sessions.set(identity.flowId, {
+        flow_id: identity.flowId,
+        conversation_key: identity.conversationKey,
+        direction: identity.direction,
+        local_ip: identity.localIp,
+        remote_ip: identity.remoteIp,
+        proto: identity.proto,
+        local_port: identity.localPort,
+        remote_port: identity.remotePort,
+        packets_total: 0,
+        bytes_total: 0,
+        first_seen: row?.ts,
+        last_seen: row?.ts,
+        first_ts: null,
+        last_ts: null,
+      });
+    }
+    const current = sessions.get(identity.flowId);
+    current.packets_total += 1;
+    current.bytes_total += Math.max(0, Number(row?.length || 0));
+    const tsValue = parseTimestamp(row?.ts);
+    if (Number.isFinite(tsValue)) {
+      if (!Number.isFinite(current.first_ts) || tsValue < current.first_ts) {
+        current.first_ts = tsValue;
+        current.first_seen = row?.ts;
+      }
+      if (!Number.isFinite(current.last_ts) || tsValue > current.last_ts) {
+        current.last_ts = tsValue;
+        current.last_seen = row?.ts;
+      }
+    }
+  });
+  return [...sessions.values()]
+    .map((session) => ({
+      ...session,
+      duration_sec:
+        Number.isFinite(session.first_ts) && Number.isFinite(session.last_ts)
+          ? Math.max(0, (session.last_ts - session.first_ts) / 1000)
+          : 0,
+    }))
+    .sort((left, right) => {
+      const leftTs = Number.isFinite(left.first_ts) ? left.first_ts : Number.MAX_SAFE_INTEGER;
+      const rightTs = Number.isFinite(right.first_ts) ? right.first_ts : Number.MAX_SAFE_INTEGER;
+      return leftTs - rightTs;
+    });
+}
+
+function medianSample(values = []) {
+  if (!values.length) return null;
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  if (ordered.length % 2) return ordered[middle];
+  return (ordered[middle - 1] + ordered[middle]) / 2;
+}
+
+function behaviorItemSample(id, { label, scope, severity, confidence, reason, evidence, metrics = {} }) {
+  return {
+    id,
+    label,
+    scope,
+    severity,
+    confidence,
+    reason,
+    evidence: Array.isArray(evidence) ? evidence.filter(Boolean) : [],
+    metrics,
+  };
+}
+
+function targetPortForIdentity(identity, direction) {
+  if (direction === "INCOMING") return identity?.localPort ?? null;
+  if (direction === "OUTGOING") return identity?.remotePort ?? null;
+  return identity?.remotePort ?? identity?.localPort ?? null;
+}
+
 function buildProcessCorrelationSample(packet, packetRows, alertRows = []) {
   const pid = cleanText(packet?.pid);
   const processName = cleanText(packet?.process_name);
@@ -585,6 +665,7 @@ function buildProcessCorrelationSample(packet, packetRows, alertRows = []) {
     return false;
   });
   const identities = rows.map((row) => packetFlowIdentity(row));
+  const sessions = buildSessionRecordsSample(rows);
   const sessionIds = new Set(identities.map((identity) => identity.flowId));
   const uniquePorts = uniqueNonEmpty([
     ...identities.map((identity) => identity.localPort),
@@ -637,6 +718,7 @@ function buildProcessCorrelationSample(packet, packetRows, alertRows = []) {
     ports_total: uniquePorts.length,
     remote_hosts_total: remoteHosts.length,
     pattern,
+    short_sessions_total: sessions.filter((session) => session.packets_total <= 3 && session.duration_sec <= 15).length,
     flow_samples: flowSamples,
     related_packets: relatedPackets,
     related_alerts: processAlerts.slice(0, 5).map((row) => ({
@@ -651,15 +733,16 @@ function buildProcessCorrelationSample(packet, packetRows, alertRows = []) {
 
 function buildHostCorrelationSample(packet, packetRows) {
   const selectedIdentity = packetFlowIdentity(packet);
-  const identities = packetRows
-    .map((row) => packetFlowIdentity(row))
-    .filter((identity) => identity.localIp === selectedIdentity.localIp);
+  const hostRows = packetRows.filter((row) => packetFlowIdentity(row).localIp === selectedIdentity.localIp);
+  const identities = hostRows.map((row) => packetFlowIdentity(row));
+  const sessions = buildSessionRecordsSample(hostRows);
   const uniqueRemotes = uniqueNonEmpty(identities.map((identity) => identity.remoteIp));
   const uniqueSessions = new Set(identities.map((identity) => identity.flowId));
   const uniqueRemotePorts = uniqueNonEmpty(identities.map((identity) => identity.remotePort));
   const selectedRemoteSessions = new Set(identities.filter((identity) => identity.remoteIp === selectedIdentity.remoteIp).map((identity) => identity.flowId));
-  const timestamps = packetRows
-    .filter((row) => packetFlowIdentity(row).localIp === selectedIdentity.localIp)
+  const outgoingRemoteHosts = uniqueNonEmpty(identities.filter((identity) => identity.direction === "OUTGOING").map((identity) => identity.remoteIp));
+  const incomingRemoteHosts = uniqueNonEmpty(identities.filter((identity) => identity.direction === "INCOMING").map((identity) => identity.remoteIp));
+  const timestamps = hostRows
     .map((row) => parseTimestamp(row?.ts))
     .filter((value) => Number.isFinite(value));
   let burstPackets = 0;
@@ -669,41 +752,59 @@ function buildHostCorrelationSample(packet, packetRows) {
   }
 
   let pattern = "Focused host activity";
-  if (uniqueRemotes.length >= 5) pattern = "Fan-out pattern observed";
-  else if (burstPackets >= 6) pattern = "Burst pattern observed";
-  else if (selectedRemoteSessions.size >= 3) pattern = "Remote peer appears across multiple sessions";
+  if (outgoingRemoteHosts.length >= 5 && uniqueSessions.size >= 6) pattern = "Fan-out pattern observed";
+  else if (incomingRemoteHosts.length >= 5 && uniqueSessions.size >= 6) pattern = "Fan-in pattern observed";
+  else if (burstPackets >= 8) pattern = "Burst pattern observed";
+  else if (selectedRemoteSessions.size >= 4) pattern = "Remote peer appears across multiple sessions";
 
   return {
     local_ip: selectedIdentity.localIp,
     remote_hosts_total: uniqueRemotes.length,
+    outgoing_remote_hosts_total: outgoingRemoteHosts.length,
+    incoming_remote_hosts_total: incomingRemoteHosts.length,
     sessions_total: uniqueSessions.size,
     remote_ports_total: uniqueRemotePorts.length,
     selected_remote_sessions_total: selectedRemoteSessions.size,
     burst_packets_10s: burstPackets,
+    short_sessions_total: sessions.filter((session) => session.packets_total <= 3 && session.duration_sec <= 15).length,
     pattern,
   };
 }
 
 function buildPortCorrelationSample(packet, packetRows) {
   const selectedIdentity = packetFlowIdentity(packet);
-  const identities = packetRows
+  const hostRows = packetRows
+    .filter((row) => packetFlowIdentity(row).localIp === selectedIdentity.localIp && packetFlowIdentity(row).proto === selectedIdentity.proto);
+  const identities = hostRows
     .map((row) => packetFlowIdentity(row))
     .filter((identity) => identity.localIp === selectedIdentity.localIp && identity.proto === selectedIdentity.proto);
+  const sessions = buildSessionRecordsSample(hostRows);
   const sameLocalPort = identities.filter((identity) => selectedIdentity.localPort != null && identity.localPort === selectedIdentity.localPort);
   const sameRemotePort = identities.filter((identity) => selectedIdentity.remotePort != null && identity.remotePort === selectedIdentity.remotePort);
   const localPortSessions = new Set(sameLocalPort.map((identity) => identity.flowId));
   const localPortRemotes = new Set(sameLocalPort.map((identity) => identity.remoteIp));
   const remotePortSessions = new Set(sameRemotePort.map((identity) => identity.flowId));
   const remotePortRemotes = new Set(sameRemotePort.map((identity) => identity.remoteIp));
+  const sameRemoteHostSessions = sessions.filter((session) => cleanText(session.remote_ip) === cleanText(selectedIdentity.remoteIp));
+  const sameRemoteTargetPorts = uniqueNonEmpty(sameRemoteHostSessions.map((session) => targetPortForIdentity({
+    localPort: session.local_port,
+    remotePort: session.remote_port,
+  }, selectedIdentity.direction)));
+  const sameRemoteTimes = sameRemoteHostSessions.filter((session) => Number.isFinite(session.first_ts)).map((session) => session.first_ts);
+  const sameRemoteSpanSec = sameRemoteTimes.length ? Math.max(0, (Math.max(...sameRemoteTimes) - Math.min(...sameRemoteTimes)) / 1000) : 0;
 
   let pattern = "Port usage stays narrow";
-  if (remotePortRemotes.size >= 4) pattern = "Sweep pattern candidate";
-  else if (localPortSessions.size >= 3) pattern = "Local port reuse across sessions";
-  else if (remotePortSessions.size >= 3) pattern = "Remote service reuse across sessions";
+  if (sameRemoteTargetPorts.length >= 6 && sameRemoteHostSessions.length >= 6 && sameRemoteSpanSec <= 60) pattern = "Simple port-scan candidate";
+  else if (remotePortRemotes.size >= 4 && remotePortSessions.size >= 4) pattern = "Sweep pattern candidate";
+  else if (localPortSessions.size >= 4) pattern = "Local port reuse across sessions";
+  else if (remotePortSessions.size >= 4) pattern = "Remote service reuse across sessions";
 
   return {
     local_port: selectedIdentity.localPort,
     remote_port: selectedIdentity.remotePort,
+    same_remote_target_ports_total: sameRemoteTargetPorts.length,
+    same_remote_sessions_total: sameRemoteHostSessions.length,
+    same_remote_span_sec: Math.round(sameRemoteSpanSec),
     local_port_sessions_total: localPortSessions.size,
     local_port_remote_hosts_total: localPortRemotes.size,
     remote_port_sessions_total: remotePortSessions.size,
@@ -748,19 +849,184 @@ function buildConversationClustersSample(packet, packetRows) {
     }));
 }
 
-function buildBehaviorLabelsSample(packet, packetRows, flowPackets) {
-  const labels = [];
-  const host = buildHostCorrelationSample(packet, packetRows);
-  const port = buildPortCorrelationSample(packet, packetRows);
-  const process = buildProcessCorrelationSample(packet, packetRows);
-  if (host?.pattern && host.pattern !== "Focused host activity") labels.push(host.pattern);
-  if (port?.pattern && port.pattern !== "Port usage stays narrow") labels.push(port.pattern);
-  if (process?.available && process?.pattern && process.pattern !== "Single-session process activity") labels.push(process.pattern);
-  const flowTimes = (flowPackets || []).map((row) => parseTimestamp(row?.ts)).filter((value) => Number.isFinite(value));
-  if ((flowPackets || []).length >= 6 && flowTimes.length && Math.max(...flowTimes) - Math.min(...flowTimes) <= 30_000) {
-    labels.push("Burst pattern observed");
+function buildBehaviorEvidenceSample(packet, packetRows, flowPackets, { processCorrelation = null, hostCorrelation = null, portCorrelation = null } = {}) {
+  const selectedIdentity = packetFlowIdentity(packet);
+  const process = processCorrelation || buildProcessCorrelationSample(packet, packetRows);
+  const host = hostCorrelation || buildHostCorrelationSample(packet, packetRows);
+  const port = portCorrelation || buildPortCorrelationSample(packet, packetRows);
+  const items = [];
+  const peerServiceSessions = buildSessionRecordsSample(packetRows).filter((session) =>
+    cleanText(session.local_ip) === cleanText(selectedIdentity.localIp)
+    && cleanText(session.remote_ip) === cleanText(selectedIdentity.remoteIp)
+    && cleanText(session.proto) === cleanText(selectedIdentity.proto)
+    && (selectedIdentity.remotePort == null || session.remote_port === selectedIdentity.remotePort)
+  );
+  const shortSessions = peerServiceSessions.filter((session) => session.packets_total <= 3 && session.duration_sec <= 15);
+  if (shortSessions.length >= 4 && shortSessions.length >= Math.max(4, Math.floor(peerServiceSessions.length * 0.8))) {
+    items.push(
+      behaviorItemSample("repeated_short_connections", {
+        label: "Repeated short connections observed",
+        scope: "flow",
+        severity: "medium",
+        confidence: "medium",
+        reason: `${shortSessions.length} short-lived session(s) were observed to ${selectedIdentity.remoteIp || "-"} on port ${selectedIdentity.remotePort || "-"}.`,
+        evidence: [`${shortSessions.length} short session(s)`, "durations <= 15s", "packets per session <= 3"],
+        metrics: { sessions_total: peerServiceSessions.length, short_sessions_total: shortSessions.length },
+      })
+    );
+    const shortStarts = shortSessions.filter((session) => Number.isFinite(session.first_ts)).map((session) => session.first_ts);
+    const intervals = shortStarts.slice(1).map((value, index) => (value - shortStarts[index]) / 1000).filter((value) => value > 0);
+    const medianInterval = intervals.length >= 3 ? medianSample(intervals) : null;
+    if (medianInterval != null) {
+      const maxJitter = Math.max(...intervals.map((value) => Math.abs(value - medianInterval)));
+      if (medianInterval >= 5 && medianInterval <= 900 && maxJitter <= Math.max(2, medianInterval * 0.2)) {
+        items.push(
+          behaviorItemSample("beacon_like_repetition", {
+            label: "Beacon-like repetition observed",
+            scope: "flow",
+            severity: "medium",
+            confidence: "medium",
+            reason: `Repeated short sessions recur at a near-regular cadence (median interval ${Math.round(medianInterval)}s, jitter ${Math.round(maxJitter)}s).`,
+            evidence: [
+              `${shortSessions.length} repeated short session(s)`,
+              `median interval ${Math.round(medianInterval)}s`,
+              `max jitter ${Math.round(maxJitter)}s`,
+            ],
+            metrics: { sessions_total: shortSessions.length, median_interval_sec: medianInterval, max_jitter_sec: maxJitter },
+          })
+        );
+      }
+    }
   }
-  return [...new Set(labels)].slice(0, 5);
+
+  const flowSessions = buildSessionRecordsSample(flowPackets || []);
+  const flowPacketTotal = flowSessions.reduce((total, session) => total + session.packets_total, 0);
+  const flowStartTimes = flowSessions.filter((session) => Number.isFinite(session.first_ts)).map((session) => session.first_ts);
+  const flowEndTimes = flowSessions.filter((session) => Number.isFinite(session.last_ts)).map((session) => session.last_ts);
+  if (flowPacketTotal >= 8 && flowStartTimes.length && flowEndTimes.length && (Math.max(...flowEndTimes) - Math.min(...flowStartTimes)) / 1000 <= 15) {
+    items.push(
+      behaviorItemSample("burst_traffic", {
+        label: "Burst pattern observed",
+        scope: "flow",
+        severity: "medium",
+        confidence: "medium",
+        reason: `${flowPacketTotal} packet(s) were clustered into a short ${Math.round((Math.max(...flowEndTimes) - Math.min(...flowStartTimes)) / 1000)}s burst on the active flow.`,
+        evidence: [`${flowPacketTotal} packet(s) in flow`, "duration <= 15s"],
+        metrics: { flow_packets_total: flowPacketTotal },
+      })
+    );
+  }
+
+  if (host?.pattern === "Fan-out pattern observed") {
+    items.push(
+      behaviorItemSample("fan_out", {
+        label: host.pattern,
+        scope: "host",
+        severity: "medium",
+        confidence: "medium",
+        reason: `Local host ${host.local_ip || "-"} touched ${host.outgoing_remote_hosts_total || host.remote_hosts_total || 0} remote host(s) across ${host.sessions_total || 0} session(s).`,
+        evidence: [`${host.outgoing_remote_hosts_total || host.remote_hosts_total || 0} outbound remote host(s)`, `${host.sessions_total || 0} session(s)`],
+        metrics: host,
+      })
+    );
+  } else if (host?.pattern === "Fan-in pattern observed") {
+    items.push(
+      behaviorItemSample("fan_in", {
+        label: host.pattern,
+        scope: "host",
+        severity: "medium",
+        confidence: "medium",
+        reason: `Multiple remote peer(s) converged on local host ${host.local_ip || "-"} across ${host.sessions_total || 0} session(s).`,
+        evidence: [`${host.incoming_remote_hosts_total || host.remote_hosts_total || 0} inbound remote host(s)`, `${host.sessions_total || 0} session(s)`],
+        metrics: host,
+      })
+    );
+  } else if (host?.pattern === "Burst pattern observed") {
+    items.push(
+      behaviorItemSample("host_burst", {
+        label: host.pattern,
+        scope: "host",
+        severity: "low",
+        confidence: "medium",
+        reason: `${host.burst_packets_10s || 0} packet(s) were seen for the local host inside the latest 10s window.`,
+        evidence: [`${host.burst_packets_10s || 0} packet(s) in 10s`],
+        metrics: host,
+      })
+    );
+  } else if (host?.pattern === "Remote peer appears across multiple sessions") {
+    items.push(
+      behaviorItemSample("peer_recurrence", {
+        label: host.pattern,
+        scope: "host",
+        severity: "low",
+        confidence: "medium",
+        reason: `Remote peer ${selectedIdentity.remoteIp || "-"} appears in ${host.selected_remote_sessions_total || 0} distinct session(s) for the local host.`,
+        evidence: [`${host.selected_remote_sessions_total || 0} selected remote session(s)`],
+        metrics: host,
+      })
+    );
+  }
+
+  if (port?.pattern && port.pattern !== "Port usage stays narrow") {
+    let reason = "";
+    let evidence = [];
+    let severity = "low";
+    if (port.pattern === "Simple port-scan candidate") {
+      reason = `${port.same_remote_target_ports_total || 0} target port(s) were touched against ${selectedIdentity.remoteIp || "-"} inside ${port.same_remote_span_sec || 0}s.`;
+      evidence = [`${port.same_remote_target_ports_total || 0} target port(s)`, `${port.same_remote_sessions_total || 0} session(s)`, `span ${port.same_remote_span_sec || 0}s`];
+      severity = "high";
+    } else if (port.pattern === "Sweep pattern candidate") {
+      reason = `Remote service port ${port.remote_port || "-"} appears across ${port.remote_port_remote_hosts_total || 0} remote host(s).`;
+      evidence = [`${port.remote_port_remote_hosts_total || 0} remote host(s) on same service`, `${port.remote_port_sessions_total || 0} session(s)`];
+      severity = "medium";
+    } else if (port.pattern === "Local port reuse across sessions") {
+      reason = `Local port ${port.local_port || "-"} is reused across ${port.local_port_sessions_total || 0} session(s).`;
+      evidence = [`${port.local_port_sessions_total || 0} local-port session(s)`, `${port.local_port_remote_hosts_total || 0} remote host(s)`];
+    } else {
+      reason = `Remote service port ${port.remote_port || "-"} is reused across ${port.remote_port_sessions_total || 0} session(s).`;
+      evidence = [`${port.remote_port_sessions_total || 0} remote-port session(s)`, `${port.remote_port_remote_hosts_total || 0} remote host(s)`];
+    }
+    items.push(
+      behaviorItemSample(`port_${cleanText(port.pattern).toLowerCase().replaceAll(" ", "_").replaceAll("-", "_")}`, {
+        label: port.pattern,
+        scope: "port",
+        severity,
+        confidence: "medium",
+        reason,
+        evidence,
+        metrics: port,
+      })
+    );
+  }
+
+  if (process?.available && process?.pattern && process.pattern !== "Single-session process activity") {
+    items.push(
+      behaviorItemSample(`process_${cleanText(process.pattern).toLowerCase().replaceAll(" ", "_").replaceAll("-", "_")}`, {
+        label: process.pattern,
+        scope: "process",
+        severity: "low",
+        confidence: cleanText(process.attribution_confidence || "medium"),
+        reason: `${process.label || "Process"} appears across ${process.sessions_total || 0} session(s), ${process.ports_total || 0} port(s), and ${process.remote_hosts_total || 0} remote host(s).`,
+        evidence: [`${process.sessions_total || 0} session(s)`, `${process.ports_total || 0} port(s)`, `${process.remote_hosts_total || 0} remote host(s)`],
+        metrics: process,
+      })
+    );
+  }
+
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = cleanText(item?.label);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 6);
+}
+
+function buildBehaviorLabelsSample(packet, packetRows, flowPackets, options = {}) {
+  return buildBehaviorEvidenceSample(packet, packetRows, flowPackets, options)
+    .map((item) => cleanText(item?.label))
+    .filter(Boolean)
+    .slice(0, 6);
 }
 
 function buildRelatedFlowsSample(packet, packetRows = []) {
@@ -815,7 +1081,7 @@ function buildAlertCorrelationSample(flowAlerts = [], peerAlerts = [], sameRemot
   };
 }
 
-function buildRootCauseGroupsSample({ processCorrelation, alertCorrelation, behaviorLabels, relatedFlows, linkedPacketSummary = null }) {
+function buildRootCauseGroupsSample({ processCorrelation, alertCorrelation, behaviorLabels, behaviorEvidence = [], relatedFlows, linkedPacketSummary = null }) {
   const groups = [];
   if (linkedPacketSummary) {
     groups.push({
@@ -841,7 +1107,12 @@ function buildRootCauseGroupsSample({ processCorrelation, alertCorrelation, beha
       body: `${cleanText(processCorrelation?.label) || "Process"} appears across ${formatNumber(Number(processCorrelation?.sessions_total || 0))} sessions and ${formatNumber(Number(processCorrelation?.alerts_total || 0))} alert(s).`,
     });
   }
-  if (Array.isArray(behaviorLabels) && behaviorLabels.length) {
+  if (Array.isArray(behaviorEvidence) && behaviorEvidence.length) {
+    groups.push({
+      title: "Behavior Pattern",
+      body: `${cleanText(behaviorEvidence[0]?.label) || "Behavior"}: ${cleanText(behaviorEvidence[0]?.reason) || behaviorLabels.join(", ") || "-"}`,
+    });
+  } else if (Array.isArray(behaviorLabels) && behaviorLabels.length) {
     groups.push({
       title: "Behavior Pattern",
       body: `Observed pattern(s): ${behaviorLabels.join(", ")}.`,
@@ -894,7 +1165,13 @@ export function buildPacketInspectionContext(packet, packets = [], alerts = []) 
   const hostCorrelation = buildHostCorrelationSample(packet, packetRows);
   const portCorrelation = buildPortCorrelationSample(packet, packetRows);
   const conversationClusters = buildConversationClustersSample(packet, packetRows);
-  const behaviorLabels = buildBehaviorLabelsSample(packet, packetRows, relatedPackets);
+  const behaviorEvidence = buildBehaviorEvidenceSample(packet, packetRows, relatedPackets, {
+    processCorrelation,
+    hostCorrelation,
+    portCorrelation,
+  });
+  const behaviorLabels = behaviorEvidence.map((item) => cleanText(item?.label)).filter(Boolean);
+  const streamContext = buildStreamContextSample(packet, relatedPackets.length ? relatedPackets : [packet], flowAlerts, "");
   const relatedFlows = buildRelatedFlowsSample(packet, packetRows);
   const { sameRemotePackets, sameRemoteAlerts } = buildSameRemoteActivitySample(packet, packetRows, alertRows);
   const alertCorrelation = buildAlertCorrelationSample(flowAlerts, peerAlerts, sameRemoteAlerts);
@@ -902,6 +1179,7 @@ export function buildPacketInspectionContext(packet, packets = [], alerts = []) 
     processCorrelation,
     alertCorrelation,
     behaviorLabels,
+    behaviorEvidence,
     relatedFlows,
   });
 
@@ -928,6 +1206,8 @@ export function buildPacketInspectionContext(packet, packets = [], alerts = []) 
     sample_packets: packetRows.length,
     sample_alerts: alertRows.length,
     behavior_labels: behaviorLabels,
+    behavior_evidence: behaviorEvidence,
+    stream_context: streamContext,
     process_correlation: processCorrelation,
     host_correlation: hostCorrelation,
     port_correlation: portCorrelation,
@@ -987,9 +1267,21 @@ export function buildAlertInspectionContext(alert, packets = [], alerts = []) {
     processCorrelation: packetContext.process_correlation || {},
     alertCorrelation,
     behaviorLabels: packetContext.behavior_labels || [],
+    behaviorEvidence: packetContext.behavior_evidence || [],
     relatedFlows,
     linkedPacketSummary: linkedPacket || null,
   });
+  const streamPacketIds = new Set(
+    [anchor, ...(Array.isArray(packetContext.related_packets) ? packetContext.related_packets : [])]
+      .flatMap((row) => [cleanText(row?.id), cleanText(row?.capture_id)])
+      .filter(Boolean)
+  );
+  const streamContext = buildStreamContextSample(
+    anchor,
+    Array.isArray(packetContext.related_packets) ? [anchor, ...packetContext.related_packets] : [anchor],
+    peerAlerts.filter((row) => relatedAlertMatch(row, anchor, streamPacketIds)),
+    cleanText(alert?.id)
+  );
 
   return {
     ...packetContext,
@@ -1004,6 +1296,7 @@ export function buildAlertInspectionContext(alert, packets = [], alerts = []) {
     related_flows: relatedFlows,
     alert_correlation: alertCorrelation,
     root_cause_groups: rootCauseGroups,
+    stream_context: streamContext,
     source: packetContext.source || "frontend-sample",
   };
 }
@@ -1015,6 +1308,7 @@ function buildRisk(packet, guess, payload, context, signals) {
   const endpoints = determineEndpoints(packet);
   const process = processSummary(packet);
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
+  const behaviorEvidence = Array.isArray(context?.behavior_evidence) ? context.behavior_evidence : Array.isArray(context?.behaviorEvidence) ? context.behaviorEvidence : [];
 
   if (isRemoteIp(endpoints.remoteEndpoint)) {
     score += 0.12;
@@ -1057,7 +1351,10 @@ function buildRisk(packet, guess, payload, context, signals) {
     score += Math.min(0.18, flowAlertsTotal * 0.06);
     reasons.push(`${flowAlertsTotal} related alert(s) were observed for this flow.`);
   }
-  if (behaviorLabels.length) {
+  if (behaviorEvidence.length) {
+    score += Math.min(0.18, behaviorEvidence.length * 0.05);
+    reasons.push(...behaviorEvidence.slice(0, 3).map((item) => cleanText(item?.reason) || `Observed behavior pattern: ${cleanText(item?.label)}`));
+  } else if (behaviorLabels.length) {
     score += Math.min(0.16, behaviorLabels.length * 0.04);
     reasons.push(`Observed behavior pattern(s): ${behaviorLabels.join(", ")}.`);
   }
@@ -1102,6 +1399,7 @@ function buildConfidence(packet, guess, payload, signals) {
 }
 
 function buildRiskExplanation(packet, risk, confidence, signals, process, context) {
+  const behaviorEvidence = Array.isArray(context?.behavior_evidence) ? context.behavior_evidence : Array.isArray(context?.behaviorEvidence) ? context.behaviorEvidence : [];
   const suspiciousReasons = (risk.reasons || []).slice(0, 4);
   const benignSignals = [];
   if (hasValue(packet?.process_name) || hasValue(packet?.pid)) benignSignals.push("A local process mapping is available for this packet.");
@@ -1120,11 +1418,19 @@ function buildRiskExplanation(packet, risk, confidence, signals, process, contex
     narrative,
     rows: toRows([
       { label: "Top Reasons", value: suspiciousReasons.length ? suspiciousReasons.join(" | ") : "No strong suspicious reasons in the current sample" },
+      { label: "Behavior Evidence", value: behaviorEvidence.length ? behaviorEvidence.map((item) => `${cleanText(item?.label)}: ${cleanText(item?.reason)}`).join(" | ") : "-" },
       { label: "Likely Benign Signals", value: benignSignals.length ? benignSignals.join(" | ") : "No strong benign signal in the current sample" },
       { label: "Confidence Text", value: confidenceText },
       { label: "Analyst Narrative", value: narrative },
     ]),
     groups: [
+      {
+        title: "Behavior Evidence",
+        items: behaviorEvidence.map((item) => ({
+          title: `${cleanText(item?.label) || "Behavior"} | ${sentenceCase(item?.confidence || "medium")} confidence`,
+          body: `${cleanText(item?.reason) || "Behavior evidence available."}${Array.isArray(item?.evidence) && item.evidence.length ? ` Evidence: ${item.evidence.join(" | ")}` : ""}`,
+        })),
+      },
       {
         title: "Top Reasons",
         items: suspiciousReasons.map((reason) => ({ title: reason, body: "This evidence pushes the packet higher in the analyst queue." })),
@@ -1148,6 +1454,7 @@ function buildFlowContext(packet, context) {
   const durationMs = Math.max(0, Number(context?.duration_ms ?? context?.durationMs ?? 0));
   const flowPacketsTotal = Number(context?.flow_packets_total ?? context?.flowPacketsTotal ?? 0);
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
+  const behaviorEvidence = Array.isArray(context?.behavior_evidence) ? context.behavior_evidence : Array.isArray(context?.behaviorEvidence) ? context.behaviorEvidence : [];
   let burstLabel = "Isolated in current sample";
   if (flowPacketsTotal >= 6 && durationMs <= 30000) burstLabel = "Burst observed in current sample";
   else if (flowPacketsTotal > 1) burstLabel = "Recurring flow in current sample";
@@ -1160,7 +1467,413 @@ function buildFlowContext(packet, context) {
     duration: formatDuration(durationMs),
     burstLabel,
     behaviorSummary: behaviorLabels.length ? behaviorLabels.join(" | ") : "No broader behavior pattern in current sample",
+    behaviorNarrative: behaviorEvidence.length ? behaviorEvidence.map((item) => cleanText(item?.reason)).filter(Boolean).join(" | ") : "",
     previousPacketDelta: Number.isFinite(context?.previous_packet_delta_ms) ? formatDuration(context.previous_packet_delta_ms) : Number.isFinite(context?.previousPacketDeltaMs) ? formatDuration(context.previousPacketDeltaMs) : "-",
+  };
+}
+
+function buildHttpRequestEntrySample(row) {
+  const method = cleanText(row?.http_method).toUpperCase();
+  if (!method) return null;
+  const path = cleanText(row?.http_path) || "/";
+  const host = cleanText(row?.http_host) || cleanText(row?.dst) || "-";
+  const snippet = cleanText(row?.payload_ascii || row?.summary).replaceAll(/\s+/g, " ").slice(0, 120).trim();
+  return {
+    title: `${method} ${path}`,
+    body: `Host ${host} | ${cleanText(row?.ts) || "-"}${snippet ? ` | ${snippet}` : ""}`,
+    ts: row?.ts,
+    snippet,
+  };
+}
+
+function buildHttpResponseEntrySample(row) {
+  const status = readNumber(row?.http_status);
+  if (status == null) return null;
+  const reason = cleanText(row?.http_reason) || "-";
+  const contentType = cleanText(row?.http_content_type) || "-";
+  const snippet = cleanText(row?.payload_ascii || row?.summary).replaceAll(/\s+/g, " ").slice(0, 120).trim();
+  return {
+    title: `${Math.trunc(status)} ${reason}`.trim(),
+    body: `Content-Type ${contentType} | ${cleanText(row?.ts) || "-"}${snippet ? ` | ${snippet}` : ""}`,
+    ts: row?.ts,
+    snippet,
+  };
+}
+
+function buildPayloadStreamEntrySample(row) {
+  const snippet = cleanText(row?.payload_ascii).replaceAll(/\s+/g, " ").slice(0, 120).trim();
+  if (!snippet) return null;
+  return {
+    title: `${formatDirection(row?.direction)} payload | ${cleanText(row?.ts) || "-"}`,
+    body: snippet,
+    ts: row?.ts,
+    snippet,
+  };
+}
+
+function buildStreamTimelinePacketEventSample(row, selectedPacketId = "") {
+  const proto = normalizeProto(row?.proto) || "OTHER";
+  const direction = formatDirection(row?.direction);
+  const sport = cleanText(row?.sport) || "-";
+  const dport = cleanText(row?.dport) || "-";
+  const processName = cleanText(row?.process_name);
+  const pid = cleanText(row?.pid);
+  const processLabel = processName ? (pid ? `${processName} (${pid})` : processName) : pid ? `PID ${pid}` : "";
+  return {
+    kind: "packet",
+    id: cleanText(row?.id),
+    ts: row?.ts,
+    title: `${cleanText(row?.ts) || "-"} | ${direction} ${proto} ${sport}->${dport}`,
+    body: [
+      cleanText(row?.summary) || "Packet observed in this stream.",
+      processLabel ? `Process: ${processLabel}` : "",
+      hasValue(row?.length) ? `Length: ${Math.max(0, Number(row.length || 0))} bytes` : "",
+    ].filter(Boolean).join(" | "),
+    process_name: row?.process_name || null,
+    pid: row?.pid || null,
+    is_current: cleanText(row?.id) && cleanText(row?.id) === cleanText(selectedPacketId),
+  };
+}
+
+function buildStreamTimelineAlertEventSample(row, selectedAlertId = "") {
+  const severity = sentenceCase(cleanText(row?.severity) || "Alert");
+  const attackType = cleanText(row?.attack_type) || "Detection";
+  const processName = cleanText(row?.process_name);
+  const pid = cleanText(row?.pid);
+  const processLabel = processName ? (pid ? `${processName} (${pid})` : processName) : pid ? `PID ${pid}` : "";
+  return {
+    kind: "alert",
+    id: cleanText(row?.id),
+    packet_id: cleanText(row?.packet_id) || null,
+    ts: row?.ts,
+    title: `${cleanText(row?.ts) || "-"} | Alert ${severity} | ${attackType}`,
+    body: [
+      cleanText(row?.detail) || "Alert tied to this stream.",
+      cleanText(row?.engine) ? `Engine: ${cleanText(row.engine)}` : "",
+      cleanText(row?.packet_id) ? `Linked packet: ${cleanText(row.packet_id)}` : "",
+      processLabel ? `Process: ${processLabel}` : "",
+    ].filter(Boolean).join(" | "),
+    process_name: row?.process_name || null,
+    pid: row?.pid || null,
+    is_current: cleanText(row?.id) && cleanText(row?.id) === cleanText(selectedAlertId),
+  };
+}
+
+function streamTimelineSortValue(item) {
+  const ts = parseTimestamp(item?.ts);
+  const fallback = Number.MAX_SAFE_INTEGER;
+  const kindRank = cleanText(item?.kind) === "packet" ? 0 : 1;
+  const idRank = cleanText(item?.id);
+  return [(Number.isFinite(ts) ? ts : fallback), kindRank, idRank];
+}
+
+function buildStreamProcessRelationshipsSample(flowPackets = [], flowAlerts = []) {
+  const buckets = new Map();
+  const ensureBucket = (row) => {
+    const pid = cleanText(row?.pid);
+    const processName = cleanText(row?.process_name);
+    if (!pid && !processName) return null;
+    const key = `${pid}|${processName}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        label: processName || (pid ? `PID ${pid}` : "Unknown process"),
+        process_name: processName || null,
+        pid: pid || null,
+        parent_pid: row?.parent_pid ?? null,
+        parent_process_name: row?.parent_process_name || null,
+        executable_path: row?.executable_path || null,
+        attribution_confidence: row?.attribution_confidence || null,
+        packets_total: 0,
+        alerts_total: 0,
+        first_seen: row?.ts || null,
+        last_seen: row?.ts || null,
+      });
+    }
+    return buckets.get(key);
+  };
+
+  flowPackets.forEach((row) => {
+    const bucket = ensureBucket(row);
+    if (!bucket) return;
+    bucket.packets_total += 1;
+    bucket.last_seen = row?.ts || bucket.last_seen;
+  });
+  flowAlerts.forEach((row) => {
+    const bucket = ensureBucket(row);
+    if (!bucket) return;
+    bucket.alerts_total += 1;
+    bucket.last_seen = row?.ts || bucket.last_seen;
+  });
+
+  return [...buckets.values()]
+    .sort((left, right) => {
+      const packetDelta = Number(right?.packets_total || 0) - Number(left?.packets_total || 0);
+      if (packetDelta) return packetDelta;
+      const alertDelta = Number(right?.alerts_total || 0) - Number(left?.alerts_total || 0);
+      if (alertDelta) return alertDelta;
+      return cleanText(left?.label).localeCompare(cleanText(right?.label));
+    })
+    .slice(0, 4);
+}
+
+function findStreamNeighborId(items, currentId, kind, step) {
+  const scoped = (Array.isArray(items) ? items : []).filter((item) => cleanText(item?.kind) === kind && cleanText(item?.id));
+  const currentIndex = scoped.findIndex((item) => cleanText(item?.id) === cleanText(currentId));
+  if (currentIndex < 0) return null;
+  const nextIndex = currentIndex + step;
+  if (nextIndex < 0 || nextIndex >= scoped.length) return null;
+  return cleanText(scoped[nextIndex]?.id) || null;
+}
+
+function buildStreamContextSample(packet, flowPackets = [], flowAlerts = [], selectedAlertId = "") {
+  const ascendingPackets = [...(flowPackets || [])]
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftTs = parseTimestamp(left?.ts);
+      const rightTs = parseTimestamp(right?.ts);
+      return (Number.isFinite(leftTs) ? leftTs : Number.MAX_SAFE_INTEGER) - (Number.isFinite(rightTs) ? rightTs : Number.MAX_SAFE_INTEGER);
+    });
+  const ascendingAlerts = [...(flowAlerts || [])]
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftTs = parseTimestamp(left?.ts);
+      const rightTs = parseTimestamp(right?.ts);
+      return (Number.isFinite(leftTs) ? leftTs : Number.MAX_SAFE_INTEGER) - (Number.isFinite(rightTs) ? rightTs : Number.MAX_SAFE_INTEGER);
+    });
+  if (!ascendingPackets.length) {
+    return {
+      available: false,
+      status: "fallback",
+      protocol: normalizeProto(packet?.proto) || "UNKNOWN",
+      summary: "No flow packets available for stream reconstruction.",
+      requests_total: 0,
+      responses_total: 0,
+      pairs_total: 0,
+      payload_snippets_total: 0,
+      timeline_total: 0,
+      stream_packets_total: 0,
+      stream_alerts_total: ascendingAlerts.length,
+      stream_processes_total: 0,
+      request_response_pairs: [],
+      payload_snippets: [],
+      timeline: [],
+      processes: [],
+      navigation: {
+        current_packet_id: cleanText(packet?.id) || null,
+        current_alert_id: cleanText(selectedAlertId) || null,
+        previous_packet_id: null,
+        next_packet_id: null,
+        previous_alert_id: null,
+        next_alert_id: null,
+      },
+      notes: ["Falling back to flow-level evidence because no stream packets were available."],
+    };
+  }
+
+  const httpRequests = [];
+  const httpResponses = [];
+  const payloadSnippets = [];
+  ascendingPackets.forEach((row) => {
+    const request = buildHttpRequestEntrySample(row);
+    const response = buildHttpResponseEntrySample(row);
+    if (request) httpRequests.push(request);
+    if (response) httpResponses.push(response);
+    if (!request && !response) {
+      const payloadEntry = buildPayloadStreamEntrySample(row);
+      if (payloadEntry) payloadSnippets.push(payloadEntry);
+    }
+  });
+
+  const requestResponsePairs = [];
+  const pairCount = Math.max(httpRequests.length, httpResponses.length);
+  for (let index = 0; index < pairCount; index += 1) {
+    const request = httpRequests[index] || null;
+    const response = httpResponses[index] || null;
+    requestResponsePairs.push({
+      title: request?.title || response?.title || "HTTP exchange",
+      body: [request ? `Request: ${request.title}` : "Request: unavailable", response ? `Response: ${response.title}` : "Response: unavailable"].join(" | "),
+      status: request && response ? "complete" : "partial",
+      request_title: request?.title || null,
+      request_body: request?.body || null,
+      response_title: response?.title || null,
+      response_body: response?.body || null,
+    });
+  }
+
+  const appProtocols = uniqueNonEmpty([...ascendingPackets.map((row) => row?.app_protocol), packet?.app_protocol]);
+  const protocol = httpRequests.length || httpResponses.length ? "HTTP" : appProtocols[0] || normalizeProto(packet?.proto) || "UNKNOWN";
+  const notes = [];
+  let status = "fallback";
+  let summary = "Flow-level evidence only; no stream reconstruction markers were available.";
+
+  if (httpRequests.length || httpResponses.length) {
+    const completePairs = requestResponsePairs.filter((item) => item.status === "complete").length;
+    status = completePairs && httpRequests.length === httpResponses.length ? "complete" : "partial";
+    summary = `${sentenceCase(status)} HTTP stream: ${httpRequests.length} request marker(s), ${httpResponses.length} response marker(s), ${completePairs} paired exchange(s).`;
+    if (httpRequests.length !== httpResponses.length) notes.push("HTTP metadata is present, but request/response pairing is partial in the current flow sample.");
+    if (payloadSnippets.length) notes.push(`${payloadSnippets.length} payload snippet(s) were captured outside explicit HTTP markers.`);
+  } else if (payloadSnippets.length) {
+    status = "partial";
+    summary = `Captured ${payloadSnippets.length} payload snippet(s) across ${ascendingPackets.length} packet(s) in this ${protocol} conversation.`;
+    notes.push("No full application request/response markers were available, so stream context falls back to payload snippets.");
+  } else {
+    if (ascendingPackets.length <= 1) notes.push("Only one packet is available for this flow, so stream reconstruction is not possible.");
+    else notes.push("Payload previews are empty or unavailable for the current flow sample.");
+  }
+
+  const timeline = [
+    ...ascendingPackets.map((row) => buildStreamTimelinePacketEventSample(row, packet?.id)),
+    ...ascendingAlerts.map((row) => buildStreamTimelineAlertEventSample(row, selectedAlertId)),
+  ].sort((left, right) => {
+    const [leftTs, leftKind, leftId] = streamTimelineSortValue(left);
+    const [rightTs, rightKind, rightId] = streamTimelineSortValue(right);
+    if (leftTs !== rightTs) return leftTs - rightTs;
+    if (leftKind !== rightKind) return leftKind - rightKind;
+    return String(leftId).localeCompare(String(rightId));
+  });
+  if (timeline.length > 12) notes.push(`Timeline preview is truncated to the first 12 event(s) out of ${timeline.length} stream event(s).`);
+  const processes = buildStreamProcessRelationshipsSample(ascendingPackets, ascendingAlerts);
+
+  return {
+    available: Boolean(httpRequests.length || httpResponses.length || payloadSnippets.length),
+    status,
+    protocol,
+    summary,
+    requests_total: httpRequests.length,
+    responses_total: httpResponses.length,
+    pairs_total: requestResponsePairs.filter((item) => item.status === "complete").length,
+    payload_snippets_total: payloadSnippets.length,
+    timeline_total: timeline.length,
+    stream_packets_total: ascendingPackets.length,
+    stream_alerts_total: ascendingAlerts.length,
+    stream_processes_total: processes.length,
+    request_response_pairs: requestResponsePairs.slice(0, 4),
+    payload_snippets: payloadSnippets.slice(0, 6),
+    timeline: timeline.slice(0, 12),
+    processes,
+    navigation: {
+      current_packet_id: cleanText(packet?.id) || null,
+      current_alert_id: cleanText(selectedAlertId) || null,
+      previous_packet_id: findStreamNeighborId(timeline, packet?.id, "packet", -1),
+      next_packet_id: findStreamNeighborId(timeline, packet?.id, "packet", 1),
+      previous_alert_id: findStreamNeighborId(timeline, selectedAlertId, "alert", -1),
+      next_alert_id: findStreamNeighborId(timeline, selectedAlertId, "alert", 1),
+    },
+    notes: notes.slice(0, 4),
+  };
+}
+
+function buildStreamInspection(streamContext) {
+  const stream = streamContext || {};
+  const pairs = Array.isArray(stream?.request_response_pairs) ? stream.request_response_pairs : Array.isArray(stream?.requestResponsePairs) ? stream.requestResponsePairs : [];
+  const snippets = Array.isArray(stream?.payload_snippets) ? stream.payload_snippets : Array.isArray(stream?.payloadSnippets) ? stream.payloadSnippets : [];
+  const timeline = Array.isArray(stream?.timeline) ? stream.timeline : [];
+  const processes = Array.isArray(stream?.processes) ? stream.processes : [];
+  const navigation = stream?.navigation || {};
+  const notes = Array.isArray(stream?.notes) ? stream.notes : [];
+  return {
+    rows: toRows([
+      { label: "Status", value: sentenceCase(stream?.status || "fallback") },
+      { label: "Protocol", value: stream?.protocol || "-" },
+      { label: "Summary", value: stream?.summary || "No stream context available." },
+      { label: "Requests", value: formatNumber(Number(stream?.requests_total ?? stream?.requestsTotal ?? 0)) },
+      { label: "Responses", value: formatNumber(Number(stream?.responses_total ?? stream?.responsesTotal ?? 0)) },
+      { label: "Paired Exchanges", value: formatNumber(Number(stream?.pairs_total ?? stream?.pairsTotal ?? 0)) },
+      { label: "Payload Snippets", value: formatNumber(Number(stream?.payload_snippets_total ?? stream?.payloadSnippetsTotal ?? 0)) },
+      { label: "Timeline Events", value: formatNumber(Number(stream?.timeline_total ?? stream?.timelineTotal ?? timeline.length)) },
+      { label: "Stream Packets", value: formatNumber(Number(stream?.stream_packets_total ?? stream?.streamPacketsTotal ?? 0)) },
+      { label: "Stream Alerts", value: formatNumber(Number(stream?.stream_alerts_total ?? stream?.streamAlertsTotal ?? 0)) },
+      { label: "Stream Processes", value: formatNumber(Number(stream?.stream_processes_total ?? stream?.streamProcessesTotal ?? processes.length)) },
+    ]),
+    groups: [
+      {
+        title: "Next / Previous",
+        items: [
+          navigation?.previous_packet_id
+            ? {
+                title: `Previous stream packet | ${cleanText(navigation.previous_packet_id)}`,
+                body: "Jump to the previous packet inside this reconstructed stream.",
+                actionKind: "packet",
+                actionId: cleanText(navigation.previous_packet_id),
+                actionLabel: "Open Packet",
+              }
+            : null,
+          navigation?.next_packet_id
+            ? {
+                title: `Next stream packet | ${cleanText(navigation.next_packet_id)}`,
+                body: "Jump to the next packet inside this reconstructed stream.",
+                actionKind: "packet",
+                actionId: cleanText(navigation.next_packet_id),
+                actionLabel: "Open Packet",
+              }
+            : null,
+          navigation?.previous_alert_id
+            ? {
+                title: `Previous stream alert | ${cleanText(navigation.previous_alert_id)}`,
+                body: "Jump to the previous alert tied to the same stream.",
+                actionKind: "alert",
+                actionId: cleanText(navigation.previous_alert_id),
+                actionLabel: "Open Alert",
+              }
+            : null,
+          navigation?.next_alert_id
+            ? {
+                title: `Next stream alert | ${cleanText(navigation.next_alert_id)}`,
+                body: "Jump to the next alert tied to the same stream.",
+                actionKind: "alert",
+                actionId: cleanText(navigation.next_alert_id),
+                actionLabel: "Open Alert",
+              }
+            : null,
+        ].filter(Boolean),
+      },
+      {
+        title: "Stream Timeline",
+        items: timeline.map((item) => ({
+          title: `${cleanText(item?.title) || "Stream event"}${item?.is_current ? " | Current selection" : ""}`,
+          body: cleanText(item?.body) || "Timeline event summary unavailable",
+          actionKind: cleanText(item?.kind),
+          actionId: cleanText(item?.id),
+          actionLabel: cleanText(item?.kind) === "alert" ? "Open Alert" : "Open Packet",
+        })),
+      },
+      {
+        title: "Stream Processes",
+        items: processes.map((item) => ({
+          title: cleanText(item?.label) || "Process tied to this stream",
+          body: [
+            `${formatNumber(Number(item?.packets_total || 0))} packet(s)`,
+            `${formatNumber(Number(item?.alerts_total || 0))} alert(s)`,
+            cleanText(item?.executable_path),
+          ].filter(Boolean).join(" | "),
+          actionKind: "process",
+          processName: cleanText(item?.process_name),
+          pid: cleanText(item?.pid),
+          actionLabel: "Filter Process",
+        })),
+      },
+      {
+        title: "Request / Response",
+        items: pairs.map((item) => ({
+          title: `${cleanText(item?.title) || "HTTP exchange"} | ${sentenceCase(item?.status || "partial")}`,
+          body: [cleanText(item?.request_body), cleanText(item?.response_body)].filter(Boolean).join(" || ") || cleanText(item?.body) || "Exchange summary unavailable",
+        })),
+      },
+      {
+        title: "Payload Snippets",
+        items: snippets.map((item) => ({
+          title: cleanText(item?.title) || "Payload snippet",
+          body: cleanText(item?.body) || cleanText(item?.snippet) || "Snippet unavailable",
+        })),
+      },
+      {
+        title: "Stream Notes",
+        items: notes.map((note) => ({
+          title: "Fallback / Reassembly note",
+          body: cleanText(note),
+        })),
+      },
+    ].filter((group) => group.items.length),
   };
 }
 
@@ -1249,12 +1962,32 @@ function buildRelatedActivity(context) {
 
 function buildBehaviorGroups(context) {
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
+  const behaviorEvidence = Array.isArray(context?.behavior_evidence) ? context.behavior_evidence : Array.isArray(context?.behaviorEvidence) ? context.behaviorEvidence : [];
   const process = context?.process_correlation || context?.processCorrelation || {};
   const host = context?.host_correlation || context?.hostCorrelation || {};
   const port = context?.port_correlation || context?.portCorrelation || {};
   const clusters = Array.isArray(context?.conversation_clusters) ? context.conversation_clusters : Array.isArray(context?.conversationClusters) ? context.conversationClusters : [];
+  const scopedItems = (scope) =>
+    behaviorEvidence
+      .filter((item) => cleanText(item?.scope).toLowerCase() === scope)
+      .map((item) => ({
+        title: `${cleanText(item?.label) || "Behavior"} | ${sentenceCase(item?.confidence || "medium")} confidence`,
+        body: `${cleanText(item?.reason) || "Behavior evidence available."}${Array.isArray(item?.evidence) && item.evidence.length ? ` Evidence: ${item.evidence.join(" | ")}` : ""}`,
+      }));
 
   return [
+    {
+      title: "Behavior Overview",
+      eyebrow: "Behavior lens",
+      rows: toRows([
+        { label: "Labels", value: behaviorLabels.length ? behaviorLabels.join(" | ") : "-" },
+        { label: "Evidence Count", value: formatNumber(behaviorEvidence.length) },
+      ]),
+      items: behaviorEvidence.map((item) => ({
+        title: `${cleanText(item?.label) || "Behavior"} | ${sentenceCase(item?.severity || "medium")} severity`,
+        body: `${cleanText(item?.reason) || "Behavior evidence available."}${Array.isArray(item?.evidence) && item.evidence.length ? ` Evidence: ${item.evidence.join(" | ")}` : ""}`,
+      })),
+    },
     {
       title: "Process-centric",
       eyebrow: "Behavior lens",
@@ -1272,6 +2005,7 @@ function buildBehaviorGroups(context) {
         { label: "Sessions", value: formatNumber(Number(process?.sessions_total ?? process?.sessionsTotal ?? 0)) },
         { label: "Ports Touched", value: formatNumber(Number(process?.ports_total ?? process?.portsTotal ?? 0)) },
         { label: "Remote Hosts", value: formatNumber(Number(process?.remote_hosts_total ?? process?.remoteHostsTotal ?? 0)) },
+        { label: "Short Sessions", value: formatNumber(Number(process?.short_sessions_total ?? process?.shortSessionsTotal ?? 0)) },
       ]),
       items: Array.isArray(process?.related_packets)
         ? process.related_packets.map((sample) => ({
@@ -1294,6 +2028,7 @@ function buildBehaviorGroups(context) {
                   body: cleanText(sample?.body) || "Process activity sample",
                 }))
               : [],
+      extraItems: scopedItems("process"),
     },
     {
       title: "Host-centric",
@@ -1302,13 +2037,16 @@ function buildBehaviorGroups(context) {
         { label: "Local Host", value: host?.local_ip || host?.localIp },
         { label: "Pattern", value: host?.pattern },
         { label: "Remote Hosts", value: formatNumber(Number(host?.remote_hosts_total ?? host?.remoteHostsTotal ?? 0)) },
+        { label: "Outbound Remote Hosts", value: formatNumber(Number(host?.outgoing_remote_hosts_total ?? host?.outgoingRemoteHostsTotal ?? 0)) },
+        { label: "Inbound Remote Hosts", value: formatNumber(Number(host?.incoming_remote_hosts_total ?? host?.incomingRemoteHostsTotal ?? 0)) },
         { label: "Sessions", value: formatNumber(Number(host?.sessions_total ?? host?.sessionsTotal ?? 0)) },
         { label: "Remote Ports", value: formatNumber(Number(host?.remote_ports_total ?? host?.remotePortsTotal ?? 0)) },
         { label: "Selected Remote Sessions", value: formatNumber(Number(host?.selected_remote_sessions_total ?? host?.selectedRemoteSessionsTotal ?? 0)) },
         { label: "Burst Window (10s)", value: formatNumber(Number(host?.burst_packets_10s ?? host?.burstPackets10s ?? 0)) },
+        { label: "Short Sessions", value: formatNumber(Number(host?.short_sessions_total ?? host?.shortSessionsTotal ?? 0)) },
         { label: "Behavior Labels", value: behaviorLabels.length ? behaviorLabels.join(" | ") : "-" },
       ]),
-      items: [],
+      items: scopedItems("host"),
     },
     {
       title: "Port-centric",
@@ -1317,12 +2055,15 @@ function buildBehaviorGroups(context) {
         { label: "Pattern", value: port?.pattern },
         { label: "Local Port", value: port?.local_port ?? port?.localPort },
         { label: "Remote Port", value: port?.remote_port ?? port?.remotePort },
+        { label: "Target Ports On Selected Remote", value: formatNumber(Number(port?.same_remote_target_ports_total ?? port?.sameRemoteTargetPortsTotal ?? 0)) },
+        { label: "Selected Remote Sessions", value: formatNumber(Number(port?.same_remote_sessions_total ?? port?.sameRemoteSessionsTotal ?? 0)) },
+        { label: "Selected Remote Span", value: Number(port?.same_remote_span_sec ?? port?.sameRemoteSpanSec ?? 0) > 0 ? `${formatNumber(Number(port?.same_remote_span_sec ?? port?.sameRemoteSpanSec ?? 0))}s` : "-" },
         { label: "Local Port Sessions", value: formatNumber(Number(port?.local_port_sessions_total ?? port?.localPortSessionsTotal ?? 0)) },
         { label: "Local Port Remote Hosts", value: formatNumber(Number(port?.local_port_remote_hosts_total ?? port?.localPortRemoteHostsTotal ?? 0)) },
         { label: "Remote Port Sessions", value: formatNumber(Number(port?.remote_port_sessions_total ?? port?.remotePortSessionsTotal ?? 0)) },
         { label: "Remote Port Remote Hosts", value: formatNumber(Number(port?.remote_port_remote_hosts_total ?? port?.remotePortRemoteHostsTotal ?? 0)) },
       ]),
-      items: [],
+      items: scopedItems("port"),
     },
     {
       title: "Conversation Clusters",
@@ -1336,7 +2077,12 @@ function buildBehaviorGroups(context) {
         body: cleanText(cluster?.body) || "Cluster summary unavailable",
       })),
     },
-  ].filter((group) => group.rows.length || group.items.length);
+  ]
+    .map((group) => ({
+      ...group,
+      items: [...(Array.isArray(group.items) ? group.items : []), ...(Array.isArray(group.extraItems) ? group.extraItems : [])],
+    }))
+    .filter((group) => group.rows.length || group.items.length);
 }
 
 function buildRawRows(data, handledKeys) {
@@ -1348,9 +2094,13 @@ function buildRawRows(data, handledKeys) {
 
 function actionHint(packet, risk, guess, context) {
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
+  const behaviorEvidence = Array.isArray(context?.behavior_evidence) ? context.behavior_evidence : Array.isArray(context?.behaviorEvidence) ? context.behaviorEvidence : [];
   const payload = analyzePayload(packet);
   const signals = protocolSignals(packet, serviceGuess(packet), payload);
-  if (behaviorLabels.some((label) => /fan-out|sweep|burst/i.test(label))) {
+  if (behaviorEvidence.length) {
+    return cleanText(behaviorEvidence[0]?.reason) || "Pivot into the broader behavior evidence before making a decision.";
+  }
+  if (behaviorLabels.some((label) => /fan-out|fan-in|sweep|burst|beacon|scan/i.test(label))) {
     return "Pivot into the broader host pattern to confirm whether this flow belongs to scanning, burst, or wide fan-out behavior.";
   }
   if (risk.label === "High") {
@@ -1404,6 +2154,8 @@ export function buildPacketInspectionModel(packet, options = {}) {
   const flow = getFlowSummary(packet.src, packet.dst);
   const endpoints = determineEndpoints(packet);
   const flowContext = buildFlowContext(packet, context);
+  const streamContext = context?.stream_context || context?.streamContext || {};
+  const streamInspection = buildStreamInspection(streamContext);
   const ports = resolveConversationPorts(packet, endpoints);
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
   const riskExplanation = buildRiskExplanation(packet, risk, confidence, signals, process, context);
@@ -1565,9 +2317,9 @@ export function buildPacketInspectionModel(packet, options = {}) {
     interpretedSummary: `${guess.label} | ${classification}`,
     analystCards,
     investigationTabs: [
-      { id: "packet", label: "Packet", sections: ["hero", "verdict", "network", "transport", "risk", "application", "payload", "enrichment", "raw"] },
-      { id: "flow", label: "Flow", sections: ["hero", "flow", "correlation", "related", "risk"] },
-      { id: "process", label: "Process", sections: ["hero", "process", "correlation", "related", "risk"] },
+      { id: "packet", label: "Packet", sections: ["hero", "verdict", "network", "transport", "stream", "risk", "application", "payload", "enrichment", "raw"] },
+      { id: "flow", label: "Flow", sections: ["hero", "flow", "stream", "correlation", "related", "risk"] },
+      { id: "process", label: "Process", sections: ["hero", "process", "stream", "correlation", "related", "risk"] },
     ],
     verdictRows: [
       { label: "Packet Type", value: classification },
@@ -1642,6 +2394,8 @@ export function buildPacketInspectionModel(packet, options = {}) {
       { label: "Same Peer Alerts", value: formatNumber(Number(context?.same_peer_alerts_total ?? context?.peerAlertsTotal ?? 0)) },
       { label: "Same Port Context", value: formatNumber(Number(context?.same_port_packets_total ?? context?.samePortCount ?? 0)) },
       { label: "Behavior Labels", value: flowContext.behaviorSummary },
+      { label: "Behavior Narrative", value: flowContext.behaviorNarrative || "-" },
+      { label: "Stream Status", value: sentenceCase(streamContext?.status || "fallback") },
       { label: "First Seen", value: flowContext.firstSeen },
       { label: "Last Seen", value: flowContext.lastSeen },
       { label: "Duration", value: flowContext.duration },
@@ -1658,6 +2412,8 @@ export function buildPacketInspectionModel(packet, options = {}) {
       { label: "Scope", value: packet?.scope },
     ],
     applicationGroups,
+    streamRows: streamInspection.rows,
+    streamGroups: streamInspection.groups,
     payload,
     payloadRows: [
       { label: "Payload Length", value: packet?.payload_len ? `${packet.payload_len} bytes` : "0 bytes" },
@@ -1687,6 +2443,9 @@ export function buildAlertInspectionModel(alert, options = {}) {
   const processCorrelation = context?.process_correlation || context?.processCorrelation || {};
   const alertCorrelation = context?.alert_correlation || context?.alertCorrelation || {};
   const flowContext = buildFlowContext(alert, context);
+  const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
+  const streamContext = context?.stream_context || context?.streamContext || {};
+  const streamInspection = buildStreamInspection(streamContext);
   const riskExplanation = {
     narrative: `${severity} alert tied to ${guess.label || normalizeProto(alert?.proto)} traffic. ${cleanText(alert?.detail) || "Review linked packet, flow, and process context."}`.trim(),
     rows: toRows([
@@ -1805,9 +2564,9 @@ export function buildAlertInspectionModel(alert, options = {}) {
     interpretedSummary: cleanText(alert?.detail) || "Detection metadata",
     analystCards,
     investigationTabs: [
-      { id: "alert", label: "Alert", sections: ["hero", "verdict", "network", "transport", "process", "flow", "application", "payload", "risk", "raw"] },
-      { id: "flow", label: "Flow", sections: ["hero", "flow", "correlation", "related", "risk"] },
-      { id: "process", label: "Process", sections: ["hero", "process", "correlation", "related", "risk"] },
+      { id: "alert", label: "Alert", sections: ["hero", "verdict", "network", "transport", "process", "flow", "stream", "application", "payload", "risk", "raw"] },
+      { id: "flow", label: "Flow", sections: ["hero", "flow", "stream", "correlation", "related", "risk"] },
+      { id: "process", label: "Process", sections: ["hero", "process", "stream", "correlation", "related", "risk"] },
     ],
     verdictRows: [
       { label: "Severity", value: severity },
@@ -1815,6 +2574,7 @@ export function buildAlertInspectionModel(alert, options = {}) {
       { label: "Engine", value: alert?.engine },
       { label: "Protocol Guess", value: `${guess.label} (${formatPercent(guess.confidence || confidenceFromSignal(alert?.app_confidence, 0.64))})` },
       { label: "Handshake Check", value: signals.handshake },
+      { label: "Behavior Pattern", value: behaviorLabels.length ? behaviorLabels.join(" | ") : "No broader behavior pattern in current sample" },
       { label: "Why Interesting", value: cleanText(alert?.detail) || "Detection evidence is attached to this alert." },
     ],
     networkRows: [
@@ -1863,6 +2623,9 @@ export function buildAlertInspectionModel(alert, options = {}) {
       { label: "Engines", value: Array.isArray(alertCorrelation?.engines) ? alertCorrelation.engines.join(" | ") : "-" },
       { label: "Related Flow Clusters", value: formatNumber(Array.isArray(context?.related_flows) ? context.related_flows.length : Array.isArray(context?.relatedFlows) ? context.relatedFlows.length : 0) },
       { label: "Same Remote Packets", value: formatNumber(Array.isArray(context?.same_remote_packets) ? context.same_remote_packets.length : Array.isArray(context?.sameRemotePackets) ? context.sameRemotePackets.length : 0) },
+      { label: "Behavior Labels", value: flowContext.behaviorSummary },
+      { label: "Behavior Narrative", value: flowContext.behaviorNarrative || "-" },
+      { label: "Stream Status", value: sentenceCase(streamContext?.status || "fallback") },
       { label: "First Seen", value: flowContext.firstSeen },
       { label: "Last Seen", value: flowContext.lastSeen },
       { label: "Duration", value: flowContext.duration },
@@ -1903,6 +2666,8 @@ export function buildAlertInspectionModel(alert, options = {}) {
         ]),
       },
     ].filter((group) => group.rows.length),
+    streamRows: streamInspection.rows,
+    streamGroups: streamInspection.groups,
     payload,
     payloadRows: [
       { label: "Payload Length", value: alert?.payload_len ? `${alert.payload_len} bytes` : "0 bytes" },

@@ -81,6 +81,8 @@ class PacketFlowContext(BaseModel):
     sample_alerts: int = 0
     previous_packet_delta_ms: int | None = None
     behavior_labels: list[str] = Field(default_factory=list)
+    behavior_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    stream_context: dict[str, Any] = Field(default_factory=dict)
     process_correlation: dict[str, Any] = Field(default_factory=dict)
     host_correlation: dict[str, Any] = Field(default_factory=dict)
     port_correlation: dict[str, Any] = Field(default_factory=dict)
@@ -113,6 +115,8 @@ class AlertInvestigationContext(BaseModel):
     alert_correlation: dict[str, Any] = Field(default_factory=dict)
     root_cause_groups: list[dict[str, Any]] = Field(default_factory=list)
     behavior_labels: list[str] = Field(default_factory=list)
+    behavior_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    stream_context: dict[str, Any] = Field(default_factory=dict)
     process_correlation: dict[str, Any] = Field(default_factory=dict)
     host_correlation: dict[str, Any] = Field(default_factory=dict)
     port_correlation: dict[str, Any] = Field(default_factory=dict)

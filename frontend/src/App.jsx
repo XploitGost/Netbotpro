@@ -113,6 +113,8 @@ function App() {
     runOfflineAnalysis,
     loadPacketDetail,
     loadAlertDetail,
+    openPacketDetailById,
+    openAlertDetailById,
     applyPacketFilters,
     applyAlertFilters,
     paginatePackets,
@@ -156,6 +158,9 @@ function App() {
     onNext: () => navigatePacketDetail(1),
     onPin: () => toggleInspectionPin("packet"),
     onFreeze: () => (liveFollow ? freezeLiveFollow() : resumeLiveFollow()),
+    onOpenPacket: openPacketDetailById,
+    onOpenAlert: openAlertDetailById,
+    onFilterProcess: filterByProcess,
   };
   const alertNavigation = {
     canPrevious: selectedAlertIndex > 0,
@@ -167,6 +172,9 @@ function App() {
     onNext: () => navigateAlertDetail(1),
     onPin: () => toggleInspectionPin("alert"),
     onFreeze: () => (liveFollow ? freezeLiveFollow() : resumeLiveFollow()),
+    onOpenPacket: openPacketDetailById,
+    onOpenAlert: openAlertDetailById,
+    onFilterProcess: filterByProcess,
   };
   const inspectSummaryCards = !packetInspection.empty
     ? packetInspection.analystCards

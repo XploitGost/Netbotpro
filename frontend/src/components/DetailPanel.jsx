@@ -139,6 +139,80 @@ function BehaviorCorrelationSection({ groups }) {
   );
 }
 
+function StreamActionButton({ item, actions }) {
+  if (!item || !actions) return null;
+  if (item.actionKind === "packet" && item.actionId && typeof actions.onOpenPacket === "function") {
+    return (
+      <button type="button" className="secondary mini-list-link" onClick={() => actions.onOpenPacket(item.actionId)}>
+        {cleanDisplay(item.actionLabel || "Open Packet")}
+      </button>
+    );
+  }
+  if (item.actionKind === "alert" && item.actionId && typeof actions.onOpenAlert === "function") {
+    return (
+      <button type="button" className="secondary mini-list-link" onClick={() => actions.onOpenAlert(item.actionId)}>
+        {cleanDisplay(item.actionLabel || "Open Alert")}
+      </button>
+    );
+  }
+  if (item.actionKind === "process" && typeof actions.onFilterProcess === "function" && (cleanDisplay(item.processName) || cleanDisplay(item.pid))) {
+    return (
+      <button
+        type="button"
+        className="secondary mini-list-link"
+        onClick={() => actions.onFilterProcess({ process_name: item.processName || "", pid: item.pid || "" })}
+      >
+        {cleanDisplay(item.actionLabel || "Filter Process")}
+      </button>
+    );
+  }
+  return null;
+}
+
+function StreamIntelligenceSection({ rows, groups, actions }) {
+  const visibleGroups = Array.isArray(groups) ? groups.filter((group) => Array.isArray(group?.items) && group.items.length) : [];
+  if (!hasRows(rows) && !visibleGroups.length) return null;
+
+  return (
+    <section className="detail-group">
+      <h3>Stream Intelligence</h3>
+      {hasRows(rows) ? (
+        <dl className="detail-grid inspection-grid">
+          {rows
+            .filter((row) => {
+              const value = cleanDisplay(row?.value);
+              return value && value !== "-";
+            })
+            .map((row) => (
+              <div key={`stream-${row.label}`}>
+                <dt>{cleanDisplay(row.label)}</dt>
+                <dd>{cleanDisplay(row.value)}</dd>
+              </div>
+            ))}
+        </dl>
+      ) : null}
+      {visibleGroups.length ? (
+        <div className="inspection-subgroups">
+          {visibleGroups.map((group) => (
+            <div key={group.title} className="inspection-subgroup">
+              <h4>{cleanDisplay(group.title)}</h4>
+              <div className="inspection-activity-list">
+                {group.items.map((item, index) => (
+                  <article key={`${group.title}-${index}`} className="inspection-activity-item">
+                    <strong>{cleanDisplay(item.title)}</strong>
+                    <p className="muted">{cleanDisplay(item.body)}</p>
+                    <StreamActionButton item={item} actions={actions} />
+                  </article>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function PayloadSection({ payload, rows, selectionKey }) {
   const [activeTab, setActiveTab] = useState("decoded");
 
@@ -279,7 +353,7 @@ export function DetailPanel({ title, model, selectionKey = "", emptyMessage = "S
   const activeSections = new Set(
     (Array.isArray(model.investigationTabs) && model.investigationTabs.length
       ? (model.investigationTabs.find((tab) => tab.id === activeTab) || model.investigationTabs[0])?.sections || []
-      : ["hero", "verdict", "network", "transport", "process", "flow", "correlation", "related", "application", "payload", "enrichment", "risk", "raw"])
+      : ["hero", "verdict", "network", "transport", "process", "flow", "stream", "correlation", "related", "application", "payload", "enrichment", "risk", "raw"])
   );
   const showSection = (key) => activeSections.has(key);
 
@@ -318,6 +392,7 @@ export function DetailPanel({ title, model, selectionKey = "", emptyMessage = "S
           {showSection("transport") ? <DetailSection title="Transport & Protocol" rows={model.transportRows} /> : null}
           {showSection("process") ? <DetailSection title="Process & Host Correlation" rows={model.processRows} /> : null}
           {showSection("flow") ? <DetailSection title="Flow & Session" rows={model.flowRows} /> : null}
+          {showSection("stream") ? <StreamIntelligenceSection rows={model.streamRows} groups={model.streamGroups} actions={navigation} /> : null}
           {showSection("risk") ? <RiskExplanationSection panel={model.riskExplanation} /> : null}
           {showSection("correlation") ? <BehaviorCorrelationSection groups={model.correlationGroups} /> : null}
           {showSection("related") ? <RelatedActivitySection groups={model.relatedGroups} /> : null}

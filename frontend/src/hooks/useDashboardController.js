@@ -367,6 +367,51 @@ export function useDashboardController() {
     }
   }
 
+  async function openPacketDetailById(packetId) {
+    const targetId = String(packetId || "").trim();
+    if (!targetId) return;
+    const existingIndex = packets.findIndex((packet, index) => {
+      const rowId = getPacketId(packet, index, packetMeta.offset);
+      return rowId === targetId || String(packet?.capture_id || "").trim() === targetId;
+    });
+    if (existingIndex >= 0) {
+      await loadPacketDetail(packets[existingIndex], existingIndex);
+      return;
+    }
+    try {
+      setActivePage("inspect");
+      setSelectedPacketId(targetId);
+      setSelectedPacketContext(null);
+      const [detail, context] = await Promise.all([api.getPacketDetail(targetId), api.getPacketContext(targetId).catch(() => null)]);
+      setSelectedPacket(detail);
+      setSelectedPacketContext(context);
+      setInspectionPinned((current) => (current.kind === "packet" ? { kind: "packet", id: targetId } : current));
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function openAlertDetailById(alertId) {
+    const targetId = String(alertId || "").trim();
+    if (!targetId) return;
+    const existingIndex = alerts.findIndex((alert, index) => getAlertId(alert, index, alertMeta.offset) === targetId);
+    if (existingIndex >= 0) {
+      await loadAlertDetail(alerts[existingIndex], existingIndex);
+      return;
+    }
+    try {
+      setActivePage("inspect");
+      setSelectedAlertId(targetId);
+      setSelectedAlertContext(null);
+      const [detail, context] = await Promise.all([api.getAlertDetail(targetId), api.getAlertContext(targetId).catch(() => null)]);
+      setSelectedAlert(detail);
+      setSelectedAlertContext(context);
+      setInspectionPinned((current) => (current.kind === "alert" ? { kind: "alert", id: targetId } : current));
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
   async function applyFocusedTarget(target) {
     if (!target?.ip) return;
     if (!focusQuerySnapshotRef.current) {
@@ -847,6 +892,8 @@ export function useDashboardController() {
     runOfflineAnalysis,
     loadPacketDetail,
     loadAlertDetail,
+    openPacketDetailById,
+    openAlertDetailById,
     applyPacketFilters,
     applyAlertFilters,
     paginatePackets,
