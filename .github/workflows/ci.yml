@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt PyInstaller
+      - name: Run backend tests
+        run: python -m unittest discover -s tests -v
+
+  frontend-build:
+    name: Frontend Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build frontend
+        run: npm run build
+
+  windows-desktop-smoke:
+    name: Desktop Smoke (windows-latest)
+    runs-on: windows-latest
+    needs: [backend-tests, frontend-build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/electron/package-lock.json
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt PyInstaller
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install desktop dependencies
+        working-directory: desktop/electron
+        run: npm ci
+      - name: Validate Electron entrypoints
+        working-directory: desktop/electron
+        run: |
+          node --check main.cjs
+          node --check preload.cjs
+      - name: Build and stage packaged backend
+        run: |
+          python -m PyInstaller packaging/pyinstaller/netbotpro_backend.spec --clean --noconfirm
+          python scripts/release/stage_backend_runtime.py
+      - name: Run packaged backend smoke
+        run: python scripts/qa/packaged_backend_smoke.py

@@ -66,6 +66,25 @@ function Resolve-ArchiveTool {
     return $null
 }
 
+function Test-DesktopDependenciesReady {
+    param(
+        [string]$ElectronDir
+    )
+
+    $requiredPaths = @(
+        (Join-Path $ElectronDir "node_modules\electron\package.json"),
+        (Join-Path $ElectronDir "node_modules\electron-builder\package.json")
+    )
+
+    foreach ($requiredPath in $requiredPaths) {
+        if (-not (Test-Path $requiredPath)) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Ensure-ArchiveToolInPath {
     param(
         [string]$ToolPath
@@ -149,14 +168,26 @@ Initialize-NsisTools -ArchiveToolPath $ArchiveTool
 
 Push-Location (Join-Path $RepoRoot "desktop\electron")
 try {
+    $ElectronBuilderCmd = Join-Path (Get-Location).Path "node_modules\.bin\electron-builder.cmd"
+
     if ($NodeHome) {
         $env:PATH = "$NodeHome;$env:PATH"
     }
     if (Test-Path $ElectronDist) {
         $env:ELECTRON_SKIP_BINARY_DOWNLOAD = "1"
     }
+    $env:npm_config_audit = "false"
+    $env:npm_config_fund = "false"
 
-    npm install --prefer-offline --no-audit --no-fund
+    if (-not (Test-DesktopDependenciesReady -ElectronDir (Get-Location).Path)) {
+        npm install --prefer-offline --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm install failed while preparing desktop dependencies."
+        }
+    } else {
+        Write-Host "Reusing existing desktop node_modules; skipping npm install."
+    }
+
     if (Test-Path $ElectronDist) {
         $ElectronPackageDist = Join-Path (Join-Path $RepoRoot "desktop\\electron\\node_modules\\electron") "dist"
         if (Test-Path $ElectronPackageDist) {
@@ -164,7 +195,24 @@ try {
         }
         Copy-Item -LiteralPath $ElectronDist -Destination $ElectronPackageDist -Recurse -Force
     }
-    npm run dist -- --win
+    npm run build:frontend
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend build failed."
+    }
+
+    if (-not (Test-Path $ElectronBuilderCmd)) {
+        throw "electron-builder executable not found at $ElectronBuilderCmd"
+    }
+
+    $electronBuilderArgs = @("--win")
+    if (Test-Path $ElectronDist) {
+        $electronBuilderArgs += "--config.electronDist=$ElectronDist"
+    }
+
+    & $ElectronBuilderCmd @electronBuilderArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Electron packaging failed."
+    }
 } finally {
     Pop-Location
 }
