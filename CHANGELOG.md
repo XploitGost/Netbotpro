@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 - 2026-04-27
 
 ### Added
 - Added final alert investigation context so Inspect can correlate packet, alert, flow, process, related alerts, and root-cause style groupings.
 - Added richer investigation UX with packet, flow, and process tabs, related flow views, same-process and same-remote activity, plus next/prev and pin/freeze controls.
 - Added analyst-readable risk explanation panels with top reasons, likely benign signals, confidence text, and investigation narrative.
+- Restored GitHub Actions workflows for backend tests, frontend builds, Windows desktop smoke checks, and manual desktop packaging.
 
 ### Changed
 - Improved protocol identification with stronger port, payload, handshake, encrypted/binary, and unusual-port evidence.
@@ -16,6 +17,7 @@
 - Added list/detail caching plus stale-request guards so monitor and inspect stay smoother under heavier history navigation.
 - Tightened desktop runtime behavior by reducing packaged-backend log verbosity and avoiding raw launch path details in desktop logs.
 - Prepared Linux packaging scripts and Electron build config for real `dist:linux` runs on a Linux host.
+- Hardened Windows packaging so local Electron and cached dependencies are reused instead of forcing unnecessary downloads during desktop builds.
 
 ### Fixed
 - Fixed history parity gaps where persisted rows could lose important protocol context compared with live traffic.
@@ -24,6 +26,7 @@
 - Fixed unsafe report enumeration and export download handling by filtering to generated safe file types and rejecting traversal-style paths.
 - Fixed loopback, firewall, and traceroute validation edge cases that could allow weaker input handling or less predictable runtime failures.
 - Fixed async alert-context caching in the history service so repeated detail reads no longer bypass the new cache path.
+- Fixed Windows desktop packaging failures caused by remote Electron asset fetches when a valid local Electron runtime was already present.
 
 ## 0.1.1 - 2026-04-15
 
