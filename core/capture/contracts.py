@@ -72,7 +72,10 @@ class CapturePreflightReport:
     recommended_interface: str | None = None
     recommended_interface_label: str | None = None
     interface_count: int = 0
+    discovery_source: str | None = None
+    discovery_reason: str | None = None
     checks: tuple[CapturePreflightCheck, ...] = field(default_factory=tuple)
+    recommendations: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,7 +87,10 @@ class CapturePreflightReport:
             "recommended_interface": self.recommended_interface,
             "recommended_interface_label": self.recommended_interface_label,
             "interface_count": self.interface_count,
+            "discovery_source": self.discovery_source,
+            "discovery_reason": self.discovery_reason,
             "checks": [check.to_dict() for check in self.checks],
+            "recommendations": list(self.recommendations),
         }
 
 

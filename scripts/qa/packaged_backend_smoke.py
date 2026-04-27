@@ -13,6 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PACKAGED_BACKEND_DIR = PROJECT_ROOT / "packaging" / "runtime" / "backend"
+DESKTOP_PACKAGED_BACKEND_DIR = PROJECT_ROOT / "desktop" / "electron" / "dist" / "win-unpacked" / "resources" / "runtime" / "backend"
 
 
 def expected_binary_name(platform_name: str | None = None) -> str:
@@ -20,7 +21,17 @@ def expected_binary_name(platform_name: str | None = None) -> str:
     return "netbotpro-backend.exe" if platform_name.startswith("win") else "netbotpro-backend"
 
 
+def resolve_runtime_dir(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> Path:
+    runtime_dir = Path(runtime_dir)
+    if runtime_dir.exists():
+        return runtime_dir
+    if DESKTOP_PACKAGED_BACKEND_DIR.exists():
+        return DESKTOP_PACKAGED_BACKEND_DIR
+    return runtime_dir
+
+
 def find_binary(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> Path:
+    runtime_dir = resolve_runtime_dir(runtime_dir)
     runtime_dir = Path(runtime_dir)
     binary_path = runtime_dir / expected_binary_name()
     if not binary_path.exists():
@@ -29,6 +40,7 @@ def find_binary(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> Path:
 
 
 def list_support_files(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> list[Path]:
+    runtime_dir = resolve_runtime_dir(runtime_dir)
     runtime_dir = Path(runtime_dir)
     binary_path = find_binary(runtime_dir)
     return sorted([entry for entry in runtime_dir.iterdir() if entry.name != binary_path.name], key=lambda item: item.name)
@@ -59,6 +71,7 @@ def validate_status_payload(payload: dict) -> None:
     if "project_root" in payload:
         raise AssertionError("Status payload must not expose project_root")
 
+
 def validate_interfaces_payload(payload: dict) -> None:
     items = payload.get("items")
     if not isinstance(items, list):
@@ -68,9 +81,13 @@ def validate_interfaces_payload(payload: dict) -> None:
             raise AssertionError("Degraded interfaces payload must include a source")
         if not payload.get("reason"):
             raise AssertionError("Degraded interfaces payload must include a reason")
+    recommendations = payload.get("recommendations")
+    if recommendations is not None and not isinstance(recommendations, list):
+        raise AssertionError("Interfaces recommendations must be a list when present")
 
 
 def run_smoke(runtime_dir: Path = PACKAGED_BACKEND_DIR, timeout_sec: float = 20.0) -> None:
+    runtime_dir = resolve_runtime_dir(runtime_dir)
     runtime_dir = Path(runtime_dir)
     binary_path = find_binary(runtime_dir)
     support_files = list_support_files(runtime_dir)

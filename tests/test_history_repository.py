@@ -1434,6 +1434,41 @@ class SQLiteHistoryRepositoryTests(unittest.TestCase):
             self.assertEqual(len(context["related_flows"]), 1)
             self.assertTrue(any(group["title"] == "Packet to Alert Chain" for group in context["root_cause_groups"]))
 
+    def test_normalize_rows_rehydrate_process_metadata_for_older_history(self):
+        packet = SQLiteHistoryRepository._normalize_packet_row(
+            {
+                "id": 7,
+                "ts": "10:00:00",
+                "src": "192.168.1.10",
+                "dst": "93.184.216.34",
+                "proto": "TCP",
+                "sport": 53000,
+                "dport": 443,
+                "direction": "OUTGOING",
+                "remote_ip": "93.184.216.34",
+                "executable_path": "C:/Program Files/Browser/browser.exe",
+            }
+        )
+        alert = SQLiteHistoryRepository._normalize_alert_row(
+            {
+                "id": 8,
+                "ts": "10:00:01",
+                "src": "93.184.216.34",
+                "dst": "192.168.1.10",
+                "proto": "TCP",
+                "sport": 443,
+                "dport": 53000,
+                "direction": "INCOMING",
+                "remote_ip": "93.184.216.34",
+            }
+        )
+
+        self.assertEqual(packet["process_name"], "browser.exe")
+        self.assertEqual(packet["attribution_source"], "history-rehydrated")
+        self.assertEqual(packet["attribution_confidence"], "medium")
+        self.assertIsNone(packet["attribution_reason_unavailable"])
+        self.assertIn("history row", alert["attribution_reason_unavailable"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,10 @@ class CaptureProviderTests(unittest.TestCase):
         self.assertTrue(report["requires_elevation"])
         self.assertEqual(report["interface_count"], 1)
         self.assertEqual(report["recommended_interface"], "eth0")
+        self.assertEqual(report["discovery_source"], "live")
+        self.assertEqual(report["discovery_reason"], None)
         self.assertEqual(report["checks"][2]["code"], "interfaces_available")
+        self.assertIn("Run Netbotpro with elevated privileges", " ".join(report["recommendations"]))
 
     def test_preflight_reports_not_ready_when_runtime_missing(self):
         provider = SystemCaptureProvider(
@@ -54,6 +57,8 @@ class CaptureProviderTests(unittest.TestCase):
         self.assertEqual(report["interface_count"], 0)
         self.assertEqual(report["checks"][0]["code"], "os_supported")
         self.assertFalse(report["checks"][1]["ok"])
+        self.assertEqual(report["discovery_source"], "live")
+        self.assertIn("No capture interfaces were detected", " ".join(report["recommendations"]))
 
     def test_list_interfaces_times_out_to_safe_empty_payload(self):
         provider = SystemCaptureProvider(
@@ -135,6 +140,22 @@ class CaptureProviderTests(unittest.TestCase):
         self.assertEqual(payload["source"], "fallback")
         self.assertEqual(payload["reason"], "interface_discovery_failed")
         self.assertEqual(payload["items"], [])
+
+    def test_preflight_includes_degraded_interface_recommendation(self):
+        provider = SystemCaptureProvider(
+            privilege_checker=_PrivilegeChecker(elevated=False),
+            os_name_getter=lambda: "windows",
+            scapy_checker=lambda: (False, "missing"),
+        )
+
+        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=RuntimeError("boom")):
+            report = provider.preflight().to_dict()
+
+        joined = " ".join(report["recommendations"])
+        self.assertEqual(report["discovery_source"], "fallback")
+        self.assertEqual(report["discovery_reason"], "interface_discovery_failed")
+        self.assertIn("Npcap", joined)
+        self.assertIn("Administrator", joined)
 
 
 if __name__ == "__main__":

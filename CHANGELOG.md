@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Added a lightweight history performance smoke benchmark so large synthetic investigation reads can be timed before release builds.
+- Added packaged desktop icon assets so Windows builds no longer ship with the default Electron branding.
+
+### Changed
+- Improved capture preflight reporting with clearer discovery source/reason metadata and actionable first-run recommendations in the Monitor hero.
+- Improved process attribution stability by retrying cache misses, recognizing wildcard-bound sockets, and using a conservative port fallback when the match is unique.
+- Improved history read-path parity by rehydrating older process metadata from persisted executable paths and backfilling clearer attribution reasons.
+- Improved packaged backend smoke discovery so QA can validate the runtime from either the staged backend bundle or the built Windows desktop output.
+
 ## 0.1.2 - 2026-04-27
 
 ### Added

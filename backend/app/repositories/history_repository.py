@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
@@ -403,6 +404,38 @@ def _enrich_protocol_metadata(row: dict[str, Any]) -> dict[str, Any]:
         enriched["payload_entropy"] = _safe_float(enriched.get("payload_entropy"))
     if enriched.get("payload_printable_ratio") is not None:
         enriched["payload_printable_ratio"] = _safe_float(enriched.get("payload_printable_ratio"))
+    return enriched
+
+
+def _enrich_process_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(row)
+    process_name = _normalize_text(enriched.get("process_name"))
+    executable_path = _normalize_text(enriched.get("executable_path"))
+    parent_process_name = _normalize_text(enriched.get("parent_process_name"))
+    attribution_confidence = _normalize_text(enriched.get("attribution_confidence"))
+    attribution_source = _normalize_text(enriched.get("attribution_source"))
+    reason_unavailable = _normalize_text(enriched.get("attribution_reason_unavailable"))
+
+    if not process_name and executable_path:
+        basename = os.path.basename(executable_path.replace("\\", "/"))
+        if basename:
+            enriched["process_name"] = basename
+            process_name = basename
+    if not parent_process_name and enriched.get("parent_pid"):
+        enriched["parent_process_name"] = f"PID {enriched['parent_pid']}"
+        parent_process_name = str(enriched["parent_process_name"])
+
+    has_process_metadata = bool(enriched.get("pid") or process_name or executable_path)
+    if has_process_metadata and not attribution_confidence:
+        enriched["attribution_confidence"] = "medium" if process_name else "low"
+    if has_process_metadata and not attribution_source:
+        enriched["attribution_source"] = "history-rehydrated"
+    if not has_process_metadata and not reason_unavailable:
+        enriched["attribution_reason_unavailable"] = (
+            "Process metadata was not captured for this history row, or the socket mapping was no longer available when the packet was stored."
+        )
+    elif has_process_metadata:
+        enriched["attribution_reason_unavailable"] = None
     return enriched
 
 
@@ -2955,7 +2988,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
                 "attribution_reason_unavailable": _row_get(row, "attribution_reason_unavailable"),
                 "attribution_source": _row_get(row, "attribution_source"),
             }
-            return _enrich_protocol_metadata(packet)
+            return _enrich_process_metadata(_enrich_protocol_metadata(packet))
 
         packet = {
             "id": row[0],
@@ -2989,7 +3022,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             "attribution_reason_unavailable": row[28] if len(row) > 28 else None,
             "attribution_source": row[29] if len(row) > 29 else None,
         }
-        return _enrich_protocol_metadata(packet)
+        return _enrich_process_metadata(_enrich_protocol_metadata(packet))
 
     @staticmethod
     def _normalize_alert_row(row: tuple[Any, ...]) -> dict[str, Any]:
@@ -3052,7 +3085,7 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
                 "attribution_reason_unavailable": _row_get(row, "attribution_reason_unavailable"),
                 "attribution_source": _row_get(row, "attribution_source"),
             }
-            return _enrich_protocol_metadata(alert)
+            return _enrich_process_metadata(_enrich_protocol_metadata(alert))
 
         alert = {
             "id": row[0],
@@ -3087,4 +3120,4 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             "attribution_reason_unavailable": row[29] if len(row) > 29 else None,
             "attribution_source": row[30] if len(row) > 30 else None,
         }
-        return _enrich_protocol_metadata(alert)
+        return _enrich_process_metadata(_enrich_protocol_metadata(alert))

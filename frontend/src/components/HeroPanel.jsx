@@ -20,6 +20,12 @@ export function HeroPanel({
 }) {
   const snapshot = buildOpsSnapshot(observability);
   const summaryCards = snapshot.summaryCards.slice(0, 4);
+  const captureRecommendations = Array.isArray(capturePreflight?.recommendations)
+    ? capturePreflight.recommendations.filter((item) => String(item || "").trim())
+    : [];
+  const failedChecks = Array.isArray(capturePreflight?.checks)
+    ? capturePreflight.checks.filter((check) => !check?.ok)
+    : [];
 
   return (
     <section className="hero card">
@@ -62,6 +68,28 @@ export function HeroPanel({
         ) : null}
         {capturePreflight?.requires_elevation ? (
           <p className="muted">Run the desktop app as Administrator if you want live capture and firewall actions.</p>
+        ) : null}
+        {failedChecks.length ? (
+          <div className="hero-capture-notes">
+            <p className="muted">Capture checks</p>
+            <ul className="hero-list">
+              {failedChecks.slice(0, 3).map((check) => (
+                <li key={check.code}>
+                  <strong>{check.label}:</strong> {check.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {captureRecommendations.length ? (
+          <div className="hero-capture-notes">
+            <p className="muted">Suggested next steps</p>
+            <ul className="hero-list">
+              {captureRecommendations.map((item, index) => (
+                <li key={`${index}-${item}`}>{item}</li>
+              ))}
+            </ul>
+          </div>
         ) : null}
         {isBusy ? <p className="table-status">Applying desktop action...</p> : null}
         {error ? <p className="error">{error}</p> : null}

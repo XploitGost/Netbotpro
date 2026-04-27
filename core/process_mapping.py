@@ -23,8 +23,11 @@ logger = logging.getLogger(__name__)
 
 _LAST_SCAN: float = 0.0
 _CACHE: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+_PORT_CACHE: Dict[Tuple[int, str], list[Dict[str, Any]]] = {}
+_WILDCARD_PORT_CACHE: Dict[Tuple[int, str], Dict[str, Any]] = {}
 _SCAN_INTERVAL = 3.0
 _NETSTAT_TIMEOUT = 2.0
+_WILDCARD_HOSTS = {"0.0.0.0", "::", "*", "[::]"}
 
 
 def _unavailable_process_info(reason: str) -> Dict[str, Any]:
@@ -79,6 +82,8 @@ def _safe_process_metadata(pid: Optional[int]) -> Dict[str, Any]:
 def _confidence_for_metadata(info: Dict[str, Any], *, source: str) -> str:
     if not info.get("pid") and not info.get("process_name"):
         return "unavailable"
+    if source.endswith("-port-fallback"):
+        return "low"
     if source == "netstat":
         return "medium"
     if info.get("executable_path") and info.get("parent_process_name"):
@@ -101,6 +106,52 @@ def _finalize_process_info(info: Dict[str, Any], *, source: str, reason: str | N
         "attribution_reason_unavailable": None,
         "attribution_source": source,
     }
+
+
+def _normalize_ip_key(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return text
+
+
+def _register_cache_entry(local_ip: str, local_port: int, proto: str, info: Dict[str, Any]) -> None:
+    ip_key = _normalize_ip_key(local_ip)
+    cache_key = (ip_key, int(local_port), proto)
+    _CACHE[cache_key] = info
+    _PORT_CACHE.setdefault((int(local_port), proto), []).append({"local_ip": ip_key, "info": info})
+    if ip_key in _WILDCARD_HOSTS:
+        _WILDCARD_PORT_CACHE[(int(local_port), proto)] = info
+
+
+def _unique_port_candidate(local_ip: str, local_port: int, proto: str) -> Dict[str, Any] | None:
+    family = ":" in _normalize_ip_key(local_ip)
+    candidates = []
+    for entry in _PORT_CACHE.get((int(local_port), proto), []):
+        entry_ip = _normalize_ip_key(entry.get("local_ip"))
+        if entry_ip in _WILDCARD_HOSTS:
+            continue
+        if (":" in entry_ip) != family:
+            continue
+        candidates.append(entry.get("info") or {})
+    if not candidates:
+        return None
+    unique = {
+        (
+            str(candidate.get("pid") or ""),
+            str(candidate.get("process_name") or "").lower(),
+            str(candidate.get("executable_path") or "").lower(),
+        ): candidate
+        for candidate in candidates
+        if candidate.get("pid") or candidate.get("process_name")
+    }
+    if len(unique) != 1:
+        return None
+    only = dict(next(iter(unique.values())))
+    only["attribution_source"] = f"{only.get('attribution_source') or 'psutil'}-port-fallback"
+    only["attribution_confidence"] = _confidence_for_metadata(only, source=str(only["attribution_source"]))
+    only["attribution_reason_unavailable"] = None
+    return only
 
 
 def _scan_with_psutil() -> None:
@@ -129,7 +180,7 @@ def _scan_with_psutil() -> None:
             continue
         pid: Optional[int] = c.pid
         info = _safe_process_metadata(pid)
-        _CACHE[(local_ip, int(local_port), proto)] = _finalize_process_info(info, source="psutil")
+        _register_cache_entry(local_ip, int(local_port), proto, _finalize_process_info(info, source="psutil"))
     _LAST_SCAN = time.time()
 
 
@@ -188,13 +239,15 @@ def _scan_with_netstat_windows() -> None:
         if not local_ip or local_port is None or proto is None:
             continue
         info = _safe_process_metadata(pid)
-        _CACHE[(local_ip, local_port, proto)] = _finalize_process_info(info, source="netstat")
+        _register_cache_entry(local_ip, local_port, proto, _finalize_process_info(info, source="netstat"))
     _LAST_SCAN = time.time()
 
 
 def _refresh_cache() -> None:
-    global _CACHE
+    global _CACHE, _PORT_CACHE, _WILDCARD_PORT_CACHE
     _CACHE.clear()
+    _PORT_CACHE.clear()
+    _WILDCARD_PORT_CACHE.clear()
     _scan_with_psutil()
     if _CACHE:
         return
@@ -205,12 +258,21 @@ def get_process_for_flow(local_ip: str, local_port: Optional[int], proto: Option
     if not local_ip or local_port is None or not proto:
         return _unavailable_process_info("No local socket key was available for process attribution.")
     now = time.time()
+    proto_key = proto.upper()
+    local_ip_key = _normalize_ip_key(local_ip)
     if now - _LAST_SCAN > _SCAN_INTERVAL:
         _refresh_cache()
-    key = (local_ip, int(local_port), proto.upper())
+    key = (local_ip_key, int(local_port), proto_key)
     info = _CACHE.get(key)
+    if not info:
+        _refresh_cache()
+        info = _CACHE.get(key)
+    if not info:
+        info = _WILDCARD_PORT_CACHE.get((int(local_port), proto_key))
+    if not info:
+        info = _unique_port_candidate(local_ip_key, int(local_port), proto_key)
     if not info:
         if psutil is None and platform.system().lower() != "windows":
             return _unavailable_process_info("Process attribution is unavailable in this runtime.")
-        return _unavailable_process_info("No active socket match / kernel-owned / stale mapping.")
+        return _unavailable_process_info("No active socket match. The socket may be short-lived, kernel-owned, wildcard-bound, or already closed.")
     return info.copy()

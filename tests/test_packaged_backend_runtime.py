@@ -45,7 +45,15 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
             self.assertIn(support, support_files)
 
             packaged_backend_smoke.validate_status_payload({"ok": True, "sniffer": {}})
-            packaged_backend_smoke.validate_interfaces_payload({"items": [], "degraded": True, "source": "fallback", "reason": "interface_discovery_timeout"})
+            packaged_backend_smoke.validate_interfaces_payload(
+                {
+                    "items": [],
+                    "degraded": True,
+                    "source": "fallback",
+                    "reason": "interface_discovery_timeout",
+                    "recommendations": ["Run Netbotpro as Administrator."],
+                }
+            )
             with self.assertRaises(AssertionError):
                 packaged_backend_smoke.validate_status_payload({"ok": True, "project_root": "C:/secret"})
             with self.assertRaises(AssertionError):
@@ -54,12 +62,16 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
     def test_desktop_package_supports_cross_platform_dist_scripts(self):
         package_json = Path(__file__).resolve().parents[1] / "desktop" / "electron" / "package.json"
         data = json.loads(package_json.read_text(encoding="utf-8"))
+        build_resources = package_json.parent / "build-resources"
 
         scripts = data.get("scripts", {})
         self.assertIn("dist:win", scripts)
         self.assertIn("dist:linux", scripts)
         self.assertNotIn("electronDist", data.get("build", {}))
         self.assertEqual(data.get("build", {}).get("linux", {}).get("target"), ["AppImage", "deb"])
+        self.assertEqual(data.get("build", {}).get("win", {}).get("icon"), "build-resources/icon.ico")
+        self.assertTrue((build_resources / "icon.ico").exists())
+        self.assertTrue((build_resources / "icon.png").exists())
 
 
 if __name__ == "__main__":

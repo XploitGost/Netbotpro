@@ -90,6 +90,43 @@ class SystemCaptureProvider(CaptureProvider):
         self._use_subprocess_interface_discovery = interfaces_func is None
 
     @staticmethod
+    def _capture_recommendations(
+        *,
+        os_name: str,
+        supported: bool,
+        scapy_ok: bool,
+        interface_count: int,
+        privileged: bool,
+        interfaces: dict[str, Any],
+    ) -> tuple[str, ...]:
+        recommendations: list[str] = []
+        if not supported:
+            recommendations.append(f"Live capture is not supported on {os_name} in the current runtime.")
+        if interfaces.get("degraded"):
+            source = str(interfaces.get("source") or "fallback")
+            reason = str(interfaces.get("reason") or "discovery_unavailable").replace("_", " ")
+            recommendations.append(f"Interface discovery is degraded ({source}). Capture setup is relying on a fallback because {reason}.")
+        if not scapy_ok:
+            if os_name == "windows":
+                recommendations.append("Check that Npcap and Scapy are installed correctly, then restart Netbotpro.")
+            else:
+                recommendations.append("Check the packet capture runtime dependencies for this host, then restart Netbotpro.")
+        if interface_count <= 0:
+            if os_name == "windows":
+                recommendations.append("No capture adapters were detected. Verify Npcap is installed and at least one network adapter is enabled.")
+            else:
+                recommendations.append("No capture interfaces were detected. Verify that the host has an active network interface and capture access.")
+        if not privileged:
+            if os_name == "windows":
+                recommendations.append("Run the desktop app as Administrator if you want live capture and firewall actions.")
+            else:
+                recommendations.append("Run Netbotpro with elevated privileges or capture capabilities if you need live capture.")
+        recommended_label = str(interfaces.get("recommended_label") or "").strip()
+        if recommended_label and interface_count > 0:
+            recommendations.append(f"Recommended interface: {recommended_label}.")
+        return tuple(recommendations[:4])
+
+    @staticmethod
     def _call_with_timeout(callback: Callable[..., Any], *args: Any, fallback: Any, operation: str) -> Any:
         result: dict[str, Any] = {"value": fallback}
         error: dict[str, BaseException] = {}
@@ -294,6 +331,14 @@ class SystemCaptureProvider(CaptureProvider):
         )
 
         ready = supported and scapy_ok and interface_count > 0
+        recommendations = self._capture_recommendations(
+            os_name=os_name,
+            supported=supported,
+            scapy_ok=scapy_ok,
+            interface_count=interface_count,
+            privileged=privileged,
+            interfaces=interfaces,
+        )
         return CapturePreflightReport(
             provider=self.name,
             os_name=os_name,
@@ -303,7 +348,10 @@ class SystemCaptureProvider(CaptureProvider):
             recommended_interface=str(interfaces.get("recommended") or "").strip() or None,
             recommended_interface_label=str(interfaces.get("recommended_label") or "").strip() or None,
             interface_count=interface_count,
+            discovery_source=str(interfaces.get("source") or "").strip() or None,
+            discovery_reason=str(interfaces.get("reason") or "").strip() or None,
             checks=checks,
+            recommendations=recommendations,
         )
 
     @staticmethod

@@ -46,6 +46,18 @@ function repoRoot() {
   return path.resolve(__dirname, "..", "..");
 }
 
+function resolveDesktopIconPath() {
+  const packagedCandidate = path.join(process.resourcesPath, "build-resources", "icon.png");
+  if (isPackagedApp() && fs.existsSync(packagedCandidate)) {
+    return packagedCandidate;
+  }
+  const devCandidate = path.join(__dirname, "build-resources", "icon.png");
+  if (fs.existsSync(devCandidate)) {
+    return devCandidate;
+  }
+  return undefined;
+}
+
 function desktopPaths() {
   const userData = app.getPath("userData");
   const configDir = path.join(userData, "config");
@@ -290,6 +302,7 @@ async function createWindow() {
     minWidth: 1100,
     minHeight: 760,
     title: "Netbotpro",
+    icon: resolveDesktopIconPath(),
     show: false,
     backgroundColor: "#0c1117",
     webPreferences: {
