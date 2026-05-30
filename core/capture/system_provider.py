@@ -33,10 +33,11 @@ from .contracts import (
 logger = logging.getLogger(__name__)
 
 SUPPORTED_CAPTURE_SYSTEMS = {"windows", "linux", "darwin"}
-CAPTURE_CALL_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_CALL_TIMEOUT_SEC", "3.0"))
-INTERFACE_DISCOVERY_TIMEOUT_SEC = float(os.environ.get("NETBOT_INTERFACE_DISCOVERY_TIMEOUT_SEC", "2.5"))
+CAPTURE_CALL_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_CALL_TIMEOUT_SEC", "8.0"))
+INTERFACE_DISCOVERY_TIMEOUT_SEC = float(os.environ.get("NETBOT_INTERFACE_DISCOVERY_TIMEOUT_SEC", "8.0"))
 INTERFACE_DISCOVERY_ARG = "--capture-discovery-json"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+USE_SUBPROCESS_DISCOVERY = os.environ.get("NETBOT_USE_SUBPROCESS_INTERFACE_DISCOVERY", "").strip().lower() in {"1", "true", "yes"}
 
 
 class DefaultPrivilegeChecker:
@@ -87,7 +88,7 @@ class SystemCaptureProvider(CaptureProvider):
         self._scapy_checker = scapy_checker or self._default_scapy_checker
         self._last_interfaces_payload: dict[str, Any] | None = None
         self._last_interfaces_timeout_at = 0.0
-        self._use_subprocess_interface_discovery = interfaces_func is None
+        self._use_subprocess_interface_discovery = interfaces_func is None and USE_SUBPROCESS_DISCOVERY
 
     @staticmethod
     def _capture_recommendations(
@@ -215,6 +216,13 @@ class SystemCaptureProvider(CaptureProvider):
         except json.JSONDecodeError as exc:
             raise RuntimeError("interface discovery child returned invalid JSON") from exc
 
+    def _run_interface_discovery_inprocess(self) -> dict[str, Any] | None:
+        fallback = self._last_interfaces_payload or {"recommended": None, "recommended_label": None, "items": []}
+        raw = self._call_with_timeout(self._interfaces_func, fallback=fallback, operation="list-interfaces-inprocess")
+        if raw is fallback:
+            return None
+        return raw
+
     def _known_interface_items(self) -> list[dict[str, Any]]:
         payload = self._last_interfaces_payload or self.list_interfaces()
         return list(payload.get("items", []))
@@ -234,17 +242,25 @@ class SystemCaptureProvider(CaptureProvider):
     def list_interfaces(self) -> dict[str, Any]:
         try:
             if self._use_subprocess_interface_discovery:
-                raw = self._run_interface_discovery_subprocess()
+                try:
+                    raw = self._run_interface_discovery_subprocess()
+                except subprocess.TimeoutExpired:
+                    logger.warning("capture provider subprocess interface discovery timed out after %.2fs", INTERFACE_DISCOVERY_TIMEOUT_SEC)
+                    raw = self._run_interface_discovery_inprocess()
+                    if raw is None:
+                        self._last_interfaces_timeout_at = time.monotonic()
+                        return self._fallback_interfaces_payload("interface_discovery_timeout")
+                except Exception:
+                    logger.warning("capture provider subprocess interface discovery failed", exc_info=True)
+                    raw = self._run_interface_discovery_inprocess()
+                    if raw is None:
+                        return self._fallback_interfaces_payload("interface_discovery_failed")
             else:
                 fallback = self._last_interfaces_payload or {"recommended": None, "recommended_label": None, "items": []}
                 raw = self._call_with_timeout(self._interfaces_func, fallback=fallback, operation="list-interfaces")
                 if raw is fallback:
                     self._last_interfaces_timeout_at = time.monotonic()
                     return self._fallback_interfaces_payload("interface_discovery_timeout")
-        except subprocess.TimeoutExpired:
-            logger.warning("capture provider interface discovery timed out after %.2fs", INTERFACE_DISCOVERY_TIMEOUT_SEC)
-            self._last_interfaces_timeout_at = time.monotonic()
-            return self._fallback_interfaces_payload("interface_discovery_timeout")
         except Exception:
             logger.warning("capture provider interface discovery failed", exc_info=True)
             return self._fallback_interfaces_payload("interface_discovery_failed")

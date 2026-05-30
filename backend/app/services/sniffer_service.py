@@ -18,7 +18,7 @@ from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
 ensure_project_root_on_path()
 
 logger = logging.getLogger(__name__)
-CAPTURE_START_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_START_TIMEOUT_SEC", "4.0"))
+CAPTURE_START_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_START_TIMEOUT_SEC", "15.0"))
 
 
 class CaptureStartUnavailableError(RuntimeError):

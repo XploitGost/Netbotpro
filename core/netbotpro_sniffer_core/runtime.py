@@ -4,7 +4,7 @@ import logging
 import threading
 from typing import Any, Callable
 
-from .interfaces import interface_local_ips, recommended_interface_name, resolve_capture_interface
+from .interfaces import ensure_capture_backend, interface_local_ips, recommended_interface_name, resolve_capture_interface
 from .packet_parser import PacketLayers, PacketMetadataBuilder
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ class NetSniffer:
         self.enable_geoip = enable_geoip
         self.enable_mac_vendor = enable_mac_vendor
         if sniff_func is None:
+            ensure_capture_backend()
             from scapy.sendrecv import sniff  # type: ignore
 
             sniff_func = sniff
@@ -50,6 +51,7 @@ class NetSniffer:
 
     def start(self, iface: str | None = None, *args: Any, **kwargs: Any) -> None:
         with self._lock:
+            ensure_capture_backend()
             iface = self._resolve_iface(iface, args, kwargs)
             if self._running:
                 return

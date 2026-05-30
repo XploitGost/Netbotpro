@@ -89,6 +89,7 @@ class CaptureProviderTests(unittest.TestCase):
 
     def test_list_interfaces_uses_subprocess_payload_when_available(self):
         provider = SystemCaptureProvider()
+        provider._use_subprocess_interface_discovery = True
 
         with patch.object(
             provider,
@@ -109,6 +110,7 @@ class CaptureProviderTests(unittest.TestCase):
 
     def test_list_interfaces_subprocess_timeout_returns_cached_degraded_payload(self):
         provider = SystemCaptureProvider()
+        provider._use_subprocess_interface_discovery = True
 
         with patch.object(
             provider,
@@ -121,7 +123,8 @@ class CaptureProviderTests(unittest.TestCase):
         ):
             provider.list_interfaces()
 
-        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=subprocess.TimeoutExpired(cmd="discover", timeout=0.1)):
+        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=subprocess.TimeoutExpired(cmd="discover", timeout=0.1)), \
+            patch.object(provider, "_run_interface_discovery_inprocess", return_value=None):
             payload = provider.list_interfaces()
 
         self.assertTrue(payload["degraded"])
@@ -132,8 +135,10 @@ class CaptureProviderTests(unittest.TestCase):
 
     def test_list_interfaces_subprocess_failure_returns_empty_fallback(self):
         provider = SystemCaptureProvider()
+        provider._use_subprocess_interface_discovery = True
 
-        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=RuntimeError("boom")):
+        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=RuntimeError("boom")), \
+            patch.object(provider, "_run_interface_discovery_inprocess", return_value=None):
             payload = provider.list_interfaces()
 
         self.assertTrue(payload["degraded"])
@@ -147,8 +152,10 @@ class CaptureProviderTests(unittest.TestCase):
             os_name_getter=lambda: "windows",
             scapy_checker=lambda: (False, "missing"),
         )
+        provider._use_subprocess_interface_discovery = True
 
-        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=RuntimeError("boom")):
+        with patch.object(provider, "_run_interface_discovery_subprocess", side_effect=RuntimeError("boom")), \
+            patch.object(provider, "_run_interface_discovery_inprocess", return_value=None):
             report = provider.preflight().to_dict()
 
         joined = " ".join(report["recommendations"])

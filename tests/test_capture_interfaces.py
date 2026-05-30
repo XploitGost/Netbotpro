@@ -30,11 +30,35 @@ FAKE_INTERFACES = [
     },
 ]
 
+FAKE_MIXED_INTERFACES = [
+    {
+        "value": r"\\Device\\NPF_{VMNET}",
+        "name": "VMware Network Adapter VMnet8",
+        "description": "VMware Virtual Ethernet Adapter for VMnet8",
+        "ip": "192.168.56.1",
+        "network_name": r"\\Device\\NPF_{VMNET}",
+        "label": "VMware Network Adapter VMnet8 - 192.168.56.1",
+    },
+    {
+        "value": r"\\Device\\NPF_{ETH}",
+        "name": "Ethernet",
+        "description": "Realtek Gaming 2.5GbE Family Controller",
+        "ip": "192.168.100.4",
+        "network_name": r"\\Device\\NPF_{ETH}",
+        "label": "Ethernet - Realtek Gaming 2.5GbE Family Controller - 192.168.100.4",
+    },
+]
+
 
 class CaptureInterfacesTests(unittest.TestCase):
     @patch("core.netbotpro_sniffer_core.interfaces._scapy_interfaces", return_value=FAKE_INTERFACES)
     @patch("core.netbotpro_sniffer_core.interfaces._detect_primary_local_ip", return_value="192.168.100.4")
     def test_recommended_interface_prefers_scapy_match(self, *_mocks):
+        self.assertEqual(recommended_interface_name(), r"\\Device\\NPF_{ETH}")
+
+    @patch("core.netbotpro_sniffer_core.interfaces._scapy_interfaces", return_value=FAKE_MIXED_INTERFACES)
+    @patch("core.netbotpro_sniffer_core.interfaces._detect_primary_local_ip", return_value=None)
+    def test_recommended_interface_prefers_physical_adapter_over_virtual(self, *_mocks):
         self.assertEqual(recommended_interface_name(), r"\\Device\\NPF_{ETH}")
 
     @patch("core.netbotpro_sniffer_core.interfaces._scapy_interfaces", return_value=FAKE_INTERFACES)
