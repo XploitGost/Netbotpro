@@ -1,8 +1,38 @@
+param(
+    [switch]$Elevated
+)
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
 $BackendPort = if ($env:NETBOT_PORT) { [int]$env:NETBOT_PORT } else { 8765 }
 $FrontendPort = 5173
+
+function Test-IsAdministrator {
+    if ($IsWindows -eq $false) {
+        return $false
+    }
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+if ($Elevated -and -not (Test-IsAdministrator)) {
+    $scriptPath = $MyInvocation.MyCommand.Path
+    $args = @(
+        "-NoExit",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "`"$scriptPath`"",
+        "-Elevated"
+    )
+    Start-Process -FilePath "powershell.exe" -ArgumentList $args -Verb RunAs | Out-Null
+    Write-Host "Requested elevated NetBotPro dev stack. Continue in the Administrator PowerShell window."
+    exit 0
+}
 
 function Resolve-PythonBin {
     $candidates = @(
@@ -23,6 +53,15 @@ function Get-ListeningPids {
         return @()
     }
     return @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+}
+
+function Get-ReadyListeningPid {
+    param([int]$Port)
+    $owners = Get-ListeningPids -Port $Port
+    if ($owners.Count -eq 0) {
+        return $null
+    }
+    return [int]$owners[0]
 }
 
 function Test-HttpReady {
@@ -118,10 +157,18 @@ if (-not $backendReady) {
         throw "Backend failed health check. See $backendLog and $backendErrLog"
     }
 
-    $backendPid = $backendProcess.Id
+    $backendPid = Get-ReadyListeningPid -Port $BackendPort
+    if (-not $backendPid) {
+        $backendPid = $backendProcess.Id
+    }
     Set-Content -Path $backendPidFile -Value $backendPid -Encoding ascii
 } else {
-    Remove-Item $backendPidFile -Force -ErrorAction SilentlyContinue
+    $backendPid = Get-ReadyListeningPid -Port $BackendPort
+    if ($backendPid) {
+        Set-Content -Path $backendPidFile -Value $backendPid -Encoding ascii
+    } else {
+        Remove-Item $backendPidFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $frontendReady = Test-HttpReady -Uri "http://127.0.0.1:$FrontendPort"
@@ -151,22 +198,30 @@ if (-not $frontendReady) {
         throw "Frontend failed health check. See $frontendLog and $frontendErrLog"
     }
 
-    $frontendPid = $frontendProcess.Id
+    $frontendPid = Get-ReadyListeningPid -Port $FrontendPort
+    if (-not $frontendPid) {
+        $frontendPid = $frontendProcess.Id
+    }
     Set-Content -Path $frontendPidFile -Value $frontendPid -Encoding ascii
 } else {
-    Remove-Item $frontendPidFile -Force -ErrorAction SilentlyContinue
+    $frontendPid = Get-ReadyListeningPid -Port $FrontendPort
+    if ($frontendPid) {
+        Set-Content -Path $frontendPidFile -Value $frontendPid -Encoding ascii
+    } else {
+        Remove-Item $frontendPidFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "Backend URL: http://127.0.0.1:$BackendPort"
 if ($backendPid) {
-    Write-Host "Started backend PID: $backendPid"
+    Write-Host "Backend PID: $backendPid"
 } else {
     Write-Host "Reused existing backend on port $BackendPort"
 }
 
 Write-Host "Frontend URL: http://127.0.0.1:$FrontendPort"
 if ($frontendPid) {
-    Write-Host "Started frontend PID: $frontendPid"
+    Write-Host "Frontend PID: $frontendPid"
 } else {
     Write-Host "Reused existing frontend on port $FrontendPort"
 }

@@ -92,10 +92,22 @@ Environment health check:
 powershell -ExecutionPolicy Bypass -File scripts\dev\doctor.ps1
 ```
 
+Install or repair Npcap for live capture on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\install-npcap.ps1
+```
+
 Recommended local dev start on Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev\start-local.ps1
+```
+
+Start the local stack with Administrator privileges for live capture:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\start-local.ps1 -Elevated
 ```
 
 Stop local dev services:
@@ -119,12 +131,14 @@ python -m compileall backend core
 python -m unittest discover -s tests
 cd frontend
 npm run build
+npm run smoke
 ```
 
 Desktop runtime smoke:
 
 ```powershell
 python scripts\qa\packaged_backend_smoke.py
+powershell -ExecutionPolicy Bypass -File scripts\qa\electron_smoke.ps1
 ```
 
 ## First-Run Notes

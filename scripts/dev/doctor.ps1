@@ -5,6 +5,7 @@ $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $FrontendNodeModules = Join-Path $RepoRoot "frontend\node_modules"
 $DesktopNodeModules = Join-Path $RepoRoot "desktop\electron\node_modules"
 $ElectronBinary = Join-Path $RepoRoot "desktop\electron\node_modules\electron\dist\electron.exe"
+$NpcapDll = Join-Path $env:WINDIR "System32\Npcap\Packet.dll"
 
 function Test-PortListening {
     param([int]$Port)
@@ -57,6 +58,9 @@ Write-Check -Name "desktop node_modules" -Ok $desktopDepsOk -Detail ($(if ($desk
 
 $electronBinaryOk = Test-Path $ElectronBinary
 Write-Check -Name "electron binary" -Ok $electronBinaryOk -Detail ($(if ($electronBinaryOk) { $ElectronBinary } else { "Run npm install in desktop\\electron until Electron binary download completes" }))
+
+$npcapOk = Test-Path $NpcapDll
+Write-Check -Name "Npcap runtime" -Ok $npcapOk -Detail ($(if ($npcapOk) { $NpcapDll } else { "Install Npcap with scripts\\dev\\install-npcap.ps1 for live capture" }))
 
 $backendReady = Test-HttpReady -Uri "http://127.0.0.1:8765/api/status"
 $backendPortBusy = Test-PortListening -Port 8765
