@@ -42,6 +42,8 @@ logs/
 *.csv
 *.pdf
 *.html
+!frontend/app.html
+!frontend/index.html
 *.bak
 *.save
 *.old
