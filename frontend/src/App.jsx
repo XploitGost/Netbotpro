@@ -455,6 +455,7 @@ function App() {
         capturePreflight={capturePreflight}
         captureUnavailableDetail={captureUnavailableDetail}
         canStartSniffer={canStartSniffer}
+        interfaceCount={interfaces.length}
         error={error}
         isBusy={loadingState.snifferAction}
         onTokenChange={setLocalToken}

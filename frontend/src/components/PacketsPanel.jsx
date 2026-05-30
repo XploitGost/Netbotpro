@@ -1,6 +1,21 @@
 import { getFlowSummary, getPeerInfo, getTrafficSide } from "../lib/networkView";
 import { useWindowedRows } from "../hooks/useWindowedRows";
 
+function EmptyTableState({ title, detail, actions }) {
+  return (
+    <div className="empty-state">
+      <p className="eyebrow">Nothing Here Yet</p>
+      <h3>{title}</h3>
+      <p className="muted">{detail}</p>
+      {actions?.length ? (
+        <div className="empty-state-actions">
+          {actions.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PacketsPanel({
   packets,
   packetMeta,
@@ -30,6 +45,12 @@ export function PacketsPanel({
       : packetMeta.total > 0
         ? "This page is empty. Try the previous page or loosen the filters."
         : "No packet traffic is visible yet. Start capture or relax the filters.";
+  const emptyTitle = isLoading ? "Loading packets" : "No packets captured yet";
+  const emptyDetail = focusedTarget?.ip
+    ? `The focused target ${focusedTarget.ip} has no matching packets in this window.`
+    : packetMeta.total > 0
+      ? "The current page or filters are too narrow for the available packet history."
+      : "Start Sniffer from the top panel, then generate a little network traffic. New packets will appear here automatically.";
 
   return (
     <div className="panel-body">
@@ -86,7 +107,15 @@ export function PacketsPanel({
           </thead>
           <tbody>
             {packets.length === 0 ? (
-              <tr><td colSpan="7" className="table-empty">{emptyMessage}</td></tr>
+              <tr>
+                <td colSpan="7" className="table-empty">
+                  <EmptyTableState
+                    title={emptyTitle}
+                    detail={emptyDetail || emptyMessage}
+                    actions={["Start Sniffer", "Check interface", "Relax filters"]}
+                  />
+                </td>
+              </tr>
             ) : topSpacerHeight > 0 ? (
               <tr className="spacer-row" aria-hidden="true"><td colSpan="7" style={{ height: `${topSpacerHeight}px` }} /></tr>
             ) : null}

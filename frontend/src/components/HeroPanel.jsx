@@ -11,6 +11,7 @@ export function HeroPanel({
   capturePreflight,
   captureUnavailableDetail,
   canStartSniffer,
+  interfaceCount = 0,
   error,
   isBusy = false,
   onTokenChange,
@@ -26,6 +27,12 @@ export function HeroPanel({
   const failedChecks = Array.isArray(capturePreflight?.checks)
     ? capturePreflight.checks.filter((check) => !check?.ok)
     : [];
+  const checks = Array.isArray(capturePreflight?.checks) ? capturePreflight.checks : [];
+  const readinessState = canStartSniffer ? "ready" : "attention";
+  const readinessTitle = canStartSniffer ? "Capture Ready" : "Capture Needs Setup";
+  const readinessHint = canStartSniffer
+    ? `${interfaceCount || capturePreflight?.interface_count || 0} interface(s) detected. Start Sniffer will use ${capturePreflight?.recommended_interface_label || "the recommended adapter"}.`
+    : captureUnavailableDetail || "Complete the capture checks before starting live monitoring.";
 
   return (
     <section className="hero card">
@@ -44,6 +51,21 @@ export function HeroPanel({
               {card.label}: {card.value}
             </span>
           ))}
+        </div>
+        <div className={`capture-readiness capture-readiness-${readinessState}`}>
+          <div>
+            <p className="eyebrow">First Run Readiness</p>
+            <h3>{readinessTitle}</h3>
+            <p className="muted">{readinessHint}</p>
+          </div>
+          <div className="capture-check-grid">
+            {checks.map((check) => (
+              <span key={check.code} className={`capture-check ${check.ok ? "capture-check-ok" : check.severity === "warning" ? "capture-check-warn" : "capture-check-fail"}`}>
+                <strong>{check.ok ? "OK" : check.severity === "warning" ? "Warn" : "Fix"}</strong>
+                {check.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
       <div className="hero-side">

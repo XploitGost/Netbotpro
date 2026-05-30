@@ -9,6 +9,17 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
   return (
     <div className="panel-body">
       <p className="eyebrow">Live Settings</p>
+      <div className="settings-helper">
+        <div>
+          <h3>Capture Profile</h3>
+          <p className="muted">
+            Use Auto for the recommended adapter, or pin a specific interface when testing VPNs, VMware networks, or wired Ethernet.
+          </p>
+        </div>
+        <span className={`ops-state-pill ${hasInterfaces ? "ops-healthy" : "ops-warning"}`}>
+          {hasInterfaces ? `${interfaceOptions.length} interface(s)` : "Manual mode"}
+        </span>
+      </div>
       <div className="form-grid">
         <label>
           <span>Interface</span>

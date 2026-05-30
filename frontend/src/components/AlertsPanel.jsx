@@ -1,6 +1,21 @@
 import { getFlowSummary, getPeerInfo } from "../lib/networkView";
 import { useWindowedRows } from "../hooks/useWindowedRows";
 
+function EmptyTableState({ title, detail, actions }) {
+  return (
+    <div className="empty-state empty-state-alerts">
+      <p className="eyebrow">Calm So Far</p>
+      <h3>{title}</h3>
+      <p className="muted">{detail}</p>
+      {actions?.length ? (
+        <div className="empty-state-actions">
+          {actions.map((item) => <span key={item}>{item}</span>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function AlertsPanel({
   alerts,
   alertMeta,
@@ -30,6 +45,12 @@ export function AlertsPanel({
       : alertMeta.total > 0
         ? "This page is empty. Try the previous page or widen the alert filters."
         : "No alerts are visible yet. Live detections will appear here.";
+  const emptyTitle = isLoading ? "Loading alerts" : "No detections yet";
+  const emptyDetail = focusedTarget?.ip
+    ? `No alert matched ${focusedTarget.ip}. That can be a good sign, or the filters may be too narrow.`
+    : alertMeta.total > 0
+      ? "The current page or filters do not include alert rows."
+      : "When IDS rules or scoring detect suspicious traffic, the findings will land here with score, process, and flow context.";
 
   return (
     <div className="panel-body">
@@ -84,7 +105,15 @@ export function AlertsPanel({
           </thead>
           <tbody>
             {alerts.length === 0 ? (
-              <tr><td colSpan="8" className="table-empty">{emptyMessage}</td></tr>
+              <tr>
+                <td colSpan="8" className="table-empty">
+                  <EmptyTableState
+                    title={emptyTitle}
+                    detail={emptyDetail || emptyMessage}
+                    actions={["Keep monitoring", "Inspect packets", "Tune filters"]}
+                  />
+                </td>
+              </tr>
             ) : topSpacerHeight > 0 ? (
               <tr className="spacer-row" aria-hidden="true"><td colSpan="8" style={{ height: `${topSpacerHeight}px` }} /></tr>
             ) : null}
