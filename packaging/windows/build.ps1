@@ -4,17 +4,17 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $RepoRoot
 
 function Resolve-BuildPython {
-    $venvPython = Join-Path $RepoRoot ".venv-pack312\Scripts\python.exe"
-    if (Test-Path $venvPython) {
-        return $venvPython
-    }
-
     try {
         $py312 = & py -3.12 -c "import sys; print(sys.executable)"
         if ($LASTEXITCODE -eq 0 -and $py312) {
             return $py312.Trim()
         }
     } catch {
+    }
+
+    $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        return $venvPython
     }
 
     return "python"

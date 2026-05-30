@@ -6,7 +6,7 @@
   "author": "XploitGost",
   "main": "main.cjs",
   "scripts": {
-    "dev": "electron .",
+    "dev": "node ../../scripts/dev/repair-electron-path.js && electron .",
     "build:frontend": "npm --prefix ../../frontend run build",
     "dist:dir": "npm run build:frontend && electron-builder --dir",
     "dist": "npm run build:frontend && electron-builder",

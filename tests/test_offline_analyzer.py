@@ -51,7 +51,7 @@ class OfflineAnalyzerTests(unittest.TestCase):
         ]
 
         with patch("core.offline_analyzer._read_pcap", return_value=packets), patch(
-            "core.offline_analyzer.get_settings_snapshot",
+            "core.offline_analyzer._load_offline_settings",
             return_value={"ids_ml_threshold": 0.25, "auto_block": True},
         ), patch(
             "core.offline_analyzer._build_offline_pipeline",

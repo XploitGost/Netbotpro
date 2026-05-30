@@ -9,12 +9,13 @@ htmlcov/
 .venv/
 venv/
 .env
+.runtime/
 
 node_modules/
 frontend/node_modules/
-desktop/node_modules/
+desktop/electron/node_modules/
 frontend/dist/
-desktop/dist/
+desktop/electron/dist/
 desktop/out/
 build/
 dist/

@@ -8,7 +8,7 @@ from backend.app.bootstrap import ensure_project_root_on_path
 
 ensure_project_root_on_path()
 
-from backend.app.services.settings_service import get_settings_snapshot  # noqa: E402
+from config.settings_manager import load_settings  # noqa: E402
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline  # noqa: E402
 from core.netbotpro_sniffer_core.packet_parser import PacketLayers, PacketMetadataBuilder  # noqa: E402
 
@@ -51,6 +51,11 @@ def _build_offline_pipeline(settings: dict[str, Any]) -> SnifferDetectionPipelin
     return SnifferDetectionPipeline(settings_provider=lambda: dict(settings))
 
 
+def _load_offline_settings() -> dict[str, Any]:
+    # Keep offline PCAP analysis usable even when the FastAPI stack is absent.
+    return load_settings()
+
+
 def _build_meta(pkt: Any, builder: PacketMetadataBuilder, index: int) -> dict[str, Any]:
     meta = builder.build(pkt)
     ts = _packet_timestamp(pkt)
@@ -66,7 +71,7 @@ def _top_pairs(counter: Counter, key_name: str, limit: int = 20) -> list[dict[st
 
 def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str, Any]:
     packets = _read_pcap(path)
-    settings = get_settings_snapshot()
+    settings = _load_offline_settings()
     if ml_threshold is not None:
         settings["ids_ml_threshold"] = ml_threshold
     settings["auto_block"] = False

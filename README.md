@@ -80,6 +80,36 @@ npm run build:frontend
 npm run dev
 ```
 
+Recommended Windows setup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\setup.ps1
+```
+
+Environment health check:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\doctor.ps1
+```
+
+Recommended local dev start on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\start-local.ps1
+```
+
+Stop local dev services:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\stop-local.ps1
+```
+
+Clean local caches and build artifacts:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\clean.ps1
+```
+
 ## Verification
 
 Useful checks during development:
@@ -120,4 +150,6 @@ python scripts\qa\packaged_backend_smoke.py
 
 - Detailed migration notes: `docs/WEB_MIGRATION.md`
 - Desktop shell notes: `docs/DESKTOP_SHELL.md`
+- Architecture notes: `docs/ARCHITECTURE.md`
 - Repo cleanup notes: `docs/README.md`
+- Contribution guide: `CONTRIBUTING.md`

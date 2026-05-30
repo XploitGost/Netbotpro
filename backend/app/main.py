@@ -85,7 +85,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="NetBotPro API",
-    version="0.1.0",
+    version="0.1.2",
     lifespan=lifespan,
 )
 

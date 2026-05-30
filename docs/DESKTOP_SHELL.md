@@ -31,8 +31,8 @@ The shell maps desktop runtime state into the Electron user-data directory:
 
 - Preferred Node runtime for local Windows packaging: Node 22 x64
 - `packaging/windows/build.ps1` will automatically use `NETBOT_NODE_HOME` when set
-- It also auto-detects a portable Node toolchain in `.tools/node-v22.22.2-win-x64/`
-- Preferred Python runtime for backend packaging: Python 3.12 via `.venv-pack312` or `py -3.12`
+- It can also hydrate temporary helper assets under `.tools/` when packaging needs them
+- Preferred Python runtime for backend packaging: `py -3.12`, with `.venv/` as a local fallback
 
 ## Release strategy
 

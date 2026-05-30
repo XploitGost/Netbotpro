@@ -46,6 +46,31 @@ function repoRoot() {
   return path.resolve(__dirname, "..", "..");
 }
 
+function devPythonCandidates() {
+  const root = repoRoot();
+  if (process.platform === "win32") {
+    return [
+      path.join(root, ".venv", "Scripts", "python.exe"),
+    ];
+  }
+  return [
+    path.join(root, ".venv", "bin", "python"),
+  ];
+}
+
+function resolveDevPython() {
+  const envOverride = process.env.NETBOT_PYTHON_BIN;
+  if (envOverride) {
+    return envOverride;
+  }
+  for (const candidate of devPythonCandidates()) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return process.platform === "win32" ? "python" : "python3";
+}
+
 function resolveDesktopIconPath() {
   const packagedCandidate = path.join(process.resourcesPath, "build-resources", "icon.png");
   if (isPackagedApp() && fs.existsSync(packagedCandidate)) {
@@ -191,7 +216,7 @@ function resolveBackendLaunch(paths) {
     };
   }
 
-  const pythonBin = process.env.NETBOT_PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
+  const pythonBin = resolveDevPython();
   const sourceRoot = isPackagedApp() ? path.join(process.resourcesPath, "python-src") : repoRoot();
   return {
     command: pythonBin,
