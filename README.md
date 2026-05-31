@@ -132,13 +132,22 @@ python -m unittest discover -s tests
 cd frontend
 npm run build
 npm run smoke
+npm run acceptance
 ```
 
 Desktop runtime smoke:
 
 ```powershell
+node scripts\qa\local_acceptance.mjs
 python scripts\qa\packaged_backend_smoke.py
 powershell -ExecutionPolicy Bypass -File scripts\qa\electron_smoke.ps1
+```
+
+Optional live capture acceptance, run from an elevated PowerShell after the local stack is up:
+
+```powershell
+$env:NETBOT_ACCEPTANCE_CAPTURE = "1"
+node scripts\qa\local_acceptance.mjs
 ```
 
 ## First-Run Notes
