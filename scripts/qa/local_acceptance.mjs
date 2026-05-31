@@ -1,11 +1,25 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const localTokenFile = path.join(repoRoot, ".runtime", "local-token.txt");
 const frontendUrl = process.env.NETBOT_FRONTEND_URL || "http://127.0.0.1:5173";
 const apiBaseUrl = process.env.NETBOT_API_BASE_URL || "http://127.0.0.1:8765/api";
-const localToken = process.env.NETBOT_LOCAL_TOKEN || "";
+const localToken = process.env.NETBOT_LOCAL_TOKEN || readLocalTokenFile();
 const requestTimeoutMs = Number(process.env.NETBOT_ACCEPTANCE_TIMEOUT_MS || 8000);
 const requestRetries = Number(process.env.NETBOT_ACCEPTANCE_RETRIES || 2);
 const enableCaptureCheck = /^(1|true|yes)$/i.test(process.env.NETBOT_ACCEPTANCE_CAPTURE || "");
 
 const checks = [];
+
+function readLocalTokenFile() {
+  try {
+    return fs.readFileSync(localTokenFile, "utf8").trim();
+  } catch (_error) {
+    return "";
+  }
+}
 
 function record(label, ok, detail = "") {
   checks.push({ label, ok, detail });

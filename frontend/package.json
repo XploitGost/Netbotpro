@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "acceptance": "node ../scripts/qa/local_acceptance.mjs",
+    "security": "node ../scripts/qa/security_smoke.mjs",
     "smoke": "node ../scripts/qa/frontend_smoke.mjs"
   },
   "dependencies": {
@@ -15,7 +16,8 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.8"
+    "@vitejs/plugin-react": "^4.7.0",
+    "postcss": "^8.5.15",
+    "vite": "^6.4.2"
   }
 }

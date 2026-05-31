@@ -133,6 +133,7 @@ cd frontend
 npm run build
 npm run smoke
 npm run acceptance
+npm run security
 ```
 
 Desktop runtime smoke:

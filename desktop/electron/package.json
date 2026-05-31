@@ -14,8 +14,8 @@
     "dist:linux": "npm run build:frontend && electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "36.3.1",
-    "electron-builder": "26.0.12"
+    "electron": "^40.10.2",
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.netbotpro.desktop",

@@ -125,6 +125,32 @@ $frontendLog = Join-Path $runtimeDir "frontend-dev.log"
 $frontendErrLog = Join-Path $runtimeDir "frontend-dev.err.log"
 $backendPidFile = Join-Path $runtimeDir "backend-dev.pid"
 $frontendPidFile = Join-Path $runtimeDir "frontend-dev.pid"
+$localTokenFile = Join-Path $runtimeDir "local-token.txt"
+
+function Resolve-LocalToken {
+    $configured = [string]$env:NETBOT_LOCAL_TOKEN
+    if ($configured.Trim()) {
+        return $configured.Trim()
+    }
+    if (Test-Path $localTokenFile) {
+        $existing = (Get-Content -Path $localTokenFile -Raw -ErrorAction SilentlyContinue).Trim()
+        if ($existing) {
+            return $existing
+        }
+    }
+    $bytes = [byte[]]::new(32)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
+    $token = ([System.BitConverter]::ToString($bytes) -replace "-", "").ToLowerInvariant()
+    Set-Content -Path $localTokenFile -Value $token -Encoding ascii
+    return $token
+}
+
+$localToken = Resolve-LocalToken
 
 $backendReady = Test-HttpReady -Uri "http://127.0.0.1:$BackendPort/api/status"
 $backendPid = $null
@@ -139,6 +165,7 @@ if (-not $backendReady) {
     $backendEnv = @{
         NETBOT_HOST = "127.0.0.1"
         NETBOT_PORT = "$BackendPort"
+        NETBOT_LOCAL_TOKEN = $localToken
         NETBOT_ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
     }
 
@@ -228,3 +255,5 @@ if ($frontendPid) {
 
 Write-Host "Backend logs: $backendLog | $backendErrLog"
 Write-Host "Frontend logs: $frontendLog | $frontendErrLog"
+Write-Host "Local token: $localToken"
+Write-Host "Local token file: $localTokenFile"
