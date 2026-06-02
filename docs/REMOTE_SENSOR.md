@@ -2,6 +2,8 @@
 
 Remote Sensor Mode lets NetBotPro capture packets on a server you own or administer while you view the dashboard from another machine.
 
+Use this mode only for systems, servers, and networks where you have explicit legal authorization. It is designed for defensive operations, incident response, troubleshooting, and lab work; it is not intended for public exposure, third-party traffic monitoring, or unauthorized packet capture.
+
 ## Security model
 
 - Remote access is disabled by default.
@@ -9,6 +11,8 @@ Remote Sensor Mode lets NetBotPro capture packets on a server you own or adminis
 - Remote clients must send the `X-NetBot-Token` header with the configured `NETBOT_LOCAL_TOKEN`.
 - Keep the backend behind a VPN, SSH tunnel, private network, or HTTPS reverse proxy for real deployments.
 - Do not expose port `8765` to the public internet without TLS, firewall rules, and a strong token.
+- Prefer allowlisted operator IPs and private routing. A strong token is required, but it is not a replacement for network-level access control.
+- Run with elevated privileges only when live capture is actually required.
 
 ## Start the sensor on the server
 

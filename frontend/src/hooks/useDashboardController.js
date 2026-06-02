@@ -5,6 +5,7 @@ import { useLiveEvents } from "./useLiveEvents";
 import { getPeerInfo, isPrivateIp } from "../lib/networkView";
 
 export const PAGE_SIZE = 25;
+const VALID_PAGES = new Set(["monitor", "inspect", "settings", "traceroute", "exports", "reports", "offline"]);
 const TIMELINE_BUCKETS = 30;
 const TIMELINE_BUCKET_MS = 2_000;
 const HISTORY_CACHE_TTL_MS = 5_000;
@@ -19,6 +20,18 @@ const defaultSettings = {
   persist_logs: false,
   whitelist_ips: "",
 };
+
+function initialActivePage() {
+  if (typeof window === "undefined") {
+    return "monitor";
+  }
+  try {
+    const page = new URLSearchParams(window.location.search).get("page") || "";
+    return VALID_PAGES.has(page) ? page : "monitor";
+  } catch {
+    return "monitor";
+  }
+}
 
 function createTimeline(now = Date.now()) {
   const base = now - (TIMELINE_BUCKETS - 1) * TIMELINE_BUCKET_MS;
@@ -144,7 +157,7 @@ function normalizeErrorMessage(error, fallback = "Request failed") {
 export function useDashboardController() {
   const { localToken, setLocalToken, managedLocalToken } = useLocalAuth();
   const api = useApiClient(localToken);
-  const [activePage, setActivePage] = useState("monitor");
+  const [activePage, setActivePage] = useState(initialActivePage);
   const [dashboard, setDashboard] = useState(null);
   const [packets, setPackets] = useState([]);
   const [alerts, setAlerts] = useState([]);

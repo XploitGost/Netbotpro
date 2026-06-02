@@ -1,10 +1,19 @@
 # NetBotPro
 
+[![CI](https://github.com/XploitGost/Netbotpro/actions/workflows/ci.yml/badge.svg)](https://github.com/XploitGost/Netbotpro/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/XploitGost/Netbotpro?label=release)](https://github.com/XploitGost/Netbotpro/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Defensive Use](https://img.shields.io/badge/use-defensive%20security-blue)](#legal-and-defensive-use-notice)
+
 NetBotPro is a local-first network analysis and defensive detection product for Windows-first desktop workflows, browser-based investigation, and authorized server-side packet sensing.
 
 It combines a FastAPI backend, a React investigation console, an Electron desktop shell, live packet capture through Scapy/Npcap, offline PCAP analysis, alert scoring, process attribution, exports, reports, and remote sensor mode for systems you own or administer.
 
-![NetBotPro monitor screenshot](docs/assets/netbotpro-monitor.png)
+## Screenshots
+
+| Monitor | Inspect | Reports |
+| --- | --- | --- |
+| ![NetBotPro monitor dashboard](docs/assets/netbotpro-monitor.png) | ![NetBotPro inspect workspace](docs/assets/netbotpro-inspect.png) | ![NetBotPro reports workspace](docs/assets/netbotpro-reports.png) |
 
 ## What It Does
 
@@ -16,6 +25,20 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 - Traceroute, export, report, and investigation packaging flows.
 - Desktop mode with a generated secure local token and an isolated Electron preload bridge.
 - Remote sensor mode for legally authorized servers and networks.
+
+## Feature Matrix
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Local web dashboard | Stable dev path | React/Vite console on `127.0.0.1:5173`. |
+| Electron desktop shell | Windows-ready | Secure preload bridge, packaged backend, setup and portable artifacts. |
+| Live packet capture | Environment-dependent | Requires Npcap/libpcap and elevated privileges where needed. |
+| Inspect workspace | Active | Packet, alert, flow, process, protocol, and related-activity context. |
+| Offline PCAP analysis | Active | Restricted file types and upload size limits. |
+| Reports and exports | Active | Safe generated downloads inside the log directory. |
+| Remote sensor mode | Controlled/opt-in | Requires `NETBOT_REMOTE_ACCESS=1`, a strong token, and authorized infrastructure. |
+| Windows packaging | Active | Built and smoke-tested first. |
+| Linux/macOS packaging | Staged | Scripts exist; production release validation is still pending. |
 
 ## Architecture
 
@@ -121,6 +144,8 @@ Then connect the dashboard to that sensor:
 http://127.0.0.1:5173/?api=http://SERVER_IP:8765/api&ws=ws://SERVER_IP:8765/ws
 ```
 
+Remote sensor mode is not a public internet service mode. Treat it as a private, controlled sensor endpoint for systems where you have explicit authorization. Prefer VPN, SSH tunneling, private routing, or a TLS reverse proxy, and restrict inbound access to trusted operator IPs.
+
 ## Verification
 
 ```powershell
@@ -141,6 +166,7 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 
 - Loopback-only by default for local development and desktop mode.
 - Remote access is opt-in and requires both `NETBOT_REMOTE_ACCESS=1` and `NETBOT_LOCAL_TOKEN`.
+- Remote sensor mode is documented as an authorized-use-only deployment path, not a general hosted SaaS mode.
 - Desktop mode generates a cryptographically secure random token when no token is provided.
 - Electron exposes runtime config through a narrow IPC preload bridge with `contextIsolation`, `sandbox`, and `nodeIntegration: false`.
 - Sensitive HTTP routes require `X-NetBot-Token`.
@@ -154,6 +180,17 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 - Remote sensor mode analyzes traffic visible to that server/interface; it does not magically see traffic from unrelated network segments.
 - Windows artifacts are currently unsigned unless a signing certificate is configured.
 - Linux/macOS packaging paths exist, but production-grade desktop release validation is strongest on Windows right now.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Start Sniffer` says no capture interface is available | Npcap/libpcap is missing, blocked, or not visible to Scapy | Install Npcap, reopen PowerShell as Administrator, then run `scripts\dev\doctor.ps1`. |
+| Frontend shows `ECONNREFUSED 127.0.0.1:8765` | Backend is not running or crashed | Run `scripts\dev\start-local.ps1`, then inspect `.runtime\backend-dev.err.log`. |
+| Protected API returns `401` | Missing or wrong local token | Use the token printed by `start-local.ps1`, `.runtime\local-token.txt`, or your configured `NETBOT_LOCAL_TOKEN`. |
+| Websocket returns `403` | Token/origin mismatch | Confirm `NETBOT_ALLOWED_ORIGINS` includes the dashboard origin and the frontend sends the local token. |
+| Electron launches but backend fails | Packaged runtime or Python dev runtime is missing | Run `scripts\qa\release_readiness.ps1`, then rebuild with `packaging\windows\build.ps1`. |
+| Remote dashboard cannot connect to sensor | Firewall, origin, token, or bind address mismatch | Use `start-sensor.ps1`, set `AllowedOrigins`, keep `NETBOT_REMOTE_ACCESS=1`, and test over VPN/private network first. |
 
 ## Legal And Defensive Use Notice
 
