@@ -151,6 +151,7 @@ Remote sensor mode is not a public internet service mode. Treat it as a private,
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 npm --prefix .\frontend run build
+npm --prefix .\frontend run test:ui
 npm --prefix .\frontend run smoke
 npm --prefix .\frontend run security
 powershell -ExecutionPolicy Bypass -File .\scripts\qa\release_readiness.ps1
@@ -203,6 +204,9 @@ GitHub Actions builds CI on push and pull request. Desktop release artifacts are
 ## More Docs
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Security policy](SECURITY.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [Safe use policy](docs/SAFE_USE_POLICY.md)
 - [Remote sensor mode](docs/REMOTE_SENSOR.md)
 - [Desktop shell](docs/DESKTOP_SHELL.md)
 - [Web migration notes](docs/WEB_MIGRATION.md)
