@@ -110,6 +110,12 @@ Start the local stack with Administrator privileges for live capture:
 powershell -ExecutionPolicy Bypass -File scripts\dev\start-local.ps1 -Elevated
 ```
 
+Start a remote sensor on a server you own or administer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev\start-sensor.ps1 -BindHost 0.0.0.0 -Port 8765 -AllowedOrigins "http://YOUR_DASHBOARD_HOST:5173"
+```
+
 Stop local dev services:
 
 ```powershell
