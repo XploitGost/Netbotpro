@@ -15,16 +15,48 @@ from backend.app.security import (
     extract_websocket_token,
     is_allowed_websocket_origin,
     is_loopback_host,
+    is_trusted_websocket_client,
+    require_trusted_client,
     validate_report_download_path,
 )
 from backend.app.services.report_service import ReportService
 
 
 class SecurityHardeningTests(unittest.TestCase):
+    def _build_request(self, client_host: str = "127.0.0.1", headers: dict[str, str] | None = None):
+        from starlette.requests import Request
+
+        encoded_headers = [(key.lower().encode("latin-1"), value.encode("latin-1")) for key, value in (headers or {}).items()]
+        return Request({"type": "http", "headers": encoded_headers, "client": (client_host, 8765)})
+
     def test_check_local_token_uses_expected_value(self):
         with patch.dict(os.environ, {"NETBOT_LOCAL_TOKEN": "super-secret"}, clear=False):
             self.assertTrue(check_local_token("super-secret"))
             self.assertFalse(check_local_token("wrong-token"))
+
+    def test_trusted_client_allows_loopback_without_remote_mode(self):
+        with patch.dict(os.environ, {"NETBOT_REMOTE_ACCESS": "", "NETBOT_LOCAL_TOKEN": ""}, clear=False):
+            self.assertIsNone(require_trusted_client(self._build_request("127.0.0.1")))
+
+    def test_trusted_client_rejects_remote_by_default(self):
+        with patch.dict(os.environ, {"NETBOT_REMOTE_ACCESS": "", "NETBOT_LOCAL_TOKEN": "secret"}, clear=False):
+            with self.assertRaises(HTTPException) as ctx:
+                require_trusted_client(self._build_request("10.0.0.5", {"X-NetBot-Token": "secret"}))
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_trusted_client_requires_token_for_remote_mode(self):
+        with patch.dict(os.environ, {"NETBOT_REMOTE_ACCESS": "1", "NETBOT_LOCAL_TOKEN": "secret"}, clear=False):
+            with self.assertRaises(HTTPException) as ctx:
+                require_trusted_client(self._build_request("10.0.0.5", {"X-NetBot-Token": "wrong"}))
+            self.assertEqual(ctx.exception.status_code, 401)
+            self.assertIsNone(require_trusted_client(self._build_request("10.0.0.5", {"X-NetBot-Token": "secret"})))
+
+    def test_trusted_websocket_client_requires_remote_mode_and_token(self):
+        with patch.dict(os.environ, {"NETBOT_REMOTE_ACCESS": "", "NETBOT_LOCAL_TOKEN": "secret"}, clear=False):
+            self.assertFalse(is_trusted_websocket_client("10.0.0.5", "secret"))
+        with patch.dict(os.environ, {"NETBOT_REMOTE_ACCESS": "1", "NETBOT_LOCAL_TOKEN": "secret"}, clear=False):
+            self.assertFalse(is_trusted_websocket_client("10.0.0.5", "wrong"))
+            self.assertTrue(is_trusted_websocket_client("10.0.0.5", "secret"))
 
     def test_ensure_within_directory_blocks_prefix_escape(self):
         with tempfile.TemporaryDirectory() as td:

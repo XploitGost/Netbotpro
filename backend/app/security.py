@@ -72,6 +72,10 @@ def require_loopback(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Local access only")
 
 
+def is_remote_access_enabled() -> bool:
+    return os.environ.get("NETBOT_REMOTE_ACCESS", "").strip().lower() in {"1", "true", "yes"}
+
+
 def is_local_token_enabled() -> bool:
     return bool(os.environ.get("NETBOT_LOCAL_TOKEN", "").strip())
 
@@ -89,6 +93,19 @@ def check_local_token(provided: str) -> bool:
 
 
 def require_local_token(request: Request) -> None:
+    provided = request.headers.get("X-NetBot-Token", "").strip()
+    if not check_local_token(provided):
+        raise HTTPException(status_code=401, detail="Invalid local token")
+
+
+def require_trusted_client(request: Request) -> None:
+    client_host = request.client.host if request.client else ""
+    if _is_loopback_host(client_host):
+        return
+    if not is_remote_access_enabled():
+        raise HTTPException(status_code=403, detail="Local access only")
+    if not is_local_token_enabled():
+        raise HTTPException(status_code=403, detail="Remote access requires NETBOT_LOCAL_TOKEN")
     provided = request.headers.get("X-NetBot-Token", "").strip()
     if not check_local_token(provided):
         raise HTTPException(status_code=401, detail="Invalid local token")
@@ -232,3 +249,9 @@ def is_allowed_websocket_origin(origin: str | None) -> bool:
     if not origin:
         return True
     return _normalize_origin(str(origin)) in set(allowed_origins())
+
+
+def is_trusted_websocket_client(client_host: str, token: str) -> bool:
+    if is_loopback_host(client_host):
+        return check_local_token(token)
+    return is_remote_access_enabled() and is_local_token_enabled() and check_local_token(token)

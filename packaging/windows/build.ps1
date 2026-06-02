@@ -4,17 +4,27 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $RepoRoot
 
 function Resolve-BuildPython {
+    $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        try {
+            & $venvPython -m PyInstaller --version | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                return $venvPython
+            }
+        } catch {
+        }
+    }
+
     try {
         $py312 = & py -3.12 -c "import sys; print(sys.executable)"
         if ($LASTEXITCODE -eq 0 -and $py312) {
-            return $py312.Trim()
+            $candidate = $py312.Trim()
+            & $candidate -m PyInstaller --version | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                return $candidate
+            }
         }
     } catch {
-    }
-
-    $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-    if (Test-Path $venvPython) {
-        return $venvPython
     }
 
     return "python"
@@ -67,30 +77,23 @@ function Resolve-ArchiveTool {
 }
 
 function Resolve-ElectronVersion {
-    $packageLockPath = Join-Path $RepoRoot "desktop\electron\package-lock.json"
-    $packageJsonPath = Join-Path $RepoRoot "desktop\electron\package.json"
-
-    if (Test-Path $packageLockPath) {
-        try {
-            $packageLock = Get-Content -LiteralPath $packageLockPath -Raw | ConvertFrom-Json
-            $lockedVersion = $packageLock.packages."node_modules/electron".version
-            if ($lockedVersion) {
-                return [string]$lockedVersion
-            }
-        } catch {
+    $electronDir = Join-Path $RepoRoot "desktop\electron"
+    Push-Location $electronDir
+    try {
+        $script = @"
+const pkg = require('./package.json');
+const lock = require('./package-lock.json');
+const locked = lock.packages?.['node_modules/electron']?.version || '';
+const declared = pkg.devDependencies?.electron || '';
+const normalized = declared.replace(/^[~^<>= ]+/, '');
+process.stdout.write(locked || normalized);
+"@
+        $version = node -e $script
+        if ($LASTEXITCODE -eq 0 -and $version) {
+            return $version.Trim()
         }
-    }
-
-    if (Test-Path $packageJsonPath) {
-        try {
-            $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
-            $declaredVersion = [string]$packageJson.devDependencies.electron
-            $normalized = $declaredVersion.TrimStart("^", "~", ">=", "<=", ">", "<", "=")
-            if ($normalized) {
-                return $normalized
-            }
-        } catch {
-        }
+    } finally {
+        Pop-Location
     }
 
     throw "Unable to resolve Electron version from desktop\electron package metadata."
@@ -200,7 +203,13 @@ if (Test-Path $ElectronDist) {
 }
 
 & $PythonCmd -m PyInstaller packaging\pyinstaller\netbotpro_backend.spec --clean --noconfirm
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller backend build failed."
+}
 & $PythonCmd scripts\release\stage_backend_runtime.py
+if ($LASTEXITCODE -ne 0) {
+    throw "Staging backend runtime failed."
+}
 
 Push-Location (Join-Path $RepoRoot "desktop\electron")
 try {

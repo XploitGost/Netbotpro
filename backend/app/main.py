@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -16,15 +16,14 @@ from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.schemas import AlertInvestigationContext, DashboardResponse, PacketFlowContext, PacketItem, AlertItem, PaginatedAlertsResponse, PaginatedPacketsResponse, SettingsPayload, StatusResponse
 from backend.app.security import (
     allowed_origins,
-    check_local_token,
     ensure_within_directory,
     enforce_rate_limit,
     extract_websocket_token,
-    is_loopback_host,
     is_allowed_websocket_origin,
     is_local_token_enabled,
+    is_trusted_websocket_client,
     require_local_token,
-    require_loopback,
+    require_trusted_client,
     validate_block_ip,
     validate_ip,
     validate_report_download_path,
@@ -133,7 +132,7 @@ async def log_requests(request: Request, call_next):
 
 
 @app.get("/api/status")
-def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
+def api_status(_: None = Depends(require_trusted_client)) -> dict[str, Any]:
     return {
         "ok": True,
         "sniffer": sniffer_service.get_state(),
@@ -144,7 +143,7 @@ def api_status(_: None = Depends(require_loopback)) -> dict[str, Any]:
 
 @app.get("/api/settings", response_model=SettingsPayload)
 def api_get_settings(
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return get_settings()
@@ -152,7 +151,7 @@ def api_get_settings(
 
 @app.get("/api/interfaces")
 def api_interfaces(
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return sniffer_service.capture_interfaces()
@@ -162,7 +161,7 @@ def api_interfaces(
 def api_put_settings(
     payload: dict[str, Any],
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "settings_update", limit=30, window_sec=60)
@@ -173,7 +172,7 @@ def api_put_settings(
 def api_start_sniffer(
     payload: dict[str, Any] | None = None,
     request: Request = None,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_start", limit=12, window_sec=60)
@@ -189,7 +188,7 @@ def api_start_sniffer(
 @app.post("/api/sniffer/stop")
 def api_stop_sniffer(
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_stop", limit=20, window_sec=60)
@@ -199,7 +198,7 @@ def api_stop_sniffer(
 @app.post("/api/session/reset")
 def api_reset_session(
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "session_reset", limit=20, window_sec=60)
@@ -208,7 +207,7 @@ def api_reset_session(
 
 @app.get("/api/sniffer/state")
 def api_sniffer_state(
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     state = sniffer_service.get_state()
@@ -228,7 +227,7 @@ async def api_recent_packets(
     only_remote: bool = False,
     limit: int = 50,
     offset: int = 0,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
@@ -253,7 +252,7 @@ async def api_recent_packets(
 @app.get("/api/packets/{packet_id}", response_model=PacketItem)
 async def api_packet_detail(
     packet_id: str,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
@@ -268,7 +267,7 @@ async def api_packet_detail(
 @app.get("/api/packets/{packet_id}/context", response_model=PacketFlowContext)
 async def api_packet_flow_context(
     packet_id: str,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
@@ -282,7 +281,7 @@ async def api_packet_flow_context(
 
 @app.get("/api/dashboard", response_model=DashboardResponse)
 def api_dashboard(
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     dashboard = sniffer_service.dashboard()
@@ -304,7 +303,7 @@ async def api_recent_alerts(
     only_remote: bool = False,
     limit: int = 50,
     offset: int = 0,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
@@ -330,7 +329,7 @@ async def api_recent_alerts(
 @app.get("/api/alerts/{alert_id}", response_model=AlertItem)
 async def api_alert_detail(
     alert_id: str,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
@@ -345,7 +344,7 @@ async def api_alert_detail(
 @app.get("/api/alerts/{alert_id}/context", response_model=AlertInvestigationContext)
 async def api_alert_context(
     alert_id: str,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
@@ -361,7 +360,7 @@ async def api_alert_context(
 def api_block_ip(
     payload: dict[str, Any],
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "firewall_block", limit=10, window_sec=60)
@@ -376,7 +375,7 @@ def api_block_ip(
 def api_traceroute(
     payload: dict[str, Any],
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "traceroute", limit=12, window_sec=60)
@@ -386,7 +385,7 @@ def api_traceroute(
 @app.get("/api/traceroute/history")
 def api_traceroute_history(
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> list[dict[str, Any]]:
     enforce_rate_limit(request, "traceroute_history", limit=60, window_sec=60)
@@ -397,7 +396,7 @@ def api_traceroute_history(
 def api_export_session(
     payload: dict[str, Any],
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "export_session", limit=20, window_sec=60)
@@ -417,7 +416,7 @@ def api_export_session(
 def api_export_investigation(
     payload: dict[str, Any],
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "export_investigation", limit=20, window_sec=60)
@@ -431,7 +430,7 @@ def api_export_investigation(
 def api_export_download(
     path: str,
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> FileResponse:
     enforce_rate_limit(request, "export_download", limit=30, window_sec=60)
@@ -445,7 +444,7 @@ def api_export_download(
 @app.get("/api/reports")
 def api_reports(
     request: Request,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> list[dict[str, Any]]:
     enforce_rate_limit(request, "reports_list", limit=60, window_sec=60)
@@ -456,7 +455,7 @@ def api_reports(
 async def api_analyze_pcap(
     file: UploadFile = File(...),
     request: Request = None,
-    _: None = Depends(require_loopback),
+    _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "analyze_pcap", limit=8, window_sec=60)
@@ -488,9 +487,6 @@ async def api_analyze_pcap(
 @app.websocket("/ws/events")
 async def ws_events(websocket: WebSocket) -> None:
     client_host = websocket.client.host if websocket.client else ""
-    if not is_loopback_host(client_host):
-        await websocket.close(code=1008)
-        return
     if not is_allowed_websocket_origin(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return
@@ -502,7 +498,7 @@ async def ws_events(websocket: WebSocket) -> None:
     except HTTPException:
         await websocket.close(code=1008)
         return
-    if not check_local_token(token):
+    if not is_trusted_websocket_client(client_host, token):
         await websocket.close(code=1008)
         return
     await websocket.accept(subprotocol=accepted_protocol)

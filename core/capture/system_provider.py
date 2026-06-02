@@ -305,6 +305,8 @@ class SystemCaptureProvider(CaptureProvider):
         interfaces = self.list_interfaces()
         if self._use_subprocess_interface_discovery:
             scapy_ok, scapy_detail = self._scapy_status_from_interfaces_payload(interfaces)
+        elif os_name == "windows" and not interfaces.get("degraded") and interfaces.get("items"):
+            scapy_ok, scapy_detail = True, "Windows capture interfaces are available; Scapy is loaded when capture starts."
         else:
             scapy_ok, scapy_detail = self._call_with_timeout(
                 self._scapy_checker,
