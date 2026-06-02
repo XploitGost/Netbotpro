@@ -3,14 +3,29 @@
 ## Unreleased
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## 0.1.3 - 2026-06-02
+
+### Added
 - Added a lightweight history performance smoke benchmark so large synthetic investigation reads can be timed before release builds.
 - Added packaged desktop icon assets so Windows builds no longer ship with the default Electron branding.
+- Added remote sensor mode for authorized server-side packet review.
+- Added a professional release README, secure environment template, MIT license, pinned Python dependencies, and dev dependency lock file.
+- Added tag-driven desktop release publishing through GitHub Actions.
 
 ### Changed
 - Improved capture preflight reporting with clearer discovery source/reason metadata and actionable first-run recommendations in the Monitor hero.
 - Improved process attribution stability by retrying cache misses, recognizing wildcard-bound sockets, and using a conservative port fallback when the match is unique.
 - Improved history read-path parity by rehydrating older process metadata from persisted executable paths and backfilling clearer attribution reasons.
 - Improved packaged backend smoke discovery so QA can validate the runtime from either the staged backend bundle or the built Windows desktop output.
+- Hardened CI to install pinned dev dependencies and run dependency health checks before tests and desktop smoke.
+
+### Fixed
+- Confirmed the Electron desktop runtime config path uses a registered IPC bridge and secure local token injection.
 
 ## 0.1.2 - 2026-04-27
 

@@ -1,186 +1,172 @@
 # NetBotPro
 
-NetBotPro is now organized around a single primary execution path:
+NetBotPro is a local-first network analysis and defensive detection product for Windows-first desktop workflows, browser-based investigation, and authorized server-side packet sensing.
 
-- `backend/` for the FastAPI API and realtime event layer
-- `frontend/` for the React dashboard
-- `core/` for packet capture, IDS, scoring, traceroute, firewall, and offline analysis
-- `config/` for persisted settings
+It combines a FastAPI backend, a React investigation console, an Electron desktop shell, live packet capture through Scapy/Npcap, offline PCAP analysis, alert scoring, process attribution, exports, reports, and remote sensor mode for systems you own or administer.
 
-## Current product focus
+![NetBotPro monitor screenshot](docs/assets/netbotpro-monitor.png)
 
-NetBotPro is a local-first network investigation console with:
+## What It Does
 
-- a live Monitor workspace for packets and alerts
-- an analyst-focused Inspect workspace for packet, alert, flow, and process investigation
-- process attribution and same-process traffic correlation
-- flow and conversation context with related packets, related alerts, and remote-host recurrence
-- protocol identification that combines port hints, payload hints, handshake checks, and unusual-port detection
-- risk explanation panels with top reasons, likely benign signals, confidence text, and analyst-readable narrative
-- persisted history that keeps investigation context much closer to live mode
+- Live packet and alert monitoring with a responsive analyst console.
+- Inspect workspace for packet, alert, flow, process, protocol, and related-activity investigation.
+- Local token authentication for sensitive API and websocket routes.
+- Websocket auth via subprotocol negotiation to avoid leaking tokens in URLs.
+- Offline PCAP analysis with upload size and file-type controls.
+- Traceroute, export, report, and investigation packaging flows.
+- Desktop mode with a generated secure local token and an isolated Electron preload bridge.
+- Remote sensor mode for legally authorized servers and networks.
 
-## Investigation highlights
+## Architecture
 
-- Packet and alert clicks land directly in Inspect instead of forcing a long Monitor scroll.
-- Inspect now includes `Packet`, `Flow`, and `Process` tabs, plus next/prev navigation, pin, and freeze-live controls.
-- Detail views show protocol guess, risk, confidence, flow stats, process attribution, related activity, behavior correlation, and payload previews.
-- History queries support process and PID filtering, and stored evidence is re-interpreted on read so older rows still get richer protocol context when possible.
-
-## Security hardening
-
-- The API remains loopback-only by default and now applies stricter response headers plus rate limits on settings, exports, reports, traceroute, and control actions.
-- Local token authentication is still required for sensitive routes, but the browser UI now keeps unmanaged tokens in `sessionStorage` instead of `localStorage`.
-- Live websocket authentication no longer needs a `?token=` query string; the frontend sends the local token through websocket subprotocol negotiation to reduce token leakage in logs and URLs.
-- Export and report downloads are constrained to generated safe file types inside the NetBotPro log directory, and report enumeration skips unsafe or symlinked files.
-- Firewall block targets reject unsupported addresses such as loopback, multicast, and unspecified IPs.
-
-## Main architecture
-
-- API entrypoint: `backend/app/main.py`
-- Web frontend: `frontend/src/App.jsx`
-- Desktop shell: `desktop/electron/main.cjs`
-- Sniffer runtime: `core/core_sniffer.py`
-- Logging facade: `log_manager.py`
-- Settings store: `config/settings_manager.py`
-
-## Install
-
-```powershell
-python -m pip install -r requirements.txt
-cd frontend
-npm install
+```mermaid
+flowchart LR
+    User["Analyst / Operator"] --> UI["React Frontend"]
+    UI --> API["FastAPI Backend"]
+    UI --> WS["WebSocket Event Stream"]
+    Electron["Electron Desktop Shell"] --> UI
+    Electron --> Token["Secure Local Token"]
+    Token --> API
+    API --> Capture["Scapy / Npcap Capture Provider"]
+    API --> History["SQLite History Repository"]
+    API --> Detection["IDS, ML Scoring, Protocol Enrichment"]
+    API --> Reports["Exports and Reports"]
+    Sensor["Remote Sensor Mode"] --> API
 ```
 
-Recommended on Windows:
+## Repository Layout
 
-- Install Npcap if you want live packet capture through Scapy
-- Run the backend with administrator privileges if you need packet capture or firewall operations
+- `backend/` - FastAPI routes, service layer, websocket event stream, desktop backend entrypoint.
+- `core/` - capture providers, packet parsing, IDS logic, scoring, traceroute, firewall helpers, offline analyzer.
+- `frontend/` - React/Vite web console.
+- `desktop/electron/` - Electron shell, secure preload bridge, packaged desktop runtime.
+- `scripts/dev/` - local setup, doctor, start/stop, Npcap install, remote sensor start.
+- `scripts/qa/` - smoke, acceptance, security, packaged backend, and release readiness checks.
+- `packaging/` - Windows/Linux/macOS packaging scripts and PyInstaller configuration.
+- `tests/` - backend, security, capture, persistence, desktop-path, and packaging smoke tests.
 
-## Run
+## Setup
 
-Backend:
+Prerequisites:
+
+- Python 3.13 recommended.
+- Node.js 20 recommended.
+- Npcap on Windows for live capture.
+- Administrator privileges when starting live capture or firewall actions on Windows.
+
+Install everything on Windows:
 
 ```powershell
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\setup.ps1
 ```
 
-Frontend:
+Manual install:
 
 ```powershell
-cd frontend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+npm --prefix .\frontend install
+npm --prefix .\desktop\electron install
+```
+
+## Environment
+
+Copy `.env.example` to `.env` for local experiments. The default secure path is still to let the dev or desktop launcher generate a local token automatically.
+
+- `NETBOT_LOCAL_TOKEN` protects sensitive API routes and websocket sessions.
+- `NETBOT_ALLOWED_ORIGINS` controls browser origins allowed to connect to the API/websocket.
+- `NETBOT_REMOTE_ACCESS=1` is required before non-loopback clients can access a sensor backend.
+- `NETBOT_HOST` and `NETBOT_PORT` control backend bind address and port.
+
+## Usage
+
+Start the local web stack:
+
+```powershell
+cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-local.ps1
+```
+
+Start with elevated privileges for live capture:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-local.ps1 -Elevated
+```
+
+Open the dashboard:
+
+```text
+http://127.0.0.1:5173
+```
+
+Start the Electron desktop shell after dependencies are installed:
+
+```powershell
+cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro\desktop\electron"
 npm run dev
-```
-
-Desktop shell:
-
-```powershell
-cd desktop\electron
-npm install
-npm run build:frontend
-npm run dev
-```
-
-Recommended Windows setup:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\setup.ps1
-```
-
-Environment health check:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\doctor.ps1
-```
-
-Install or repair Npcap for live capture on Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\install-npcap.ps1
-```
-
-Recommended local dev start on Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\start-local.ps1
-```
-
-Start the local stack with Administrator privileges for live capture:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\start-local.ps1 -Elevated
 ```
 
 Start a remote sensor on a server you own or administer:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\start-sensor.ps1 -BindHost 0.0.0.0 -Port 8765 -AllowedOrigins "http://YOUR_DASHBOARD_HOST:5173"
+cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-sensor.ps1 -BindHost 0.0.0.0 -Port 8765 -AllowedOrigins "http://YOUR_DASHBOARD_HOST:5173"
 ```
 
-Stop local dev services:
+Then connect the dashboard to that sensor:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\stop-local.ps1
-```
-
-Clean local caches and build artifacts:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\dev\clean.ps1
+```text
+http://127.0.0.1:5173/?api=http://SERVER_IP:8765/api&ws=ws://SERVER_IP:8765/ws
 ```
 
 ## Verification
 
-Useful checks during development:
-
 ```powershell
-python -m compileall backend core
-python -m unittest discover -s tests
-cd frontend
-npm run build
-npm run smoke
-npm run acceptance
-npm run security
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+npm --prefix .\frontend run build
+npm --prefix .\frontend run smoke
+npm --prefix .\frontend run security
+powershell -ExecutionPolicy Bypass -File .\scripts\qa\release_readiness.ps1
 ```
 
-Desktop runtime smoke:
+Build Windows desktop artifacts:
 
 ```powershell
-node scripts\qa\local_acceptance.mjs
-powershell -ExecutionPolicy Bypass -File scripts\qa\release_readiness.ps1
-python scripts\qa\packaged_backend_smoke.py
-powershell -ExecutionPolicy Bypass -File scripts\qa\electron_smoke.ps1
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 ```
 
-Optional live capture acceptance, run from an elevated PowerShell after the local stack is up:
+## Security Model
 
-```powershell
-$env:NETBOT_ACCEPTANCE_CAPTURE = "1"
-node scripts\qa\local_acceptance.mjs
-```
+- Loopback-only by default for local development and desktop mode.
+- Remote access is opt-in and requires both `NETBOT_REMOTE_ACCESS=1` and `NETBOT_LOCAL_TOKEN`.
+- Desktop mode generates a cryptographically secure random token when no token is provided.
+- Electron exposes runtime config through a narrow IPC preload bridge with `contextIsolation`, `sandbox`, and `nodeIntegration: false`.
+- Sensitive HTTP routes require `X-NetBot-Token`.
+- Websocket sessions prefer the `netbot.auth.*` subprotocol instead of query-string tokens.
+- Downloads are constrained to generated safe file types inside the NetBotPro log directory.
 
-## First-Run Notes
+## Limitations
 
-- The desktop shell creates its own config, data, and log folders under the Electron user-data directory on first launch.
-- Live capture and firewall actions can require Administrator privileges on Windows, even when the dashboard itself starts normally.
-- If no process mapping appears immediately, the packet can still be valid; short-lived sockets and kernel-owned traffic can arrive before attribution is available.
+- Live capture depends on OS permissions, Npcap/libpcap availability, and visible capture interfaces.
+- Process attribution can be incomplete for short-lived sockets, kernel-owned traffic, NAT, or traffic observed away from the endpoint.
+- Remote sensor mode analyzes traffic visible to that server/interface; it does not magically see traffic from unrelated network segments.
+- Windows artifacts are currently unsigned unless a signing certificate is configured.
+- Linux/macOS packaging paths exist, but production-grade desktop release validation is strongest on Windows right now.
 
-## Known Limitations
+## Legal And Defensive Use Notice
 
-- Linux packaging is wired and build-ready, but a production Linux artifact still needs to be built and smoke-tested on a real Linux host before it should be called released.
-- Live capture quality depends on the local capture stack and interface permissions.
-- Some history rows can show reduced process or protocol evidence when they were stored before newer enrichment fields existed.
+NetBotPro is intended for defensive monitoring, troubleshooting, education, and authorized security analysis. Only capture, inspect, or analyze traffic on systems, accounts, servers, and networks where you have explicit legal permission. Do not use this project for unauthorized surveillance, intrusion, credential theft, evasion, or abuse.
 
-## Notes
+## Release
 
-- The supported primary UI is the web stack.
-- The maintained desktop delivery path is the Electron shell in `desktop/electron/`.
-- Deprecated Tkinter UI files were removed to keep the repository focused on the active product path.
-- Temporary caches, build artifacts, and zip backups are intentionally excluded from the final repo layout.
+GitHub Actions builds CI on push and pull request. Desktop release artifacts are produced by the `Release Desktop` workflow. Pushing a version tag such as `v0.1.3` triggers the release workflow and publishes the generated artifacts to GitHub Releases.
 
-## More docs
+## More Docs
 
-- Detailed migration notes: `docs/WEB_MIGRATION.md`
-- Desktop shell notes: `docs/DESKTOP_SHELL.md`
-- Architecture notes: `docs/ARCHITECTURE.md`
-- Repo cleanup notes: `docs/README.md`
-- Contribution guide: `CONTRIBUTING.md`
+- [Architecture](docs/ARCHITECTURE.md)
+- [Remote sensor mode](docs/REMOTE_SENSOR.md)
+- [Desktop shell](docs/DESKTOP_SHELL.md)
+- [Web migration notes](docs/WEB_MIGRATION.md)
+- [Contributing](CONTRIBUTING.md)
