@@ -168,9 +168,9 @@ def _friendly_label(name: str, description: str, ip_addr: str | None) -> str:
 
 
 def _scapy_interfaces() -> list[dict[str, Any]]:
-    ensure_capture_backend()
     if platform.system().lower() == "windows":
         return _windows_interfaces()
+    ensure_capture_backend()
     try:
         from scapy.interfaces import IFACES  # type: ignore
     except Exception:
@@ -230,6 +230,7 @@ def recommended_interface_name() -> str | None:
     if not items:
         return None
 
+    system_name = platform.system().lower()
     target_ip = _detect_primary_local_ip()
     if target_ip:
         for item in items:
@@ -238,27 +239,28 @@ def recommended_interface_name() -> str | None:
             if item.get("ip") == target_ip and not _is_virtual_or_tunnel_name(iface_name, description):
                 return str(item["value"])
 
-    try:
-        from scapy.config import conf  # type: ignore
-        from scapy.interfaces import get_working_if  # type: ignore
+    if system_name != "windows":
+        try:
+            from scapy.config import conf  # type: ignore
+            from scapy.interfaces import get_working_if  # type: ignore
 
-        working = get_working_if()
-        resolved = resolve_capture_interface(_iface_value_from_obj(working))
-        if resolved:
-            return resolved
-        resolved = resolve_capture_interface(getattr(working, "name", None))
-        if resolved:
-            return resolved
+            working = get_working_if()
+            resolved = resolve_capture_interface(_iface_value_from_obj(working))
+            if resolved:
+                return resolved
+            resolved = resolve_capture_interface(getattr(working, "name", None))
+            if resolved:
+                return resolved
 
-        conf_iface = getattr(conf, "iface", None)
-        resolved = resolve_capture_interface(_iface_value_from_obj(conf_iface))
-        if resolved:
-            return resolved
-        resolved = resolve_capture_interface(getattr(conf_iface, "name", None))
-        if resolved:
-            return resolved
-    except Exception:
-        logger.debug("scapy interface recommendation failed", exc_info=True)
+            conf_iface = getattr(conf, "iface", None)
+            resolved = resolve_capture_interface(_iface_value_from_obj(conf_iface))
+            if resolved:
+                return resolved
+            resolved = resolve_capture_interface(getattr(conf_iface, "name", None))
+            if resolved:
+                return resolved
+        except Exception:
+            logger.debug("scapy interface recommendation failed", exc_info=True)
 
     stats: dict[str, Any] = {}
     if psutil is not None:

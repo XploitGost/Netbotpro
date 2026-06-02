@@ -66,6 +66,36 @@ function Resolve-ArchiveTool {
     return $null
 }
 
+function Resolve-ElectronVersion {
+    $packageLockPath = Join-Path $RepoRoot "desktop\electron\package-lock.json"
+    $packageJsonPath = Join-Path $RepoRoot "desktop\electron\package.json"
+
+    if (Test-Path $packageLockPath) {
+        try {
+            $packageLock = Get-Content -LiteralPath $packageLockPath -Raw | ConvertFrom-Json
+            $lockedVersion = $packageLock.packages."node_modules/electron".version
+            if ($lockedVersion) {
+                return [string]$lockedVersion
+            }
+        } catch {
+        }
+    }
+
+    if (Test-Path $packageJsonPath) {
+        try {
+            $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
+            $declaredVersion = [string]$packageJson.devDependencies.electron
+            $normalized = $declaredVersion.TrimStart("^", "~", ">=", "<=", ">", "<", "=")
+            if ($normalized) {
+                return $normalized
+            }
+        } catch {
+        }
+    }
+
+    throw "Unable to resolve Electron version from desktop\electron package metadata."
+}
+
 function Test-DesktopDependenciesReady {
     param(
         [string]$ElectronDir
@@ -157,11 +187,17 @@ function Initialize-NsisTools {
 
 $PythonCmd = Resolve-BuildPython
 $NodeHome = Resolve-BuildNodeHome
-$ElectronDist = Join-Path $RepoRoot ".tools\\electron-v36.3.1-win32-x64"
+$ElectronVersion = Resolve-ElectronVersion
+$ElectronDist = Join-Path $RepoRoot ".tools\electron-v$ElectronVersion-win32-x64"
 $ArchiveTool = Resolve-ArchiveTool
 
 Ensure-ArchiveToolInPath -ToolPath $ArchiveTool
 Initialize-NsisTools -ArchiveToolPath $ArchiveTool
+
+Write-Host "Using Electron version: $ElectronVersion"
+if (Test-Path $ElectronDist) {
+    Write-Host "Using cached Electron dist: $ElectronDist"
+}
 
 & $PythonCmd -m PyInstaller packaging\pyinstaller\netbotpro_backend.spec --clean --noconfirm
 & $PythonCmd scripts\release\stage_backend_runtime.py

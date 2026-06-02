@@ -140,6 +140,7 @@ Desktop runtime smoke:
 
 ```powershell
 node scripts\qa\local_acceptance.mjs
+powershell -ExecutionPolicy Bypass -File scripts\qa\release_readiness.ps1
 python scripts\qa\packaged_backend_smoke.py
 powershell -ExecutionPolicy Bypass -File scripts\qa\electron_smoke.ps1
 ```
