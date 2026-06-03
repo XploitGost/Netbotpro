@@ -26,12 +26,18 @@ class AgentScriptTests(unittest.TestCase):
                 self.assertIn(fragment, script, f"{name} missing {fragment}")
 
     def test_agent_scripts_do_not_print_raw_token(self):
-        for name in ["start-agent.ps1", "status-agent.ps1"]:
-            script = self._read_script(name)
+        start_script = self._read_script("start-agent.ps1")
+        status_script = self._read_script("status-agent.ps1")
 
-            self.assertIn("Agent token: <hidden>", script)
+        self.assertIn("Agent token is configured and hidden.", start_script)
+        self.assertIn(
+            "Agent token is never printed by this status command.",
+            status_script,
+        )
+        for script in [start_script, status_script]:
             self.assertNotIn('Write-Host "Agent token: $AgentToken"', script)
             self.assertNotIn('Write-Host ("Agent token:', script)
+            self.assertNotIn("Agent token: <hidden>", script)
 
     def test_status_agent_removes_stale_pid_file(self):
         powershell = shutil.which("powershell") or shutil.which("pwsh")

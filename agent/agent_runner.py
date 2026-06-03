@@ -12,8 +12,18 @@ from agent.agent_identity import (
     load_or_create_agent_id,
 )
 from agent.agent_payloads import build_telemetry_payload
+from core.privacy_redaction import redact_sensitive_text
 
 logger = logging.getLogger("netbotpro.agent")
+
+
+def sanitize_agent_log_message(message: object, *secrets: str) -> str:
+    """Remove known agent secrets before writing operational logs."""
+    text = redact_sensitive_text(str(message))
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    return text
 
 
 def run_agent() -> int:
@@ -56,7 +66,11 @@ def run_agent() -> int:
                 time.sleep(1)
             except Exception as exc:
                 registered = False
-                logger.warning("agent sync failed; retrying in %ss: %s", backoff, exc)
+                logger.warning(
+                    "agent sync failed; retrying in %ss: %s",
+                    backoff,
+                    sanitize_agent_log_message(exc, config.agent_token),
+                )
                 time.sleep(backoff)
                 backoff = min(60, backoff * 2)
     except KeyboardInterrupt:

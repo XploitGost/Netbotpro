@@ -60,7 +60,7 @@ Write-Host "Central API: $CentralApi"
 Write-Host "PID file: $PidFile"
 Write-Host "Log: $StdoutLog"
 Write-Host "Error log: $StderrLog"
-Write-Host "Agent token: <hidden>"
+Write-Host "Agent token is configured and hidden."
 
 if ($Foreground) {
     & $PythonExe -m agent.agent_runner

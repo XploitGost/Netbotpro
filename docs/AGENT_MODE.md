@@ -24,6 +24,11 @@ The agent payload builder runs central redaction before data is submitted.
 Authorization headers, cookies, passwords, API keys, secrets, session values,
 tokens, and JWT-like strings are masked.
 
+The central backend redacts the same payload again before it is stored or shown
+in the UI. This double-redaction posture is deliberate: the agent should avoid
+sending secrets, and the central service should still defend itself if a future
+agent version or custom integration submits sensitive text.
+
 ## What Agent Mode Does Not Send
 
 Phase one does not send:
@@ -37,6 +42,22 @@ Phase one does not send:
 
 Raw capture artifacts remain guarded by Full and Forensic capture policies on
 the sensor backend. Agent Mode does not bypass those controls.
+
+## Architecture
+
+Agent Mode has three small boundaries:
+
+- `agent/agent_runner.py` owns the loop: load config, create identity, register,
+  heartbeat, submit telemetry, and retry with backoff.
+- `agent/agent_payloads.py` owns the summary payload shape and calls central
+  redaction before sending anything to the backend.
+- `backend/app/services/agent_registry.py` owns server-side registration,
+  token verification, redaction, in-memory state, and append-only event storage.
+
+The React console reads the registry through local-token-protected API routes
+and renders the `Agents` page. The page shows host, status, OS, health, capture
+summary, alert counts, and recent telemetry. It does not expose raw packet
+tables, payload previews, or raw artifact links for agents.
 
 ## Backend Endpoints
 
@@ -62,6 +83,37 @@ X-NetBot-Agent-Token: <shared agent token>
 If `NETBOT_AGENT_TOKEN` is configured on the central backend, registration and
 all later agent requests must match it.
 
+Dashboard reads still use the normal local dashboard controls:
+
+- loopback is trusted for local development;
+- remote dashboard access requires `NETBOT_REMOTE_ACCESS=1`;
+- sensitive dashboard reads require `X-NetBot-Token` when
+  `NETBOT_LOCAL_TOKEN` is configured.
+
+Agent authentication is intentionally separate from dashboard authentication.
+An agent token can submit telemetry, but it cannot read the operator dashboard.
+
+## Configuration
+
+Agent environment variables:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `NETBOT_CENTRAL_API` | yes | Central API base, for example `http://host:8000/api`. |
+| `NETBOT_AGENT_TOKEN` | yes | Shared secret used in `X-NetBot-Agent-Token`. |
+| `NETBOT_AGENT_ID` | no | Pre-provisioned UUID. If omitted, a stable local UUID is created. |
+| `NETBOT_AGENT_MODE` | no | Enables explicit agent-mode runtime intent when set to `1`, `true`, `yes`, or `on`. |
+| `NETBOT_AGENT_HEARTBEAT_INTERVAL` | no | Heartbeat seconds, clamped by config loader. |
+| `NETBOT_AGENT_TELEMETRY_INTERVAL` | no | Telemetry seconds, clamped by config loader. |
+
+Central backend environment:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `NETBOT_AGENT_TOKEN` | recommended | Rejects agent registration and telemetry unless the submitted token matches. |
+| `NETBOT_LOCAL_TOKEN` | recommended | Protects dashboard reads including `/api/agents`. |
+| `NETBOT_REMOTE_ACCESS` | remote only | Enables non-loopback dashboard clients when explicitly needed. |
+
 ## Run On Windows
 
 ```powershell
@@ -84,7 +136,8 @@ The scripts write:
 - stderr: `.runtime/logs/agent-runner.err.log`
 
 The token is never printed by the status script and is hidden by the start
-script output.
+script output. The agent runner also sanitizes sync exception text before it is
+written to `.runtime/logs/agent-runner.err.log`.
 
 ## Run On Linux Or macOS
 
@@ -106,6 +159,55 @@ If `NETBOT_AGENT_ID` is not set, the agent creates a stable UUID in:
 That ID is reused across restarts. Set `NETBOT_AGENT_ID` only when you need a
 pre-provisioned identity.
 
+## Storage
+
+Phase one stores append-only registry events in:
+
+```text
+.runtime/logs/agents.jsonl
+```
+
+The file contains redacted public records, telemetry summaries, timestamps, and
+a SHA-256 token hash for local verification when no central `NETBOT_AGENT_TOKEN`
+is configured. The raw agent token is not stored.
+
+JSONL is intentionally simple for this staged release: it is easy to inspect,
+safe to append, and enough for small fleets. For a serious multi-agent
+deployment, SQLite should replace JSONL so the registry can support indexed
+lookups, retention, migrations, compaction, integrity checks, and concurrent
+read patterns without replaying a growing log file.
+
+The service boundary is already centralized in `AgentRegistry`, so a future
+SQLite implementation can keep the API routes and frontend stable.
+
+## Logging
+
+Agent scripts write stdout and stderr to:
+
+```text
+.runtime/logs/agent-runner.log
+.runtime/logs/agent-runner.err.log
+```
+
+Expected log content:
+
+- agent ID;
+- central API URL;
+- registration success;
+- heartbeat or telemetry retry messages;
+- sanitized exception summaries.
+
+Forbidden log content:
+
+- `NETBOT_AGENT_TOKEN`;
+- `X-NetBot-Agent-Token` raw values;
+- Authorization, Cookie, password, API key, secret, session, or JWT-like values;
+- raw packets, payload bytes, payload previews, PCAP paths submitted by an
+  agent.
+
+The test suite includes script and sanitizer coverage to keep the raw token out
+of agent console output and sync failure logs.
+
 ## Security Notes
 
 Use Agent Mode only on systems and networks where you have explicit permission.
@@ -115,3 +217,15 @@ or a TLS reverse proxy. Keep `NETBOT_AGENT_TOKEN` long, random, and out of logs.
 Phase one is intentionally telemetry-only. Remote commands, file collection,
 and raw capture forwarding are separate future work and must keep the same
 authorization, audit, and redaction boundaries.
+
+## Next Phase Checklist
+
+Before Agent Mode grows beyond summary telemetry, add:
+
+- SQLite-backed registry storage with migrations and retention.
+- Per-agent token rotation or per-agent token hashes instead of one shared
+  fleet token.
+- Explicit enrollment and revocation workflow.
+- Audit events for operator reads and registry state changes.
+- TLS deployment guidance for central API exposure.
+- Separate policy gates for any future command, file, or raw capture feature.

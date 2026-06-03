@@ -17,6 +17,10 @@ ensure_project_root_on_path()
 from log_manager import LOG_DIR  # noqa: E402
 
 AGENT_OFFLINE_AFTER_SECONDS = 90
+
+# Phase one uses append-only JSONL so Agent Mode stays easy to review and
+# recover. The registry boundary is intentionally narrow so a production SQLite
+# backend can replace this storage without changing the API routes or frontend.
 _SENSITIVE_KEYS = {
     "api_key",
     "apikey",

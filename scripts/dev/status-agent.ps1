@@ -12,7 +12,7 @@ Write-Host "NetBotPro Agent status"
 Write-Host "PID file: $PidFile"
 Write-Host "Log: $StdoutLog"
 Write-Host "Error log: $StderrLog"
-Write-Host "Agent token: <hidden>"
+Write-Host "Agent token is never printed by this status command."
 
 if (-not (Test-Path $PidFile)) {
     Write-Host "Status: stopped"
