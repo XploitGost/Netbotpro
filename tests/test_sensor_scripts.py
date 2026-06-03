@@ -17,14 +17,13 @@ class SensorScriptTests(unittest.TestCase):
 
         self.assertIn("[switch]$ShowToken", script)
         self.assertIn('Write-Host "Token file: $TokenFile"', script)
-        self.assertIn(
-            'if ($ShowToken) {\n    Write-Host "Token: $SensorToken"\n}', script
-        )
+        self.assertIn("if ($ShowToken)", script)
+        self.assertNotIn('Write-Host "Token: $SensorToken"', script)
         self.assertNotIn("Token: <hidden", script)
 
     def test_start_sensor_prints_token_only_with_show_token_block(self):
         script = self._read_script("start-sensor.ps1")
-        token_print = 'Write-Host "Token: $SensorToken"'
+        token_print = 'Write-Host ("Token: {0}" -f $SensorToken)'
 
         self.assertEqual(script.count(token_print), 1)
         self.assertIn("if ($ShowToken)", script)

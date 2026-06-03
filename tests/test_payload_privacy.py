@@ -1,5 +1,6 @@
 import unittest
 
+from backend.app.services.redaction import redact_http_path as service_redact_http_path
 from backend.app.services.redaction import (
     redact_sensitive_text as service_redact_sensitive_text,
 )
@@ -9,6 +10,7 @@ from core.netbotpro_sniffer_core.layer7 import (
     redact_sensitive_text,
     safe_bytes_preview,
 )
+from core.privacy_redaction import redact_http_path as core_redact_http_path
 from core.privacy_redaction import redact_sensitive_text as core_redact_sensitive_text
 
 
@@ -77,6 +79,15 @@ class PayloadPrivacyTests(unittest.TestCase):
         self.assertIn("[REDACTED]", redacted)
         self.assertIn("[REDACTED_JWT]", redacted)
         self.assertEqual(redacted, core_redacted)
+
+    def test_backend_and_core_redact_http_path_match(self):
+        path = "/login?access_token=secret-token&session=session-secret&ok=1"
+
+        self.assertEqual(service_redact_http_path(path), core_redact_http_path(path))
+        self.assertEqual(
+            service_redact_http_path(path),
+            "/login?access_token=[REDACTED]&session=[REDACTED]&ok=1",
+        )
 
     def test_export_dataframes_redact_packet_and_alert_text(self):
         packets = packet_rows_to_df(

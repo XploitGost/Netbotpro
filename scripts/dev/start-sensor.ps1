@@ -92,7 +92,7 @@ Write-Host "Capture mode: $CaptureMode"
 Write-Host "Remote IP allowlist: $(if ($env:NETBOT_REMOTE_IP_ALLOWLIST) { $env:NETBOT_REMOTE_IP_ALLOWLIST } else { '<not set>' })"
 Write-Host "Token file: $TokenFile"
 if ($ShowToken) {
-    Write-Host "Token: $SensorToken"
+    Write-Host ("Token: {0}" -f $SensorToken)
 }
 Write-Host "PID file: $PidFile"
 Write-Host "Logs: $StdoutLog | $StderrLog"
