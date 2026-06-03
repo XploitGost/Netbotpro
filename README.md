@@ -44,17 +44,54 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 
 ```mermaid
 flowchart LR
-    User["Analyst / Operator"] --> UI["React Frontend"]
-    UI --> API["FastAPI Backend"]
-    UI --> WS["WebSocket Event Stream"]
-    Electron["Electron Desktop Shell"] --> UI
-    Electron --> Token["Secure Local Token"]
-    Token --> API
-    API --> Capture["Scapy / Npcap Capture Provider"]
-    API --> History["SQLite History Repository"]
-    API --> Detection["IDS, ML Scoring, Protocol Enrichment"]
-    API --> Reports["Exports and Reports"]
-    Sensor["Remote Sensor Mode"] --> API
+    Operator["Analyst / Operator"]
+
+    subgraph Client["Client Runtime"]
+        Browser["React Analyst Console"]
+        Desktop["Electron Desktop Shell"]
+        Preload["Hardened Preload Bridge"]
+        Token["Local Token Store"]
+    end
+
+    subgraph Sensor["Authorized Sensor Host"]
+        API["FastAPI Control Plane"]
+        WS["WebSocket Event Stream"]
+        Policy["Remote Access / Token / Allowlist"]
+        CapturePolicy["Capture Policy<br/>metadata / full / forensic"]
+        Audit["Audit Log"]
+    end
+
+    subgraph Core["Core Network Pipeline"]
+        Capture["Scapy / Npcap Capture Provider"]
+        Parser["Packet Parser + Layer 7 Metadata"]
+        Redaction["Central Redaction"]
+        Detection["IDS Rules / ML Scoring"]
+        ProcessMap["Process Attribution"]
+    end
+
+    subgraph Data["Local Data Plane"]
+        History["SQLite History Repository"]
+        Reports["Redacted Reports / JSON / ZIP"]
+        Raw["Guarded Raw PCAP Export"]
+    end
+
+    Operator --> Browser
+    Desktop --> Preload --> Browser
+    Desktop --> Token
+    Token --> Browser
+    Browser -->|"X-NetBot-Token"| API
+    Browser -->|"netbot.auth subprotocol"| WS
+    Policy --> API
+    API --> CapturePolicy
+    API --> Audit
+    API --> Capture --> Parser --> Redaction --> Detection
+    Parser --> ProcessMap
+    Redaction --> History
+    Detection --> History
+    History --> Reports
+    CapturePolicy --> Raw
+    API --> Reports
+    API --> Raw
 ```
 
 ## Repository Layout
