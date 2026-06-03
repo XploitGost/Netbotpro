@@ -60,9 +60,11 @@ Authorization, Proxy-Authorization, Cookie, Set-Cookie, Basic/Bearer tokens,
 password/token/api key/session/secret key-value pairs, sensitive query
 parameters, and JWT-like strings.
 
-Redaction is applied before payload previews, report/export dataframes, and
-JSON-style summaries leave the backend. Raw PCAP is intentionally not redacted,
-so it is only exposed through the guarded raw artifact export.
+Redaction is centralized in `core/privacy_redaction.py`, with compatibility
+wrappers in `core/redaction.py` and `backend/app/services/redaction.py`.
+It is applied before payload previews, report/export dataframes, audit fields,
+and JSON-style summaries leave the backend. Raw PCAP is intentionally not
+redacted, so it is only exposed through the guarded raw artifact export.
 
 ## Raw PCAP Warning
 

@@ -9,6 +9,7 @@ from core.netbotpro_sniffer_core.layer7 import (
     redact_sensitive_text,
     safe_bytes_preview,
 )
+from core.privacy_redaction import redact_sensitive_text as core_redact_sensitive_text
 
 
 class PayloadPrivacyTests(unittest.TestCase):
@@ -59,6 +60,7 @@ class PayloadPrivacyTests(unittest.TestCase):
         )
 
         redacted = service_redact_sensitive_text(text)
+        core_redacted = core_redact_sensitive_text(text)
 
         for secret in [
             "bearer-secret",
@@ -74,6 +76,7 @@ class PayloadPrivacyTests(unittest.TestCase):
             self.assertNotIn(secret, redacted)
         self.assertIn("[REDACTED]", redacted)
         self.assertIn("[REDACTED_JWT]", redacted)
+        self.assertEqual(redacted, core_redacted)
 
     def test_export_dataframes_redact_packet_and_alert_text(self):
         packets = packet_rows_to_df(
