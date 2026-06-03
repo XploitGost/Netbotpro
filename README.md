@@ -218,6 +218,8 @@ GitHub Actions builds CI on push and pull request. Desktop release artifacts are
 - [Security policy](SECURITY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Safe use policy](docs/SAFE_USE_POLICY.md)
+- [Capture modes](docs/CAPTURE_MODES.md)
+- [Server deployment](docs/SERVER_DEPLOYMENT.md)
 - [Remote sensor mode](docs/REMOTE_SENSOR.md)
 - [Desktop shell](docs/DESKTOP_SHELL.md)
 - [Web migration notes](docs/WEB_MIGRATION.md)

@@ -18,6 +18,7 @@ This document describes the main assets, trust boundaries, and expected mitigati
 | Browser to backend API | Unauthorized control or data reads | Local token required on sensitive routes. |
 | Browser to websocket | Token leakage or unauthorized stream access | Token subprotocol, origin checks, trusted client checks. |
 | Remote client to sensor | Public exposure of capture/control API | Remote mode disabled by default, token required, private network recommended. |
+| Full/forensic capture | Raw payload or PCAP evidence may contain credentials | Safe Use gate, full-capture opt-in, audit log, redaction, retention policy. |
 | Electron renderer to main process | Renderer compromise reaching Node APIs | Context isolation, sandbox, no nodeIntegration, narrow preload config. |
 | Export download path | Path traversal or unsafe file disclosure | Safe suffix allowlist and directory containment checks. |
 | Capture provider | OS privilege abuse or unavailable interfaces | Preflight diagnostics and admin/root guidance. |
@@ -38,6 +39,14 @@ If the backend is bound to a non-loopback interface, an attacker could try to ca
 ### Token Exposure
 
 Tokens in URLs can leak through logs and browser history. NetBotPro prefers websocket subprotocol authentication instead of query-string websocket tokens. Operators should avoid pasting tokens into screenshots or public logs.
+
+### Raw PCAP And Payload Retention
+
+Raw PCAP and payload previews can contain Authorization headers, cookies, bearer tokens, Basic Auth, session IDs, passwords, API keys, and personal data. Metadata mode avoids storing payload previews. Full and Forensic mode require explicit authorization and should be paired with short retention, restricted raw export, and secure storage.
+
+### Remote Dashboard Exposure
+
+When a sensor binds to `0.0.0.0`, attackers can discover the API if the network path is open. Use VPN/private routing, TLS reverse proxy, firewall restrictions, `NETBOT_REMOTE_IP_ALLOWLIST`, and long random local tokens.
 
 ### Unsafe Generated Downloads
 

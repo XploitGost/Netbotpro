@@ -24,6 +24,10 @@ const defaultSettings = {
   alert_only_mode: false,
   safe_use_policy_accepted: false,
   remote_dashboard_allowlist: "",
+  capture_mode: "metadata",
+  allow_full_capture: false,
+  forensic_duration_minutes: 0,
+  forensic_confirmed: false,
 };
 
 function initialActivePage() {
@@ -729,7 +733,12 @@ export function useDashboardController() {
       return;
     }
     try {
-      const data = await api.startSniffer({ iface: settings.iface || "iface=default" });
+      const data = await api.startSniffer({
+        iface: settings.iface || "iface=default",
+        capture_mode: settings.capture_mode || "metadata",
+        forensic_duration_minutes: Number(settings.forensic_duration_minutes || 0),
+        forensic_confirmed: Boolean(settings.forensic_confirmed),
+      });
       setDashboard((current) => ({ ...(current || {}), state: data }));
       setStatusMessage("Live capture started");
     } catch (err) {
@@ -771,6 +780,10 @@ export function useDashboardController() {
         alert_only_mode: Boolean(settings.alert_only_mode),
         safe_use_policy_accepted: Boolean(settings.safe_use_policy_accepted),
         remote_dashboard_allowlist: settings.remote_dashboard_allowlist,
+        capture_mode: settings.capture_mode || "metadata",
+        allow_full_capture: Boolean(settings.allow_full_capture),
+        forensic_duration_minutes: Number(settings.forensic_duration_minutes || 0),
+        forensic_confirmed: Boolean(settings.forensic_confirmed),
       });
       setSettings((current) => ({ ...current, ...data, iface: data.iface || current.iface || "iface=default" }));
       setStatusMessage("Settings saved");

@@ -147,6 +147,7 @@ class SecurityHardeningTests(unittest.TestCase):
         with patch.dict(os.environ, {"NETBOT_REMOTE_IP_ALLOWLIST": "10.0.0.5, 192.168.10.0/24"}, clear=False):
             self.assertTrue(is_remote_ip_allowed("10.0.0.5"))
             self.assertTrue(is_remote_ip_allowed("192.168.10.44"))
+            self.assertTrue(is_remote_ip_allowed("127.0.0.1"))
             self.assertFalse(is_remote_ip_allowed("192.168.11.44"))
 
     def test_remote_allowlist_rejects_non_allowlisted_dashboard_client(self):

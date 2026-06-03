@@ -37,12 +37,20 @@ def _clean_detail(value: Any) -> Any:
 
 
 def audit_event(action: str, *, actor: str = "unknown", success: bool = True, detail: dict[str, Any] | None = None) -> None:
+    detail = detail or {}
     event = {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": str(action or "unknown"),
+        "event_type": str(action or "unknown"),
         "actor": str(actor or "unknown"),
+        "client_ip": str(actor or "unknown"),
+        "user_id": str(detail.get("user_id") or "local-token"),
+        "capture_mode": str(detail.get("capture_mode") or "metadata"),
         "success": bool(success),
-        "detail": _clean_detail(detail or {}),
+        "reason": str(detail.get("reason") or detail.get("detail") or ""),
+        "target": str(detail.get("target") or detail.get("path") or ""),
+        "detail": _clean_detail(detail),
     }
     try:
         _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)

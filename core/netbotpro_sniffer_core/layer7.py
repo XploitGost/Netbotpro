@@ -2,31 +2,13 @@ from __future__ import annotations
 
 import binascii
 import logging
-import re
 from typing import Any
+
+from core.redaction import redact_http_path, redact_sensitive_text
 
 from .tls import tls_fingerprints
 
 logger = logging.getLogger(__name__)
-_SENSITIVE_HEADER_RE = re.compile(
-    r"(?im)^((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)\s*:\s*)([^\r\n]*)"
-)
-_SENSITIVE_TOKEN_RE = re.compile(r"(?i)\b(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]+")
-_SENSITIVE_QUERY_RE = re.compile(r"(?i)([?&](?:access_token|api_key|apikey|auth|authorization|code|password|secret|token)=)[^&#\s]+")
-
-
-def redact_sensitive_text(value: str) -> str:
-    text = str(value or "")
-    text = _SENSITIVE_HEADER_RE.sub(r"\1[REDACTED]", text)
-    text = _SENSITIVE_TOKEN_RE.sub("[REDACTED_TOKEN]", text)
-    text = _SENSITIVE_QUERY_RE.sub(r"\1[REDACTED]", text)
-    return text
-
-
-def redact_http_path(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return redact_sensitive_text(str(value))
 
 
 def safe_bytes_preview(payload: bytes, max_len: int = 64, *, enabled: bool = False) -> dict[str, Any]:

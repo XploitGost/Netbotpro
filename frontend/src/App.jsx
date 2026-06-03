@@ -458,6 +458,8 @@ function App() {
         interfaceCount={interfaces.length}
         error={error}
         safeUsePolicyAccepted={Boolean(settings.safe_use_policy_accepted)}
+        captureMode={settings.capture_mode || "metadata"}
+        payloadCaptureEnabled={Boolean(settings.payload_capture_enabled)}
         isBusy={loadingState.snifferAction}
         onTokenChange={setLocalToken}
         onOpenSettings={() => setActivePage("settings")}

@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.event_bus import EventBus
+from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
@@ -120,8 +121,8 @@ class SnifferService:
         packet = dict(meta)
         packet.setdefault("ts", datetime.utcnow().isoformat() + "Z")
         packet.setdefault("id", self._next_packet_id())
-        settings = get_settings_snapshot()
-        self._apply_payload_policy(packet, settings)
+        policy = current_capture_policy()
+        self._apply_payload_policy(packet, policy.to_public_dict())
         try:
             alerts = self._detection_pipeline.analyze(packet)
         except Exception:
@@ -129,7 +130,7 @@ class SnifferService:
             alerts = []
         alerts = self._assign_alert_ids(packet, alerts)
         for alert in alerts:
-            self._apply_payload_policy(alert, settings)
+            self._apply_payload_policy(alert, policy.to_public_dict())
 
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
@@ -139,7 +140,7 @@ class SnifferService:
 
     @staticmethod
     def _apply_payload_policy(row: dict[str, Any], settings: dict[str, Any]) -> None:
-        if bool(settings.get("payload_capture_enabled")) and not bool(settings.get("alert_only_mode")):
+        if bool(settings.get("payload_capture_enabled")) and not bool(settings.get("alert_only_mode")) and settings.get("capture_mode") in {"full", "forensic"}:
             return
         row["payload_hex"] = ""
         row["payload_ascii"] = ""

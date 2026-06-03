@@ -42,6 +42,15 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
           ) : null}
         </label>
         <label>
+          <span>Capture Mode</span>
+          <select value={settings.capture_mode || "metadata"} onChange={(event) => onChange("capture_mode", event.target.value)} disabled={isBusy}>
+            <option value="metadata">Metadata - safest default</option>
+            <option value="full">Full - authorized payload capture</option>
+            <option value="forensic">Forensic - incident capture</option>
+          </select>
+          <small className="field-help">Full and Forensic require Safe Use acceptance and full-capture authorization.</small>
+        </label>
+        <label>
           <span>ML Threshold</span>
           <input type="number" min="0" max="1" step="0.01" value={settings.ids_ml_threshold} onChange={(event) => onChange("ids_ml_threshold", event.target.value)} disabled={isBusy} />
         </label>
@@ -71,6 +80,11 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
           <input type="number" min="0" max="525600" step="60" value={settings.retention_minutes || 0} onChange={(event) => onChange("retention_minutes", event.target.value)} disabled={isBusy} />
           <small className="field-help">0 keeps current behavior. Any positive value auto-cleans old packet/report rows.</small>
         </label>
+        <label>
+          <span>Forensic duration minutes</span>
+          <input type="number" min="0" max="1440" step="5" value={settings.forensic_duration_minutes || 0} onChange={(event) => onChange("forensic_duration_minutes", event.target.value)} disabled={isBusy || settings.capture_mode !== "forensic"} />
+          <small className="field-help">Set a duration or confirm explicit-stop capture for forensic mode.</small>
+        </label>
         <label className="toggle">
           <input type="checkbox" checked={Boolean(settings.auto_block)} onChange={(event) => onChange("auto_block", event.target.checked)} disabled={isBusy} />
           <span>Auto block high-risk alerts</span>
@@ -84,13 +98,32 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
           <span>Enable redacted payload preview</span>
         </label>
         <label className="toggle">
+          <input type="checkbox" checked={Boolean(settings.allow_full_capture)} onChange={(event) => onChange("allow_full_capture", event.target.checked)} disabled={isBusy} />
+          <span>I allow Full/Forensic capture on this authorized server</span>
+        </label>
+        <label className="toggle">
           <input type="checkbox" checked={Boolean(settings.alert_only_mode)} onChange={(event) => onChange("alert_only_mode", event.target.checked)} disabled={isBusy} />
           <span>Alert-only mode, never store packet payload previews</span>
+        </label>
+        <label className="toggle">
+          <input type="checkbox" checked={Boolean(settings.forensic_confirmed)} onChange={(event) => onChange("forensic_confirmed", event.target.checked)} disabled={isBusy || settings.capture_mode !== "forensic"} />
+          <span>Forensic capture may run until I explicitly stop it</span>
         </label>
         <label className="toggle full-span">
           <input type="checkbox" checked={Boolean(settings.safe_use_policy_accepted)} onChange={(event) => onChange("safe_use_policy_accepted", event.target.checked)} disabled={isBusy} />
           <span>I accept the Safe Use Policy for authorized defensive monitoring only</span>
         </label>
+        {settings.capture_mode !== "metadata" ? (
+          <div className="settings-helper full-span">
+            <div>
+              <h3>{settings.capture_mode === "forensic" ? "Forensic Capture Warning" : "Full Capture Warning"}</h3>
+              <p className="muted">
+                Full packet capture may collect sensitive data. Use it only on authorized servers. UI and reports are redacted, but raw forensic artifacts can contain sensitive content.
+              </p>
+            </div>
+            <span className="ops-state-pill ops-warning">Sensitive Mode</span>
+          </div>
+        ) : null}
       </div>
       {isBusy ? <p className="table-status">Saving runtime settings...</p> : null}
       <button className="primary wide-button" onClick={onSave} disabled={isBusy}>Save Settings</button>

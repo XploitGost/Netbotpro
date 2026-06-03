@@ -14,6 +14,8 @@ export function HeroPanel({
   interfaceCount = 0,
   error,
   safeUsePolicyAccepted = true,
+  captureMode = "metadata",
+  payloadCaptureEnabled = false,
   isBusy = false,
   onTokenChange,
   onOpenSettings,
@@ -35,6 +37,7 @@ export function HeroPanel({
   const readinessHint = canStartSniffer
     ? `${interfaceCount || capturePreflight?.interface_count || 0} interface(s) detected. Start Sniffer will use ${capturePreflight?.recommended_interface_label || "the recommended adapter"}.`
     : captureUnavailableDetail || "Complete the capture checks before starting live monitoring.";
+  const modeLabel = captureMode === "forensic" ? "Forensic Capture" : captureMode === "full" ? "Full Capture" : "Metadata Mode";
 
   return (
     <section className="hero card">
@@ -45,6 +48,12 @@ export function HeroPanel({
           <span className={`ops-state-pill ${levelClass(snapshot.overall)}`}>Ops {levelLabel(snapshot.overall)}</span>
           <span className={`graph-chip ${levelClass(connectionState === "degraded" ? "degraded" : connectionState === "reconnecting" ? "warning" : "healthy")}`}>
             Stream {connectionLabel}
+          </span>
+          <span className={`graph-chip ${captureMode === "metadata" ? "ops-healthy" : "ops-warning"}`}>
+            {modeLabel}
+          </span>
+          <span className={`graph-chip ${payloadCaptureEnabled ? "ops-warning" : "ops-healthy"}`}>
+            Redaction {payloadCaptureEnabled ? "on for previews" : "metadata-only"}
           </span>
         </div>
         <div className="hero-metrics">

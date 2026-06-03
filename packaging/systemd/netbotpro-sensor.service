@@ -1,0 +1,19 @@
+[Unit]
+Description=NetBotPro Remote Sensor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/netbotpro
+EnvironmentFile=/etc/netbotpro/sensor.env
+ExecStart=/opt/netbotpro/.venv/bin/python -m uvicorn backend.app.main:app --host ${NETBOT_HOST} --port ${NETBOT_PORT}
+Restart=on-failure
+RestartSec=5
+User=root
+Group=root
+StandardOutput=append:/var/log/netbotpro/sensor-backend.log
+StandardError=append:/var/log/netbotpro/sensor-backend.err.log
+
+[Install]
+WantedBy=multi-user.target

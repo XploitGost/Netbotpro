@@ -3,6 +3,9 @@ param(
     [int]$Port = 8765,
     [string]$AllowedOrigins = "",
     [string]$Token = "",
+    [string]$CaptureMode = "metadata",
+    [string]$Allowlist = "",
+    [switch]$ShowToken,
     [switch]$Background
 )
 
@@ -10,12 +13,14 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $RuntimeDir = Join-Path $RepoRoot ".runtime"
+$LogDir = Join-Path $RuntimeDir "logs"
 $TokenFile = Join-Path $RuntimeDir "sensor-token.txt"
 $PidFile = Join-Path $RuntimeDir "sensor-backend.pid"
-$StdoutLog = Join-Path $RuntimeDir "sensor-backend.log"
-$StderrLog = Join-Path $RuntimeDir "sensor-backend.err.log"
+$StdoutLog = Join-Path $LogDir "sensor-backend.log"
+$StderrLog = Join-Path $LogDir "sensor-backend.err.log"
 
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 function Resolve-PythonBin {
     $candidate = Join-Path $RepoRoot ".venv\Scripts\python.exe"
@@ -67,6 +72,10 @@ $env:NETBOT_PORT = [string]$Port
 $env:NETBOT_REMOTE_ACCESS = "1"
 $env:NETBOT_LOCAL_TOKEN = $SensorToken
 $env:NETBOT_ALLOWED_ORIGINS = $EffectiveOrigins
+$env:NETBOT_CAPTURE_MODE = $CaptureMode
+if ($Allowlist.Trim()) {
+    $env:NETBOT_REMOTE_IP_ALLOWLIST = $Allowlist.Trim()
+}
 
 $uvicornArgs = @(
     "-m", "uvicorn",
@@ -79,8 +88,16 @@ Write-Host "NetBotPro sensor mode"
 Write-Host "Backend bind: http://$BindHost`:$Port"
 Write-Host "Remote access: enabled"
 Write-Host "Allowed origins: $EffectiveOrigins"
+Write-Host "Capture mode: $CaptureMode"
+Write-Host "Remote IP allowlist: $(if ($env:NETBOT_REMOTE_IP_ALLOWLIST) { $env:NETBOT_REMOTE_IP_ALLOWLIST } else { '<not set>' })"
 Write-Host "Token file: $TokenFile"
-Write-Host "Token: $SensorToken"
+if ($ShowToken) {
+    Write-Host "Token: $SensorToken"
+} else {
+    Write-Host "Token: <hidden; rerun with -ShowToken only in a private terminal>"
+}
+Write-Host "PID file: $PidFile"
+Write-Host "Log file: $StdoutLog"
 Write-Host "Dashboard hint: http://127.0.0.1:5173/?api=http://SERVER_IP:$Port/api&ws=ws://SERVER_IP:$Port/ws"
 
 if ($Background) {

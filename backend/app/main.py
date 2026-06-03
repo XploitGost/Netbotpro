@@ -23,7 +23,6 @@ from backend.app.security import (
     is_local_token_enabled,
     is_trusted_websocket_client,
     require_local_token,
-    require_server_safe_use_policy,
     require_trusted_client,
     validate_block_ip,
     validate_ip,
@@ -31,6 +30,7 @@ from backend.app.security import (
 )
 from backend.app.services.event_bus import EventBus
 from backend.app.services.audit_service import audit_event
+from backend.app.services.capture_policy import current_capture_policy, enforce_capture_policy
 from backend.app.services.export_service import ExportService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
 from backend.app.services.investigation_export_service import InvestigationExportService
@@ -144,6 +144,7 @@ def api_status(_: None = Depends(require_trusted_client)) -> dict[str, Any]:
         "sniffer": sniffer_service.get_state(),
         "observability": _observability_snapshot(),
         "local_token_required": is_local_token_enabled(),
+        "capture_policy": current_capture_policy().to_public_dict(),
     }
 
 
@@ -171,7 +172,10 @@ def api_put_settings(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "settings_update", limit=30, window_sec=60)
-    return update_settings(payload)
+    updated = update_settings(payload)
+    event_type = "safe_use_accepted" if payload.get("safe_use_policy_accepted") else "settings_changed"
+    audit_event(event_type, actor=_actor_from_request(request), detail={"changed_keys": sorted(payload.keys()), "capture_mode": updated.get("capture_mode")})
+    return updated
 
 
 @app.post("/api/sniffer/start")
@@ -180,18 +184,28 @@ def api_start_sniffer(
     request: Request = None,
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
-    ___: None = Depends(require_server_safe_use_policy),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_start", limit=12, window_sec=60)
     payload = payload or {}
     iface = payload.get("iface")
     try:
+        policy = enforce_capture_policy(payload, request)
         state = sniffer_service.start(iface=iface)
-        audit_event("capture_start", actor=_actor_from_request(request), detail={"iface": state.get("iface")})
+        event_type = "sniffer_started"
+        if policy.mode == "full":
+            event_type = "full_capture_enabled"
+        elif policy.mode == "forensic":
+            event_type = "forensic_capture_started"
+        state["capture_policy"] = policy.to_public_dict()
+        audit_event(event_type, actor=_actor_from_request(request), detail={"iface": state.get("iface"), "capture_mode": policy.mode})
         return state
+    except HTTPException as exc:
+        policy = current_capture_policy(payload)
+        audit_event("sniffer_started", actor=_actor_from_request(request), success=False, detail={"reason": str(exc.detail), "iface": iface, "capture_mode": policy.mode})
+        raise
     except CaptureStartUnavailableError as exc:
         logger.warning("capture_start_unavailable detail=%s", exc.detail)
-        audit_event("capture_start", actor=_actor_from_request(request), success=False, detail={"detail": exc.detail, "iface": iface})
+        audit_event("sniffer_started", actor=_actor_from_request(request), success=False, detail={"detail": exc.detail, "iface": iface, "capture_mode": current_capture_policy(payload).mode})
         raise HTTPException(status_code=409, detail=exc.detail) from exc
 
 
@@ -203,7 +217,8 @@ def api_stop_sniffer(
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_stop", limit=20, window_sec=60)
     state = sniffer_service.stop()
-    audit_event("capture_stop", actor=_actor_from_request(request), detail={"iface": state.get("iface")})
+    policy = current_capture_policy()
+    audit_event("forensic_capture_stopped" if policy.mode == "forensic" else "sniffer_stopped", actor=_actor_from_request(request), detail={"iface": state.get("iface"), "capture_mode": policy.mode})
     return state
 
 
@@ -377,6 +392,7 @@ def api_block_ip(
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "firewall_block", limit=10, window_sec=60)
     ip = validate_block_ip(str(payload.get("ip") or ""))
+    audit_event("firewall_block_requested", actor=_actor_from_request(request), detail={"target": ip, "capture_mode": current_capture_policy().mode})
     ok = block_ip(ip)
     if not ok:
         raise HTTPException(status_code=409, detail=f"Failed to block {ip}")
@@ -391,6 +407,7 @@ def api_traceroute(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "traceroute", limit=12, window_sec=60)
+    audit_event("traceroute_requested", actor=_actor_from_request(request), detail={"target": str(payload.get("target") or ""), "capture_mode": current_capture_policy().mode})
     return traceroute_service.run(payload)
 
 
@@ -420,10 +437,10 @@ def api_export_session(
             alert_rows=sniffer_service.recent_alerts(),
             traceroute_rows=(history[0].get("hops", []) if history else []),
         )
-        audit_event("export_create", actor=_actor_from_request(request), detail={"kind": result.get("format"), "path": result.get("path")})
+        audit_event("report_generated", actor=_actor_from_request(request), detail={"kind": result.get("format"), "path": result.get("path"), "capture_mode": current_capture_policy().mode})
         return result
     except ValueError as exc:
-        audit_event("export_create", actor=_actor_from_request(request), success=False, detail={"detail": str(exc)})
+        audit_event("report_generated", actor=_actor_from_request(request), success=False, detail={"detail": str(exc), "capture_mode": current_capture_policy().mode})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -437,10 +454,10 @@ def api_export_investigation(
     enforce_rate_limit(request, "export_investigation", limit=20, window_sec=60)
     try:
         result = investigation_export_service.export_report(payload)
-        audit_event("export_create", actor=_actor_from_request(request), detail={"kind": result.get("kind"), "path": result.get("path")})
+        audit_event("report_generated", actor=_actor_from_request(request), detail={"kind": result.get("kind"), "path": result.get("path"), "capture_mode": current_capture_policy().mode})
         return result
     except ValueError as exc:
-        audit_event("export_create", actor=_actor_from_request(request), success=False, detail={"detail": str(exc)})
+        audit_event("report_generated", actor=_actor_from_request(request), success=False, detail={"detail": str(exc), "capture_mode": current_capture_policy().mode})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -455,10 +472,36 @@ def api_export_download(
     safe_name = validate_report_download_path(path)
     file_path = Path(ensure_within_directory(str(LOG_DIR), safe_name))
     if not file_path.exists() or not file_path.is_file():
-        audit_event("report_download", actor=_actor_from_request(request), success=False, detail={"path": safe_name})
+        audit_event("export_downloaded", actor=_actor_from_request(request), success=False, detail={"path": safe_name, "capture_mode": current_capture_policy().mode})
         raise HTTPException(status_code=404, detail="Export not found")
-    audit_event("report_download", actor=_actor_from_request(request), detail={"path": safe_name})
+    audit_event("export_downloaded", actor=_actor_from_request(request), detail={"path": safe_name, "capture_mode": current_capture_policy().mode})
     return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/exports/raw-pcap")
+def api_raw_pcap_download(
+    path: str,
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> FileResponse:
+    enforce_rate_limit(request, "raw_pcap_download", limit=8, window_sec=60)
+    policy = enforce_capture_policy({"capture_mode": current_capture_policy().mode}, request)
+    if policy.mode not in {"full", "forensic"}:
+        audit_event("raw_pcap_export_downloaded", actor=_actor_from_request(request), success=False, detail={"reason": "metadata_mode", "capture_mode": policy.mode})
+        raise HTTPException(status_code=403, detail="Raw PCAP export is only available in full or forensic capture mode")
+    safe_name = Path(str(path or "").strip()).name
+    if not safe_name or safe_name != str(path or "").strip():
+        raise HTTPException(status_code=400, detail="Unsafe raw PCAP path")
+    if Path(safe_name).suffix.lower() not in {".pcap", ".pcapng"}:
+        audit_event("raw_pcap_export_downloaded", actor=_actor_from_request(request), success=False, detail={"reason": "unsupported_type", "path": safe_name, "capture_mode": policy.mode})
+        raise HTTPException(status_code=400, detail="Raw export must be a .pcap or .pcapng artifact")
+    file_path = Path(ensure_within_directory(str(LOG_DIR), safe_name))
+    if not file_path.exists() or not file_path.is_file():
+        audit_event("raw_pcap_export_downloaded", actor=_actor_from_request(request), success=False, detail={"reason": "not_found", "path": safe_name, "capture_mode": policy.mode})
+        raise HTTPException(status_code=404, detail="Raw PCAP artifact not found")
+    audit_event("raw_pcap_export_downloaded", actor=_actor_from_request(request), detail={"path": safe_name, "capture_mode": policy.mode})
+    return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store", "X-NetBot-Warning": "Raw PCAP may contain sensitive data"})
 
 
 @app.get("/api/reports")
@@ -480,6 +523,7 @@ async def api_analyze_pcap(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "analyze_pcap", limit=8, window_sec=60)
+    audit_event("analyze_pcap_requested", actor=_actor_from_request(request), detail={"filename": file.filename or "capture.pcap", "capture_mode": current_capture_policy().mode})
     import tempfile
 
     suffix = (Path(file.filename or "capture.pcap").suffix or ".pcap").lower()
@@ -523,7 +567,7 @@ async def ws_events(websocket: WebSocket) -> None:
         await websocket.close(code=1008)
         return
     if client_host and client_host not in {"127.0.0.1", "::1", "localhost"}:
-        audit_event("remote_login", actor=client_host, detail={"path": "/ws/events", "transport": "websocket"})
+        audit_event("remote_login_success", actor=client_host, detail={"path": "/ws/events", "transport": "websocket"})
     await websocket.accept(subprotocol=accepted_protocol)
     queue = event_bus.subscribe()
     try:

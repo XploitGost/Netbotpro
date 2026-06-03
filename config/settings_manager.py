@@ -46,6 +46,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "alert_only_mode": False,
     "safe_use_policy_accepted": False,
     "remote_dashboard_allowlist": "",
+    "capture_mode": "metadata",
+    "allow_full_capture": False,
+    "forensic_duration_minutes": 0,
+    "forensic_confirmed": False,
 
     # TraceRoute defaults
     "tr_mode": "UDP",

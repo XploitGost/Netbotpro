@@ -142,6 +142,8 @@ def _remote_allowlist_items() -> list[ipaddress._BaseNetwork | ipaddress._BaseAd
 
 
 def is_remote_ip_allowed(client_host: str) -> bool:
+    if _is_loopback_host(client_host):
+        return True
     allowlist = _remote_allowlist_items()
     if not allowlist:
         return True
@@ -185,18 +187,26 @@ def require_trusted_client(request: Request) -> None:
     if _is_loopback_host(client_host):
         return
     if not is_remote_access_enabled():
+        _audit_auth("remote_login_failed", client_host, request, "remote_access_disabled")
         raise HTTPException(status_code=403, detail="Local access only")
     if not is_remote_ip_allowed(client_host):
+        _audit_auth("remote_login_failed", client_host, request, "ip_not_allowlisted")
         raise HTTPException(status_code=403, detail="Remote dashboard IP is not allowlisted")
     if not is_local_token_enabled():
+        _audit_auth("remote_login_failed", client_host, request, "missing_server_token")
         raise HTTPException(status_code=403, detail="Remote access requires NETBOT_LOCAL_TOKEN")
     provided = request.headers.get("X-NetBot-Token", "").strip()
     if not check_local_token(provided):
+        _audit_auth("remote_login_failed", client_host, request, "invalid_token")
         raise HTTPException(status_code=401, detail="Invalid local token")
+    _audit_auth("remote_login_success", client_host, request, "trusted")
+
+
+def _audit_auth(event_type: str, client_host: str, request: Request, reason: str) -> None:
     try:
         from backend.app.services.audit_service import audit_event
 
-        audit_event("remote_login", actor=client_host, success=True, detail={"path": request.url.path})
+        audit_event(event_type, actor=client_host, success=event_type.endswith("success"), detail={"path": request.url.path, "reason": reason})
     except Exception:
         pass
 

@@ -59,10 +59,16 @@ class LocalTokenSecurityTests(unittest.TestCase):
         dependencies = {dependency.call for dependency in route.dependant.dependencies}
         self.assertIn(main.require_local_token, dependencies)
 
-    def test_sniffer_start_requires_server_safe_use_policy_dependency(self):
+    def test_raw_pcap_export_route_declares_local_token_dependency(self):
+        route = self._route("/api/exports/raw-pcap")
+        dependencies = {dependency.call for dependency in route.dependant.dependencies}
+        self.assertIn(main.require_local_token, dependencies)
+
+    def test_sniffer_start_keeps_trusted_client_and_token_dependencies(self):
         route = self._route("/api/sniffer/start", method="POST")
         dependencies = {dependency.call for dependency in route.dependant.dependencies}
-        self.assertIn(main.require_server_safe_use_policy, dependencies)
+        self.assertIn(main.require_trusted_client, dependencies)
+        self.assertIn(main.require_local_token, dependencies)
 
 
 if __name__ == "__main__":

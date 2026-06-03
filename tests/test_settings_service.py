@@ -54,6 +54,10 @@ class SettingsServiceTests(unittest.TestCase):
                     "alert_only_mode": True,
                     "safe_use_policy_accepted": True,
                     "retention_minutes": 120,
+                    "capture_mode": "forensic",
+                    "allow_full_capture": True,
+                    "forensic_duration_minutes": 15,
+                    "forensic_confirmed": True,
                 }
             )
 
@@ -64,6 +68,10 @@ class SettingsServiceTests(unittest.TestCase):
             self.assertTrue(updated["alert_only_mode"])
             self.assertTrue(updated["safe_use_policy_accepted"])
             self.assertEqual(updated["retention_minutes"], 120)
+            self.assertEqual(updated["capture_mode"], "forensic")
+            self.assertTrue(updated["allow_full_capture"])
+            self.assertEqual(updated["forensic_duration_minutes"], 15)
+            self.assertTrue(updated["forensic_confirmed"])
             mock_save.assert_called_once()
             mock_set_persist.assert_called_once_with(bool(updated.get("persist_logs")))
             if updated.get("persist_logs"):

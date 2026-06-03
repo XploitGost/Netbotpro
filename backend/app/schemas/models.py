@@ -180,6 +180,10 @@ class SettingsPayload(BaseModel):
     alert_only_mode: bool | None = None
     safe_use_policy_accepted: bool | None = None
     remote_dashboard_allowlist: str | None = None
+    capture_mode: str | None = None
+    allow_full_capture: bool | None = None
+    forensic_duration_minutes: int | None = None
+    forensic_confirmed: bool | None = None
 
 
 class EventEnvelope(BaseModel):

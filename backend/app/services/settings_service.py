@@ -25,6 +25,8 @@ BOOL_KEYS = {
     "payload_capture_enabled",
     "alert_only_mode",
     "safe_use_policy_accepted",
+    "allow_full_capture",
+    "forensic_confirmed",
 }
 
 FLOAT_KEYS = {
@@ -36,6 +38,7 @@ FLOAT_KEYS = {
 INT_KEYS = {
     "sniffer_sample_rate": (1, 10),
     "retention_minutes": (0, 60 * 24 * 365),
+    "forensic_duration_minutes": (0, 60 * 24),
     "tr_max_hops": (1, 64),
     "tr_queries": (1, 5),
     "tr_port": (1, 65535),
@@ -45,6 +48,7 @@ STR_ENUM_KEYS = {
     "language": {"fa", "en"},
     "theme": {"dark", "light"},
     "tr_mode": {"UDP", "TCP", "ICMP"},
+    "capture_mode": {"metadata", "full", "forensic"},
 }
 
 _LOCK = threading.Lock()

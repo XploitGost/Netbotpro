@@ -4,6 +4,16 @@ from typing import Any
 
 import pandas as pd
 
+from core.redaction import redact_sensitive_text
+
+
+def _redacted(value: Any) -> Any:
+    if value is None:
+        return value
+    if isinstance(value, str):
+        return redact_sensitive_text(value)
+    return value
+
 
 def packet_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
     cols = [
@@ -25,7 +35,7 @@ def packet_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "dport": row.get("dport"),
                 "length": row.get("length") or row.get("len"),
                 "direction": row.get("direction"),
-                "summary": row.get("summary"),
+                "summary": _redacted(row.get("summary")),
                 "country": row.get("country"),
                 "country_code": row.get("country_code"),
                 "country_name": row.get("country_name"),
@@ -35,7 +45,7 @@ def packet_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "inside_outside": row.get("inside_outside"),
                 "pid": row.get("pid"),
                 "process_name": row.get("process_name"),
-                "l7": row.get("l7"),
+                "l7": _redacted(row.get("l7")),
                 "tls_version": row.get("tls_version"),
                 "sni": row.get("sni"),
                 "alpn": row.get("alpn"),
@@ -68,7 +78,7 @@ def alert_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "attack": row.get("attack") or row.get("attack_type"),
                 "score": row.get("score"),
                 "engine": row.get("engine"),
-                "detail": row.get("detail") or row.get("info") or "",
+                "detail": _redacted(row.get("detail") or row.get("info") or ""),
             }
         )
     df = pd.DataFrame(normalized)

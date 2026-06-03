@@ -1,5 +1,6 @@
 import unittest
 
+from core.netbotpro_logging.privacy import alert_rows_to_df, packet_rows_to_df
 from core.netbotpro_sniffer_core.layer7 import redact_http_path, redact_sensitive_text, safe_bytes_preview
 
 
@@ -30,6 +31,25 @@ class PayloadPrivacyTests(unittest.TestCase):
         self.assertNotIn("abc123", redacted)
         self.assertNotIn("token=secret", redacted)
         self.assertEqual(redact_http_path("/login?access_token=secret&x=1"), "/login?access_token=[REDACTED]&x=1")
+
+    def test_export_dataframes_redact_packet_and_alert_text(self):
+        packets = packet_rows_to_df(
+            [
+                {
+                    "summary": "GET /login?token=secret HTTP/1.1",
+                    "l7": "HTTP POST /?password=hunter2",
+                }
+            ]
+        )
+        alerts = alert_rows_to_df([{"detail": "Authorization: Bearer secret-token", "attack": "Cleartext Auth"}])
+
+        packet_text = " ".join(str(value) for value in packets.iloc[0].to_dict().values())
+        alert_text = " ".join(str(value) for value in alerts.iloc[0].to_dict().values())
+
+        self.assertNotIn("token=secret", packet_text)
+        self.assertNotIn("password=hunter2", packet_text)
+        self.assertNotIn("secret-token", alert_text)
+        self.assertIn("[REDACTED]", f"{packet_text} {alert_text}")
 
 
 if __name__ == "__main__":
