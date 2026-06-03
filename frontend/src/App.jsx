@@ -16,7 +16,13 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { StatCard } from "./components/StatCard";
 import { TraceroutePanel } from "./components/TraceroutePanel";
 import { PAGE_SIZE, useDashboardController } from "./hooks/useDashboardController";
-import { buildAlertInspectionContext, buildAlertInspectionModel, buildCaptureInspectionContext, buildPacketInspectionContext, buildPacketInspectionModel } from "./lib/inspectionModel";
+import {
+  buildAlertInspectionContext,
+  buildAlertInspectionModel,
+  buildCaptureInspectionContext,
+  buildPacketInspectionContext,
+  buildPacketInspectionModel,
+} from "./lib/inspectionModel";
 
 function PageSection({ title, subtitle, children, wide = false, fullWidth = false, actions = null }) {
   return (
@@ -229,7 +235,9 @@ function App() {
           {
             label: "Flow / Conversation",
             value: focusedTarget?.ip || "No flow pinned",
-            hint: focusedTarget ? "Pinned target context stays visible while you inspect traffic." : "Track a source, destination, or peer to lock the investigation context.",
+            hint: focusedTarget
+              ? "Pinned target context stays visible while you inspect traffic."
+              : "Track a source, destination, or peer to lock the investigation context.",
             tone: focusedTarget ? "focus" : "neutral",
           },
           {
@@ -241,7 +249,9 @@ function App() {
           {
             label: "Why It Matters",
             value: selectedAlert?.attack_type || "Inspection desk is idle",
-            hint: selectedAlert ? "An alert is selected; packet context will fill in after you pick related traffic." : "Alert and packet detail stay here so you do not need to scroll back through Monitor.",
+            hint: selectedAlert
+              ? "An alert is selected; packet context will fill in after you pick related traffic."
+              : "Alert and packet detail stay here so you do not need to scroll back through Monitor.",
             tone: selectedAlert ? "warning" : "neutral",
           },
         ];
@@ -253,7 +263,13 @@ function App() {
         type="button"
         className="secondary"
         disabled={loadingState.exports || !canExportPacket}
-        onClick={() => exportInvestigation(createInvestigationExportPayload({ kind: "packet", id: selectedPacketId, model: packetInspection }))}
+        onClick={() => exportInvestigation(
+          createInvestigationExportPayload({
+            kind: "packet",
+            id: selectedPacketId,
+            model: packetInspection,
+          })
+        )}
       >
         Export Packet Report
       </button>
@@ -261,7 +277,13 @@ function App() {
         type="button"
         className="secondary"
         disabled={loadingState.exports || !canExportAlert}
-        onClick={() => exportInvestigation(createInvestigationExportPayload({ kind: "alert", id: selectedAlertId, model: alertInspection }))}
+        onClick={() => exportInvestigation(
+          createInvestigationExportPayload({
+            kind: "alert",
+            id: selectedAlertId,
+            model: alertInspection,
+          })
+        )}
       >
         Export Alert Report
       </button>
@@ -323,7 +345,12 @@ function App() {
 
   const inspectPage = (
     <section className="page-grid page-grid-inspect">
-      <PageSection title="Analyst Summary" subtitle="Fast answers for the packet or alert you are inspecting" fullWidth actions={inspectActions}>
+      <PageSection
+        title="Analyst Summary"
+        subtitle="Fast answers for the packet or alert you are inspecting"
+        fullWidth
+        actions={inspectActions}
+      >
         <div className="inspect-summary-grid">
           {inspectSummaryCards.map((card) => (
             <InspectSummaryCard
@@ -342,7 +369,11 @@ function App() {
           model={packetInspection}
           selectionKey={selectedPacketId}
           navigation={packetNavigation}
-          emptyMessage={loadingState.packetDetail ? "Loading packet inspection..." : "Select a packet from Monitor to open the inspection view."}
+          emptyMessage={
+            loadingState.packetDetail
+              ? "Loading packet inspection..."
+              : "Select a packet from Monitor to open the inspection view."
+          }
         />
       </PageSection>
       <PageSection title="Alert Detail" subtitle="Detection context and scoring without the monitor scroll" wide>
@@ -351,7 +382,11 @@ function App() {
           model={alertInspection}
           selectionKey={selectedAlertId}
           navigation={alertNavigation}
-          emptyMessage={loadingState.alertDetail ? "Loading alert inspection..." : "Select an alert from Monitor to inspect its detection metadata."}
+          emptyMessage={
+            loadingState.alertDetail
+              ? "Loading alert inspection..."
+              : "Select an alert from Monitor to inspect its detection metadata."
+          }
         />
       </PageSection>
       <PageSection title="Pinned Target" subtitle="Lock onto one IP without the view jumping" fullWidth>
@@ -430,7 +465,13 @@ function App() {
   const exportsPage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Exports" subtitle="Session exports separated from monitoring" wide>
-        <ExportPanel error={error} exportInfo={exportInfo} isBusy={loadingState.exports} onDownload={downloadExport} onExport={exportSession} />
+        <ExportPanel
+          error={error}
+          exportInfo={exportInfo}
+          isBusy={loadingState.exports}
+          onDownload={downloadExport}
+          onExport={exportSession}
+        />
       </PageSection>
     </section>
   );
@@ -446,7 +487,12 @@ function App() {
   const offlinePage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Offline Analysis" subtitle="Analyze PCAP files in a dedicated workspace" wide>
-        <OfflineAnalysisPanel offlineResult={offlineResult} isBusy={loadingState.offlineAnalysis} onFileChange={setOfflineFile} onRunAnalysis={runOfflineAnalysis} />
+        <OfflineAnalysisPanel
+          offlineResult={offlineResult}
+          isBusy={loadingState.offlineAnalysis}
+          onFileChange={setOfflineFile}
+          onRunAnalysis={runOfflineAnalysis}
+        />
       </PageSection>
     </section>
   );
