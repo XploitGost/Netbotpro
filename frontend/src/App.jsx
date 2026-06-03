@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { AlertsPanel } from "./components/AlertsPanel";
+import { AgentsPanel } from "./components/AgentsPanel";
 import { AppNav } from "./components/AppNav";
 import { DetailPanel } from "./components/DetailPanel";
 import { ExportPanel } from "./components/ExportPanel";
@@ -99,6 +100,9 @@ function App() {
     setOfflineFile,
     exportInfo,
     reports,
+    agents,
+    selectedAgentId,
+    agentTelemetry,
     connectionState,
     connectionLabel,
     statusMessage,
@@ -131,6 +135,8 @@ function App() {
     runOfflineAnalysis,
     loadPacketDetail,
     loadAlertDetail,
+    loadAgents,
+    selectAgent,
     openPacketDetailById,
     openAlertDetailById,
     applyPacketFilters,
@@ -392,6 +398,21 @@ function App() {
     </section>
   );
 
+  const agentsPage = (
+    <section className="page-grid page-grid-single">
+      <PageSection title="Servers / Agents" subtitle="Registered telemetry agents and redacted host summaries" wide>
+        <AgentsPanel
+          agents={agents}
+          selectedAgentId={selectedAgentId}
+          agentTelemetry={agentTelemetry}
+          isLoading={loadingState.agents}
+          onRefresh={() => loadAgents(selectedAgentId)}
+          onSelectAgent={selectAgent}
+        />
+      </PageSection>
+    </section>
+  );
+
   const traceroutePage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Traceroute" subtitle="Route probing in its own page" wide>
@@ -433,6 +454,7 @@ function App() {
   const currentPage = {
     monitor: monitorPage,
     inspect: inspectPage,
+    agents: agentsPage,
     settings: settingsPage,
     traceroute: traceroutePage,
     exports: exportsPage,

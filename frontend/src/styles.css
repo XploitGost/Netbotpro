@@ -941,6 +941,56 @@ th {
   margin-top: 6px;
 }
 
+.selected-row {
+  background: rgba(123, 211, 137, 0.08);
+}
+
+.agents-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.agent-status {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  text-transform: capitalize;
+}
+
+.agent-status-online {
+  border-color: rgba(123, 211, 137, 0.45);
+  color: var(--good);
+}
+
+.agent-status-offline {
+  border-color: rgba(255, 184, 107, 0.45);
+  color: var(--warn);
+}
+
+.agents-detail-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.agent-telemetry-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.agent-telemetry-item {
+  align-items: center;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  gap: 0.8rem;
+  justify-content: space-between;
+  padding: 0.7rem 0.8rem;
+}
+
 .mini-list-link {
   text-align: left;
 }
@@ -1468,6 +1518,7 @@ button:disabled {
   .detail-grid,
   .analysis-grid,
   .inspect-summary-grid,
+  .agents-detail-grid,
   .graph-summary-grid,
   .ops-summary-grid,
   .ops-metric-grid {

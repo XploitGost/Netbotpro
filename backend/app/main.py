@@ -11,6 +11,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Header,
     HTTPException,
     Request,
     UploadFile,
@@ -46,6 +47,7 @@ from backend.app.security import (
     validate_ip,
     validate_report_download_path,
 )
+from backend.app.services.agent_registry import AgentRegistry
 from backend.app.services.audit_service import audit_event
 from backend.app.services.capture_policy import (
     current_capture_policy,
@@ -77,6 +79,7 @@ export_service = ExportService()
 investigation_export_service = InvestigationExportService()
 history_service = HistoryService(sniffer_service)
 report_service = ReportService()
+agent_registry = AgentRegistry()
 logger = logging.getLogger("netbotpro.api")
 if not logger.handlers:
     logging.basicConfig(
@@ -176,6 +179,138 @@ def api_status(_: None = Depends(require_trusted_client)) -> dict[str, Any]:
         "observability": _observability_snapshot(),
         "local_token_required": is_local_token_enabled(),
         "capture_policy": current_capture_policy().to_public_dict(),
+    }
+
+
+def _agent_headers(
+    agent_id: str = Header("", alias="X-NetBot-Agent-Id"),
+    agent_token: str = Header("", alias="X-NetBot-Agent-Token"),
+) -> tuple[str, str]:
+    return agent_id.strip(), agent_token.strip()
+
+
+def _require_known_agent(headers: tuple[str, str] = Depends(_agent_headers)) -> str:
+    agent_id, agent_token = headers
+    if not agent_id:
+        audit_event(
+            "agent_auth_failed",
+            success=False,
+            detail={"reason": "missing_agent_id"},
+        )
+        raise HTTPException(status_code=403, detail="Missing agent id")
+    if not agent_registry.verify(agent_id, agent_token):
+        audit_event(
+            "agent_auth_failed",
+            actor=agent_id,
+            success=False,
+            detail={"reason": "invalid_agent_token"},
+        )
+        raise HTTPException(status_code=401, detail="Invalid agent token")
+    return agent_id
+
+
+@app.post("/api/agents/register")
+def api_agent_register(
+    payload: dict[str, Any],
+    headers: tuple[str, str] = Depends(_agent_headers),
+) -> dict[str, Any]:
+    header_agent_id, agent_token = headers
+    payload_agent_id = str(payload.get("agent_id") or "").strip()
+    if header_agent_id and payload_agent_id and header_agent_id != payload_agent_id:
+        audit_event(
+            "agent_register_failed",
+            actor=header_agent_id,
+            success=False,
+            detail={"reason": "agent_id_mismatch"},
+        )
+        raise HTTPException(
+            status_code=400, detail="Agent id header and payload mismatch"
+        )
+    if header_agent_id and not payload_agent_id:
+        payload = {**payload, "agent_id": header_agent_id}
+        payload_agent_id = header_agent_id
+    try:
+        registered = agent_registry.register(payload, agent_token)
+    except PermissionError as exc:
+        audit_event(
+            "agent_register_failed",
+            actor=payload_agent_id or header_agent_id or "unknown",
+            success=False,
+            detail={"reason": str(exc)},
+        )
+        raise HTTPException(status_code=401, detail="Invalid agent token") from exc
+    except ValueError as exc:
+        audit_event(
+            "agent_register_failed",
+            actor=header_agent_id or "unknown",
+            success=False,
+            detail={"reason": str(exc)},
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_event(
+        "agent_registered",
+        actor=registered.get("agent_id", "unknown"),
+        detail={"hostname": registered.get("hostname")},
+    )
+    return {"ok": True, "agent": registered}
+
+
+@app.post("/api/agents/heartbeat")
+def api_agent_heartbeat(
+    payload: dict[str, Any],
+    agent_id: str = Depends(_require_known_agent),
+) -> dict[str, Any]:
+    try:
+        agent = agent_registry.heartbeat(agent_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown agent") from exc
+    return {"ok": True, "agent": agent}
+
+
+@app.post("/api/agents/telemetry")
+def api_agent_telemetry(
+    payload: dict[str, Any],
+    agent_id: str = Depends(_require_known_agent),
+) -> dict[str, Any]:
+    try:
+        return agent_registry.telemetry(agent_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown agent") from exc
+
+
+@app.get("/api/agents")
+def api_agents(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> list[dict[str, Any]]:
+    return agent_registry.list_agents()
+
+
+@app.get("/api/agents/{agent_id}")
+def api_agent_detail(
+    agent_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    agent = agent_registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
+@app.get("/api/agents/{agent_id}/telemetry")
+def api_agent_telemetry_history(
+    agent_id: str,
+    limit: int = 20,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    agent = agent_registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "agent": agent,
+        "items": agent_registry.get_telemetry(agent_id, limit=limit),
     }
 
 

@@ -53,12 +53,18 @@ flowchart LR
         Token["Local Token Store"]
     end
 
-    subgraph Sensor["Authorized Sensor Host"]
+    subgraph Central["Central / Local Control Plane"]
         API["FastAPI Control Plane"]
         WS["WebSocket Event Stream"]
         Policy["Remote Access / Token / Allowlist"]
-        CapturePolicy["Capture Policy<br/>metadata / full / forensic"]
+        AgentAPI["Agent Registry API"]
+        AgentStore["Agent Telemetry Store"]
         Audit["Audit Log"]
+    end
+
+    subgraph Sensor["Authorized Remote Sensor Host"]
+        SensorAPI["Sensor FastAPI Backend"]
+        CapturePolicy["Capture Policy<br/>metadata / full / forensic"]
     end
 
     subgraph Core["Core Network Pipeline"]
@@ -75,16 +81,25 @@ flowchart LR
         Raw["Guarded Raw PCAP Export"]
     end
 
+    subgraph Agents["Agent Mode Hosts"]
+        AgentRunner["Agent Runner"]
+        AgentIdentity["Stable Agent Identity"]
+        AgentHealth["Health / Network / Capture Summary"]
+    end
+
     Operator --> Browser
     Desktop --> Preload --> Browser
     Desktop --> Token
     Token --> Browser
     Browser -->|"X-NetBot-Token"| API
     Browser -->|"netbot.auth subprotocol"| WS
+    Browser -->|"Fleet View"| AgentAPI
     Policy --> API
-    API --> CapturePolicy
     API --> Audit
-    API --> Capture --> Parser --> Redaction --> Detection
+    API --> SensorAPI
+    SensorAPI --> CapturePolicy
+    SensorAPI --> Audit
+    SensorAPI --> Capture --> Parser --> Redaction --> Detection
     Parser --> ProcessMap
     Redaction --> History
     Detection --> History
@@ -92,6 +107,11 @@ flowchart LR
     CapturePolicy --> Raw
     API --> Reports
     API --> Raw
+    AgentRunner --> AgentIdentity
+    AgentRunner --> AgentHealth
+    AgentRunner -->|"register / heartbeat / redacted telemetry"| AgentAPI
+    AgentAPI --> AgentStore
+    AgentAPI --> Audit
 ```
 
 ## Repository Layout
@@ -139,6 +159,7 @@ Copy `.env.example` to `.env` for local experiments. The default secure path is 
 - `NETBOT_ALLOWED_ORIGINS` controls browser origins allowed to connect to the API/websocket.
 - `NETBOT_REMOTE_ACCESS=1` is required before non-loopback clients can access a sensor backend.
 - `NETBOT_HOST` and `NETBOT_PORT` control backend bind address and port.
+- `NETBOT_AGENT_TOKEN` authorizes summary-only Agent Mode registration and telemetry.
 
 ## Usage
 
@@ -182,6 +203,11 @@ http://127.0.0.1:5173/?api=http://SERVER_IP:8765/api&ws=ws://SERVER_IP:8765/ws
 ```
 
 Remote sensor mode is not a public internet service mode. Treat it as a private, controlled sensor endpoint for systems where you have explicit authorization. Prefer VPN, SSH tunneling, private routing, or a TLS reverse proxy, and restrict inbound access to trusted operator IPs.
+
+Agent Mode is a staged, summary-only server telemetry runner. It registers an
+authorized host with the central backend and sends health, network, capture,
+alert, and flow summaries without forwarding raw packets, payload previews, or
+PCAP artifacts. See [docs/AGENT_MODE.md](docs/AGENT_MODE.md).
 
 Server Mode adds extra guardrails:
 

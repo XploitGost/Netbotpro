@@ -5,7 +5,7 @@ import { useLiveEvents } from "./useLiveEvents";
 import { getPeerInfo, isPrivateIp } from "../lib/networkView";
 
 export const PAGE_SIZE = 25;
-const VALID_PAGES = new Set(["monitor", "inspect", "settings", "traceroute", "exports", "reports", "offline"]);
+const VALID_PAGES = new Set(["monitor", "inspect", "agents", "settings", "traceroute", "exports", "reports", "offline"]);
 const TIMELINE_BUCKETS = 30;
 const TIMELINE_BUCKET_MS = 2_000;
 const HISTORY_CACHE_TTL_MS = 5_000;
@@ -192,6 +192,9 @@ export function useDashboardController() {
   const [offlineResult, setOfflineResult] = useState(null);
   const [exportInfo, setExportInfo] = useState(null);
   const [reports, setReports] = useState([]);
+  const [agents, setAgents] = useState([]);
+  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [agentTelemetry, setAgentTelemetry] = useState([]);
   const [connectionState, setConnectionState] = useState("connecting");
   const [statusMessage, setStatusMessage] = useState("Connecting to local backend...");
   const [observability, setObservability] = useState({});
@@ -204,6 +207,7 @@ export function useDashboardController() {
     alertDetail: false,
     exports: false,
     reports: false,
+    agents: false,
     traceroute: false,
     offlineAnalysis: false,
     settings: false,
@@ -307,10 +311,11 @@ export function useDashboardController() {
           return;
         }
 
-        const [dashboardData, settingsData, interfacesData] = await Promise.all([
+        const [dashboardData, settingsData, interfacesData, agentsData] = await Promise.all([
           api.getDashboard(),
           api.getSettings(),
           api.getInterfaces().catch(() => ({ recommended: "", items: [], preflight: null })),
+          api.getAgents().catch(() => []),
         ]);
         if (!active) return;
         clearHistoryCaches();
@@ -333,6 +338,9 @@ export function useDashboardController() {
         const reportsData = await api.getReports();
         if (!active) return;
         setReports(reportsData || []);
+        const agentItems = Array.isArray(agentsData) ? agentsData : [];
+        setAgents(agentItems);
+        setSelectedAgentId((current) => current || agentItems[0]?.agent_id || "");
         setStatusMessage("Dashboard synced");
       } catch (err) {
         if (!active) return;
@@ -442,6 +450,36 @@ export function useDashboardController() {
       setReports(data || []);
     } finally {
       setLoading("reports", false);
+    }
+  }
+
+  async function loadAgents(selectAgentId = selectedAgentId) {
+    setLoading("agents", true);
+    try {
+      const data = await api.getAgents();
+      const items = Array.isArray(data) ? data : [];
+      const nextSelected = selectAgentId || items[0]?.agent_id || "";
+      setAgents(items);
+      setSelectedAgentId(nextSelected);
+      if (nextSelected) {
+        const telemetry = await api.getAgentTelemetry(nextSelected);
+        setAgentTelemetry(telemetry.items || []);
+      } else {
+        setAgentTelemetry([]);
+      }
+    } finally {
+      setLoading("agents", false);
+    }
+  }
+
+  async function selectAgent(agentId) {
+    setSelectedAgentId(agentId);
+    setLoading("agents", true);
+    try {
+      const telemetry = await api.getAgentTelemetry(agentId);
+      setAgentTelemetry(telemetry.items || []);
+    } finally {
+      setLoading("agents", false);
     }
   }
 
@@ -1099,6 +1137,9 @@ export function useDashboardController() {
     setOfflineFile,
     exportInfo,
     reports,
+    agents,
+    selectedAgentId,
+    agentTelemetry,
     connectionState,
     connectionLabel,
     statusMessage,
@@ -1132,6 +1173,8 @@ export function useDashboardController() {
     runOfflineAnalysis,
     loadPacketDetail,
     loadAlertDetail,
+    loadAgents,
+    selectAgent,
     openPacketDetailById,
     openAlertDetailById,
     applyPacketFilters,
