@@ -6,15 +6,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
+from backend.app.services.redaction import redact_sensitive_text
 
 ensure_project_root_on_path()
 
 from log_manager import LOG_DIR  # noqa: E402
 
-
 _AUDIT_LOCK = threading.Lock()
 _AUDIT_PATH = LOG_DIR / "audit.jsonl"
-_SENSITIVE_KEYS = {"token", "authorization", "cookie", "password", "secret", "x-netbot-token"}
+_SENSITIVE_KEYS = {
+    "token",
+    "authorization",
+    "cookie",
+    "password",
+    "secret",
+    "x-netbot-token",
+}
 
 
 def _clean_detail(value: Any) -> Any:
@@ -22,7 +29,9 @@ def _clean_detail(value: Any) -> Any:
         cleaned: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if key_text.lower() in _SENSITIVE_KEYS or any(marker in key_text.lower() for marker in _SENSITIVE_KEYS):
+            if key_text.lower() in _SENSITIVE_KEYS or any(
+                marker in key_text.lower() for marker in _SENSITIVE_KEYS
+            ):
                 cleaned[key_text] = "[REDACTED]"
             else:
                 cleaned[key_text] = _clean_detail(item)
@@ -31,25 +40,37 @@ def _clean_detail(value: Any) -> Any:
         return [_clean_detail(item) for item in value[:50]]
     if isinstance(value, tuple):
         return [_clean_detail(item) for item in value[:50]]
-    if isinstance(value, (str, int, float, bool)) or value is None:
+    if isinstance(value, str):
+        return redact_sensitive_text(value)
+    if isinstance(value, (int, float, bool)) or value is None:
         return value
     return str(value)
 
 
-def audit_event(action: str, *, actor: str = "unknown", success: bool = True, detail: dict[str, Any] | None = None) -> None:
+def audit_event(
+    action: str,
+    *,
+    actor: str = "unknown",
+    success: bool = True,
+    detail: dict[str, Any] | None = None,
+) -> None:
     detail = detail or {}
     event = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": str(action or "unknown"),
         "event_type": str(action or "unknown"),
-        "actor": str(actor or "unknown"),
-        "client_ip": str(actor or "unknown"),
-        "user_id": str(detail.get("user_id") or "local-token"),
+        "actor": redact_sensitive_text(str(actor or "unknown")),
+        "client_ip": redact_sensitive_text(str(actor or "unknown")),
+        "user_id": redact_sensitive_text(str(detail.get("user_id") or "local-token")),
         "capture_mode": str(detail.get("capture_mode") or "metadata"),
         "success": bool(success),
-        "reason": str(detail.get("reason") or detail.get("detail") or ""),
-        "target": str(detail.get("target") or detail.get("path") or ""),
+        "reason": redact_sensitive_text(
+            str(detail.get("reason") or detail.get("detail") or "")
+        ),
+        "target": redact_sensitive_text(
+            str(detail.get("target") or detail.get("path") or "")
+        ),
         "detail": _clean_detail(detail),
     }
     try:

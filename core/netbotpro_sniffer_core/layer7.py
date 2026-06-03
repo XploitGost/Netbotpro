@@ -11,17 +11,23 @@ from .tls import tls_fingerprints
 logger = logging.getLogger(__name__)
 
 
-def safe_bytes_preview(payload: bytes, max_len: int = 64, *, enabled: bool = False) -> dict[str, Any]:
+def safe_bytes_preview(
+    payload: bytes, max_len: int = 64, *, enabled: bool = False
+) -> dict[str, Any]:
     if not payload:
         return {"payload_len": 0, "payload_hex": "", "payload_ascii": ""}
     if not enabled:
         return {"payload_len": len(payload), "payload_hex": "", "payload_ascii": ""}
 
     preview_text = payload[:max_len].decode("utf-8", errors="ignore")
-    redacted_preview = redact_sensitive_text(preview_text).encode("utf-8", errors="ignore")[:max_len]
+    redacted_preview = redact_sensitive_text(preview_text).encode(
+        "utf-8", errors="ignore"
+    )[:max_len]
     preview = redacted_preview or payload[:max_len]
     hex_text = binascii.hexlify(preview).decode("ascii")
-    hex_text = " ".join(hex_text[index : index + 2] for index in range(0, len(hex_text), 2))
+    hex_text = " ".join(
+        hex_text[index : index + 2] for index in range(0, len(hex_text), 2)
+    )
     ascii_text = "".join(chr(value) if 32 <= value < 127 else "." for value in preview)
     return {
         "payload_len": len(payload),
@@ -67,7 +73,11 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
     if layers.DNS in pkt and pkt.haslayer(layers.DNSQR):
         try:
             query = pkt[layers.DNSQR]
-            qname = query.qname.decode(errors="ignore") if isinstance(query.qname, bytes) else str(query.qname)
+            qname = (
+                query.qname.decode(errors="ignore")
+                if isinstance(query.qname, bytes)
+                else str(query.qname)
+            )
             data.update(
                 {
                     "dns_qname": qname,
@@ -84,7 +94,9 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
             raw_text = payload[:1024].decode("utf-8", errors="ignore")
             lines = raw_text.splitlines()
             line0 = lines[0] if lines else ""
-            if line0.startswith(("GET ", "POST ", "HEAD ", "PUT ", "DELETE ", "OPTIONS ", "PATCH ")):
+            if line0.startswith(
+                ("GET ", "POST ", "HEAD ", "PUT ", "DELETE ", "OPTIONS ", "PATCH ")
+            ):
                 parts = line0.split()
                 http_method = parts[0] if len(parts) > 0 else None
                 http_path = redact_http_path(parts[1]) if len(parts) > 1 else None
@@ -140,7 +152,12 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
 
     if payload:
         tls_info = tls_fingerprints(payload)
-        if tls_info.get("ja3") or tls_info.get("ja4") or tls_info.get("tls_sni") or tls_info.get("tls_alpn"):
+        if (
+            tls_info.get("ja3")
+            or tls_info.get("ja4")
+            or tls_info.get("tls_sni")
+            or tls_info.get("tls_alpn")
+        ):
             data.update(tls_info)
             data["sni"] = tls_info.get("tls_sni")
             data["alpn"] = list(tls_info.get("tls_alpn") or [])

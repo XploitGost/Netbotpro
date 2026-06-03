@@ -17,9 +17,32 @@ def _redacted(value: Any) -> Any:
 
 def packet_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
     cols = [
-        "ts", "src", "dst", "proto", "sport", "dport", "length", "direction", "summary",
-        "country", "country_code", "country_name", "city", "org", "asn", "inside_outside",
-        "pid", "process_name", "l7", "tls_version", "sni", "alpn", "ja3", "ja3s", "ja4", "ja4s",
+        "ts",
+        "src",
+        "dst",
+        "proto",
+        "sport",
+        "dport",
+        "length",
+        "direction",
+        "summary",
+        "country",
+        "country_code",
+        "country_name",
+        "city",
+        "org",
+        "asn",
+        "inside_outside",
+        "pid",
+        "process_name",
+        "l7",
+        "tls_version",
+        "sni",
+        "alpn",
+        "ja3",
+        "ja3s",
+        "ja4",
+        "ja4s",
     ]
     if not rows:
         return pd.DataFrame(columns=cols)
@@ -90,7 +113,9 @@ def alert_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
 
 def traceroute_rows_to_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
     if not rows:
-        return pd.DataFrame(columns=["hop", "ip", "rtt", "country", "city", "org", "asn", "route"])
+        return pd.DataFrame(
+            columns=["hop", "ip", "rtt", "country", "city", "org", "asn", "route"]
+        )
     return pd.DataFrame(
         [
             {

@@ -5,6 +5,10 @@ administer, or have explicit permission to monitor. The default posture is
 metadata-first: collect enough context for detection and reporting without
 keeping raw packet contents.
 
+Full and Forensic capture are only for authorized servers, with permission from
+the server owner or administrator. Do not enable payload or raw artifact capture
+on third-party networks or systems you do not administer.
+
 ## Metadata
 
 Metadata is the default and safest mode.
@@ -20,6 +24,8 @@ Metadata is the default and safest mode.
 ## Full
 
 Full mode enables payload-aware capture for controlled server investigations.
+Use it only on an authorized server where the owner or administrator has
+approved packet-content monitoring.
 
 - Requires `NETBOT_ALLOW_FULL_CAPTURE=1`.
 - Requires Safe Use Policy acceptance through `NETBOT_SAFE_USE_ACCEPTED=1` or
@@ -35,6 +41,8 @@ Full mode enables payload-aware capture for controlled server investigations.
 ## Forensic
 
 Forensic mode is intended for incident response on authorized servers.
+Use it only when the server owner or administrator has approved incident
+evidence capture and retention.
 
 - Requires every Full mode control.
 - Requires either `forensic_duration_minutes` or explicit confirmation that

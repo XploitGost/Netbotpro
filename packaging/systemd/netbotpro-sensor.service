@@ -7,7 +7,11 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/netbotpro
 EnvironmentFile=/etc/netbotpro/sensor.env
-ExecStart=/opt/netbotpro/.venv/bin/python -m uvicorn backend.app.main:app --host ${NETBOT_HOST} --port ${NETBOT_PORT}
+ExecStart=/opt/netbotpro/.venv/bin/python \
+    -m uvicorn \
+    backend.app.main:app \
+    --host ${NETBOT_HOST} \
+    --port ${NETBOT_PORT}
 Restart=on-failure
 RestartSec=5
 User=root

@@ -93,11 +93,9 @@ Write-Host "Remote IP allowlist: $(if ($env:NETBOT_REMOTE_IP_ALLOWLIST) { $env:N
 Write-Host "Token file: $TokenFile"
 if ($ShowToken) {
     Write-Host "Token: $SensorToken"
-} else {
-    Write-Host "Token: <hidden; rerun with -ShowToken only in a private terminal>"
 }
 Write-Host "PID file: $PidFile"
-Write-Host "Log file: $StdoutLog"
+Write-Host "Logs: $StdoutLog | $StderrLog"
 Write-Host "Dashboard hint: http://127.0.0.1:5173/?api=http://SERVER_IP:$Port/api&ws=ws://SERVER_IP:$Port/ws"
 
 if ($Background) {

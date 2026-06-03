@@ -4,13 +4,16 @@ import threading
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
-from backend.app.security import normalize_ip_csv, normalize_ip_network_csv, sanitize_iface_name
+from backend.app.security import (
+    normalize_ip_csv,
+    normalize_ip_network_csv,
+    sanitize_iface_name,
+)
 
 ensure_project_root_on_path()
 
 from config.settings_manager import load_settings, save_settings  # noqa: E402
 from log_manager import init_storage, set_persist  # noqa: E402
-
 
 BOOL_KEYS = {
     "autostart_sniffer",

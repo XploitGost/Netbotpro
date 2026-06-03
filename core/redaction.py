@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 SENSITIVE_HEADER_RE = re.compile(
     r"(?im)^((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)\s*:\s*)([^\r\n]*)"
 )
@@ -13,7 +12,9 @@ SENSITIVE_QUERY_RE = re.compile(
 SENSITIVE_KV_RE = re.compile(
     r"(?i)\b(password|passwd|pwd|token|access_token|refresh_token|api_key|apikey|secret|session|sessionid|jwt)\s*[:=]\s*[^&\s;,]+"
 )
-JWT_LIKE_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
+JWT_LIKE_RE = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"
+)
 
 
 def redact_sensitive_text(value: str) -> str:

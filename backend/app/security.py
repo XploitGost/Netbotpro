@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import base64
 import hmac
-import os
 import ipaddress
+import os
 import re
 import threading
 import time
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
 _RATE_LIMITS: dict[tuple[str, str], list[float]] = {}
@@ -57,7 +56,11 @@ def _normalize_origin(origin: str) -> str:
 
 def allowed_origins() -> list[str]:
     raw = os.environ.get("NETBOT_ALLOWED_ORIGINS", "").strip()
-    items = [item.strip() for item in raw.split(",") if item.strip()] if raw else list(_DEFAULT_ALLOWED_ORIGINS)
+    items = (
+        [item.strip() for item in raw.split(",") if item.strip()]
+        if raw
+        else list(_DEFAULT_ALLOWED_ORIGINS)
+    )
     normalized: list[str] = []
     for item in items:
         value = _normalize_origin(item)
@@ -73,7 +76,11 @@ def require_loopback(request: Request) -> None:
 
 
 def is_remote_access_enabled() -> bool:
-    return os.environ.get("NETBOT_REMOTE_ACCESS", "").strip().lower() in {"1", "true", "yes"}
+    return os.environ.get("NETBOT_REMOTE_ACCESS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def is_local_token_enabled() -> bool:
@@ -123,9 +130,13 @@ def _remote_allowlist_items() -> list[ipaddress._BaseNetwork | ipaddress._BaseAd
     try:
         from backend.app.services.settings_service import get_settings_snapshot
 
-        configured = str(get_settings_snapshot().get("remote_dashboard_allowlist") or "").strip()
+        configured = str(
+            get_settings_snapshot().get("remote_dashboard_allowlist") or ""
+        ).strip()
         if configured:
-            raw_items.extend(item.strip() for item in configured.split(",") if item.strip())
+            raw_items.extend(
+                item.strip() for item in configured.split(",") if item.strip()
+            )
     except Exception:
         pass
 
@@ -173,7 +184,10 @@ def require_server_safe_use_policy(request: Request) -> None:
     if not is_remote_access_enabled():
         return
     if not is_safe_use_policy_accepted():
-        raise HTTPException(status_code=451, detail="Safe Use Policy must be accepted before Server Mode capture")
+        raise HTTPException(
+            status_code=451,
+            detail="Safe Use Policy must be accepted before Server Mode capture",
+        )
 
 
 def require_local_token(request: Request) -> None:
@@ -187,14 +201,20 @@ def require_trusted_client(request: Request) -> None:
     if _is_loopback_host(client_host):
         return
     if not is_remote_access_enabled():
-        _audit_auth("remote_login_failed", client_host, request, "remote_access_disabled")
+        _audit_auth(
+            "remote_login_failed", client_host, request, "remote_access_disabled"
+        )
         raise HTTPException(status_code=403, detail="Local access only")
     if not is_remote_ip_allowed(client_host):
         _audit_auth("remote_login_failed", client_host, request, "ip_not_allowlisted")
-        raise HTTPException(status_code=403, detail="Remote dashboard IP is not allowlisted")
+        raise HTTPException(
+            status_code=403, detail="Remote dashboard IP is not allowlisted"
+        )
     if not is_local_token_enabled():
         _audit_auth("remote_login_failed", client_host, request, "missing_server_token")
-        raise HTTPException(status_code=403, detail="Remote access requires NETBOT_LOCAL_TOKEN")
+        raise HTTPException(
+            status_code=403, detail="Remote access requires NETBOT_LOCAL_TOKEN"
+        )
     provided = request.headers.get("X-NetBot-Token", "").strip()
     if not check_local_token(provided):
         _audit_auth("remote_login_failed", client_host, request, "invalid_token")
@@ -202,29 +222,44 @@ def require_trusted_client(request: Request) -> None:
     _audit_auth("remote_login_success", client_host, request, "trusted")
 
 
-def _audit_auth(event_type: str, client_host: str, request: Request, reason: str) -> None:
+def _audit_auth(
+    event_type: str, client_host: str, request: Request, reason: str
+) -> None:
     try:
         from backend.app.services.audit_service import audit_event
 
-        audit_event(event_type, actor=client_host, success=event_type.endswith("success"), detail={"path": request.url.path, "reason": reason})
+        audit_event(
+            event_type,
+            actor=client_host,
+            success=event_type.endswith("success"),
+            detail={"path": request.url.path, "reason": reason},
+        )
     except Exception:
         pass
 
 
-def enforce_rate_limit(request: Request, scope: str, limit: int, window_sec: int) -> None:
+def enforce_rate_limit(
+    request: Request, scope: str, limit: int, window_sec: int
+) -> None:
     client_host = request.client.host if request and request.client else "unknown"
     now = time.time()
     key = (client_host, scope)
     with _RATE_LOCK:
         if len(_RATE_LIMITS) > _MAX_RATE_LIMIT_KEYS:
             cutoff = now - max(1, window_sec)
-            stale_keys = [item for item, history in _RATE_LIMITS.items() if not history or max(history) < cutoff]
+            stale_keys = [
+                item
+                for item, history in _RATE_LIMITS.items()
+                if not history or max(history) < cutoff
+            ]
             for stale_key in stale_keys[: len(_RATE_LIMITS) - _MAX_RATE_LIMIT_KEYS]:
                 _RATE_LIMITS.pop(stale_key, None)
         history = _RATE_LIMITS.get(key, [])
         history = [ts for ts in history if now - ts < window_sec]
         if len(history) >= limit:
-            raise HTTPException(status_code=429, detail=f"Rate limit exceeded for {scope}")
+            raise HTTPException(
+                status_code=429, detail=f"Rate limit exceeded for {scope}"
+            )
         history.append(now)
         _RATE_LIMITS[key] = history
 
@@ -255,7 +290,12 @@ def validate_traceroute_target(value: str) -> str:
     try:
         return str(ipaddress.ip_address(target))
     except ValueError:
-        if _HOST_RE.fullmatch(target) is None or ".." in target or target.startswith(".") or target.endswith("."):
+        if (
+            _HOST_RE.fullmatch(target) is None
+            or ".." in target
+            or target.startswith(".")
+            or target.endswith(".")
+        ):
             raise HTTPException(status_code=400, detail="Invalid traceroute target")
         return target
 
@@ -320,7 +360,9 @@ def sanitize_iface_name(value: str, *, maximum_length: int = 512) -> str:
     return text or "iface=default"
 
 
-def extract_websocket_token(protocol_header: str | None, query_token: str | None) -> tuple[str, str | None]:
+def extract_websocket_token(
+    protocol_header: str | None, query_token: str | None
+) -> tuple[str, str | None]:
     accepted_protocol = None
     token = ""
     for raw_item in str(protocol_header or "").split(","):
@@ -331,14 +373,18 @@ def extract_websocket_token(protocol_header: str | None, query_token: str | None
             accepted_protocol = WEBSOCKET_APP_PROTOCOL
             continue
         if item.startswith(_WEBSOCKET_AUTH_PREFIX):
-            encoded = item[len(_WEBSOCKET_AUTH_PREFIX):].strip()
+            encoded = item[len(_WEBSOCKET_AUTH_PREFIX) :].strip()
             if not encoded:
                 continue
             padding = "=" * ((4 - len(encoded) % 4) % 4)
             try:
-                decoded = base64.urlsafe_b64decode(f"{encoded}{padding}".encode("ascii")).decode("utf-8")
+                decoded = base64.urlsafe_b64decode(
+                    f"{encoded}{padding}".encode("ascii")
+                ).decode("utf-8")
             except Exception as exc:
-                raise HTTPException(status_code=400, detail="Invalid websocket auth token") from exc
+                raise HTTPException(
+                    status_code=400, detail="Invalid websocket auth token"
+                ) from exc
             token = decoded.strip()
     if token:
         return token, accepted_protocol
@@ -354,4 +400,9 @@ def is_allowed_websocket_origin(origin: str | None) -> bool:
 def is_trusted_websocket_client(client_host: str, token: str) -> bool:
     if is_loopback_host(client_host):
         return check_local_token(token)
-    return is_remote_access_enabled() and is_remote_ip_allowed(client_host) and is_local_token_enabled() and check_local_token(token)
+    return (
+        is_remote_access_enabled()
+        and is_remote_ip_allowed(client_host)
+        and is_local_token_enabled()
+        and check_local_token(token)
+    )

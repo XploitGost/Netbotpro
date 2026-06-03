@@ -30,7 +30,8 @@ if (-not (Test-Path $PidFile)) {
 
 $pidText = (Get-Content -Path $PidFile -Raw -ErrorAction SilentlyContinue).Trim()
 if (-not $pidText -or -not ($pidText -match '^\d+$')) {
-    Write-Host "Process: unknown (invalid PID file)"
+    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+    Write-Host "Process: stopped (invalid stale PID file removed)"
     exit 1
 }
 
@@ -40,5 +41,6 @@ if ($process) {
     exit 0
 }
 
-Write-Host "Process: stopped (stale PID file)"
+Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+Write-Host "Process: stopped (stale PID file removed)"
 exit 1

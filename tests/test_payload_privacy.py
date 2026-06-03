@@ -1,7 +1,14 @@
 import unittest
 
+from backend.app.services.redaction import (
+    redact_sensitive_text as service_redact_sensitive_text,
+)
 from core.netbotpro_logging.privacy import alert_rows_to_df, packet_rows_to_df
-from core.netbotpro_sniffer_core.layer7 import redact_http_path, redact_sensitive_text, safe_bytes_preview
+from core.netbotpro_sniffer_core.layer7 import (
+    redact_http_path,
+    redact_sensitive_text,
+    safe_bytes_preview,
+)
 
 
 class PayloadPrivacyTests(unittest.TestCase):
@@ -30,7 +37,43 @@ class PayloadPrivacyTests(unittest.TestCase):
 
         self.assertNotIn("abc123", redacted)
         self.assertNotIn("token=secret", redacted)
-        self.assertEqual(redact_http_path("/login?access_token=secret&x=1"), "/login?access_token=[REDACTED]&x=1")
+        self.assertEqual(
+            redact_http_path("/login?access_token=secret&x=1"),
+            "/login?access_token=[REDACTED]&x=1",
+        )
+
+    def test_central_redaction_masks_common_credential_shapes(self):
+        jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        text = "\n".join(
+            [
+                "Authorization: Bearer bearer-secret",
+                "Proxy-Authorization: Basic basic-secret",
+                "Cookie: sid=cookie-secret",
+                "password=hunter2",
+                "token=query-secret",
+                "api_key=api-secret",
+                "secret=shared-secret",
+                "session=session-secret",
+                jwt,
+            ]
+        )
+
+        redacted = service_redact_sensitive_text(text)
+
+        for secret in [
+            "bearer-secret",
+            "basic-secret",
+            "cookie-secret",
+            "hunter2",
+            "query-secret",
+            "api-secret",
+            "shared-secret",
+            "session-secret",
+            jwt,
+        ]:
+            self.assertNotIn(secret, redacted)
+        self.assertIn("[REDACTED]", redacted)
+        self.assertIn("[REDACTED_JWT]", redacted)
 
     def test_export_dataframes_redact_packet_and_alert_text(self):
         packets = packet_rows_to_df(
@@ -41,9 +84,18 @@ class PayloadPrivacyTests(unittest.TestCase):
                 }
             ]
         )
-        alerts = alert_rows_to_df([{"detail": "Authorization: Bearer secret-token", "attack": "Cleartext Auth"}])
+        alerts = alert_rows_to_df(
+            [
+                {
+                    "detail": "Authorization: Bearer secret-token",
+                    "attack": "Cleartext Auth",
+                }
+            ]
+        )
 
-        packet_text = " ".join(str(value) for value in packets.iloc[0].to_dict().values())
+        packet_text = " ".join(
+            str(value) for value in packets.iloc[0].to_dict().values()
+        )
         alert_text = " ".join(str(value) for value in alerts.iloc[0].to_dict().values())
 
         self.assertNotIn("token=secret", packet_text)
