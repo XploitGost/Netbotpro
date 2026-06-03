@@ -49,11 +49,21 @@ class SettingsServiceTests(unittest.TestCase):
                 {
                     "iface": "Wi-Fi 1\r\nInjected",
                     "whitelist_ips": "127.0.0.1, bad-ip, ::1, 127.0.0.1",
+                    "remote_dashboard_allowlist": "10.0.0.5, bad-cidr, 192.168.1.0/24",
+                    "payload_capture_enabled": True,
+                    "alert_only_mode": True,
+                    "safe_use_policy_accepted": True,
+                    "retention_minutes": 120,
                 }
             )
 
             self.assertEqual(updated["iface"], "Wi-Fi 1Injected")
             self.assertEqual(updated["whitelist_ips"], "127.0.0.1, ::1")
+            self.assertEqual(updated["remote_dashboard_allowlist"], "10.0.0.5, 192.168.1.0/24")
+            self.assertTrue(updated["payload_capture_enabled"])
+            self.assertTrue(updated["alert_only_mode"])
+            self.assertTrue(updated["safe_use_policy_accepted"])
+            self.assertEqual(updated["retention_minutes"], 120)
             mock_save.assert_called_once()
             mock_set_persist.assert_called_once_with(bool(updated.get("persist_logs")))
             if updated.get("persist_logs"):

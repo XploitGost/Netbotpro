@@ -23,12 +23,14 @@ from backend.app.security import (
     is_local_token_enabled,
     is_trusted_websocket_client,
     require_local_token,
+    require_server_safe_use_policy,
     require_trusted_client,
     validate_block_ip,
     validate_ip,
     validate_report_download_path,
 )
 from backend.app.services.event_bus import EventBus
+from backend.app.services.audit_service import audit_event
 from backend.app.services.export_service import ExportService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
 from backend.app.services.investigation_export_service import InvestigationExportService
@@ -74,6 +76,10 @@ def _load_pcap_analyzer():
         logger.exception("offline_analysis_unavailable")
         raise HTTPException(status_code=503, detail="Offline PCAP analysis is unavailable in this runtime") from exc
     return analyze_pcap_file
+
+
+def _actor_from_request(request: Request | None) -> str:
+    return request.client.host if request and request.client else "unknown"
 
 
 @asynccontextmanager
@@ -174,14 +180,18 @@ def api_start_sniffer(
     request: Request = None,
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
+    ___: None = Depends(require_server_safe_use_policy),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_start", limit=12, window_sec=60)
     payload = payload or {}
     iface = payload.get("iface")
     try:
-        return sniffer_service.start(iface=iface)
+        state = sniffer_service.start(iface=iface)
+        audit_event("capture_start", actor=_actor_from_request(request), detail={"iface": state.get("iface")})
+        return state
     except CaptureStartUnavailableError as exc:
         logger.warning("capture_start_unavailable detail=%s", exc.detail)
+        audit_event("capture_start", actor=_actor_from_request(request), success=False, detail={"detail": exc.detail, "iface": iface})
         raise HTTPException(status_code=409, detail=exc.detail) from exc
 
 
@@ -192,7 +202,9 @@ def api_stop_sniffer(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_stop", limit=20, window_sec=60)
-    return sniffer_service.stop()
+    state = sniffer_service.stop()
+    audit_event("capture_stop", actor=_actor_from_request(request), detail={"iface": state.get("iface")})
+    return state
 
 
 @app.post("/api/session/reset")
@@ -402,13 +414,16 @@ def api_export_session(
     enforce_rate_limit(request, "export_session", limit=20, window_sec=60)
     history = traceroute_service.history()
     try:
-        return export_service.export_session(
+        result = export_service.export_session(
             kind=str(payload.get("format") or "zip"),
             packet_rows=sniffer_service.recent_packets(),
             alert_rows=sniffer_service.recent_alerts(),
             traceroute_rows=(history[0].get("hops", []) if history else []),
         )
+        audit_event("export_create", actor=_actor_from_request(request), detail={"kind": result.get("format"), "path": result.get("path")})
+        return result
     except ValueError as exc:
+        audit_event("export_create", actor=_actor_from_request(request), success=False, detail={"detail": str(exc)})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -421,8 +436,11 @@ def api_export_investigation(
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "export_investigation", limit=20, window_sec=60)
     try:
-        return investigation_export_service.export_report(payload)
+        result = investigation_export_service.export_report(payload)
+        audit_event("export_create", actor=_actor_from_request(request), detail={"kind": result.get("kind"), "path": result.get("path")})
+        return result
     except ValueError as exc:
+        audit_event("export_create", actor=_actor_from_request(request), success=False, detail={"detail": str(exc)})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -437,7 +455,9 @@ def api_export_download(
     safe_name = validate_report_download_path(path)
     file_path = Path(ensure_within_directory(str(LOG_DIR), safe_name))
     if not file_path.exists() or not file_path.is_file():
+        audit_event("report_download", actor=_actor_from_request(request), success=False, detail={"path": safe_name})
         raise HTTPException(status_code=404, detail="Export not found")
+    audit_event("report_download", actor=_actor_from_request(request), detail={"path": safe_name})
     return FileResponse(file_path, filename=file_path.name, headers={"Cache-Control": "no-store"})
 
 
@@ -448,6 +468,7 @@ def api_reports(
     __: None = Depends(require_local_token),
 ) -> list[dict[str, Any]]:
     enforce_rate_limit(request, "reports_list", limit=60, window_sec=60)
+    report_service.cleanup_retention(int(get_settings().get("retention_minutes") or 0))
     return report_service.list_reports()
 
 
@@ -501,6 +522,8 @@ async def ws_events(websocket: WebSocket) -> None:
     if not is_trusted_websocket_client(client_host, token):
         await websocket.close(code=1008)
         return
+    if client_host and client_host not in {"127.0.0.1", "::1", "localhost"}:
+        audit_event("remote_login", actor=client_host, detail={"path": "/ws/events", "transport": "websocket"})
     await websocket.accept(subprotocol=accepted_protocol)
     queue = event_bus.subscribe()
     try:

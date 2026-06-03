@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.security import validate_report_download_path
@@ -11,6 +12,31 @@ from log_manager import LOG_DIR  # noqa: E402
 
 
 class ReportService:
+    def cleanup_retention(self, retention_minutes: int) -> int:
+        try:
+            minutes = int(retention_minutes)
+        except Exception:
+            return 0
+        if minutes <= 0:
+            return 0
+        cutoff = time.time() - minutes * 60
+        removed = 0
+        root = Path(LOG_DIR).resolve()
+        if not root.exists():
+            return 0
+        for path in root.glob("*"):
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                validate_report_download_path(path.name)
+                if path.stat().st_mtime >= cutoff:
+                    continue
+                path.unlink()
+                removed += 1
+            except Exception:
+                continue
+        return removed
+
     def list_reports(self) -> list[dict[str, str | int]]:
         root = Path(LOG_DIR).resolve()
         if not root.exists():

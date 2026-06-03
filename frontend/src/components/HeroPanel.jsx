@@ -13,8 +13,10 @@ export function HeroPanel({
   canStartSniffer,
   interfaceCount = 0,
   error,
+  safeUsePolicyAccepted = true,
   isBusy = false,
   onTokenChange,
+  onOpenSettings,
   onStartSniffer,
   onStopSniffer,
   onResetData,
@@ -90,6 +92,15 @@ export function HeroPanel({
         ) : null}
         {capturePreflight?.requires_elevation ? (
           <p className="muted">Run the desktop app as Administrator if you want live capture and firewall actions.</p>
+        ) : null}
+        {!safeUsePolicyAccepted ? (
+          <div className="hero-capture-notes">
+            <p className="muted">Safe Use Policy</p>
+            <ul className="hero-list">
+              <li>Accept the defensive-use policy in Settings before using Server Mode capture.</li>
+            </ul>
+            {onOpenSettings ? <button className="secondary" onClick={onOpenSettings}>Open Settings</button> : null}
+          </div>
         ) : null}
         {failedChecks.length ? (
           <div className="hero-capture-notes">

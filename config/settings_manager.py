@@ -42,6 +42,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "persist_logs": False,
     "retention_minutes": 0,
     "mask_ip_logs": False,
+    "payload_capture_enabled": False,
+    "alert_only_mode": False,
+    "safe_use_policy_accepted": False,
+    "remote_dashboard_allowlist": "",
 
     # TraceRoute defaults
     "tr_mode": "UDP",

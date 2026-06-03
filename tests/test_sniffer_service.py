@@ -104,6 +104,37 @@ class SnifferServiceTests(unittest.TestCase):
 
         self.assertIn("Detected 0 capture interface", str(ctx.exception))
 
+    def test_start_rejects_unknown_remote_interface_name(self):
+        service = SnifferService(EventBus(), capture_provider=_FakeCaptureProvider())
+
+        with self.assertRaises(CaptureStartUnavailableError) as ctx:
+            service.start("not-a-local-interface")
+
+        self.assertIn("local interfaces", str(ctx.exception))
+        service.close()
+
+    @patch("backend.app.services.sniffer_service.get_settings_snapshot", return_value={"payload_capture_enabled": False, "alert_only_mode": False})
+    def test_payload_preview_is_removed_by_default_before_state_and_persistence(self, _mock_settings):
+        service = SnifferService(EventBus(), capture_provider=_FakeCaptureProvider())
+        try:
+            service._on_packet(
+                {
+                    "src": "192.168.1.10",
+                    "dst": "8.8.8.8",
+                    "proto": "TCP",
+                    "payload_len": 42,
+                    "payload_hex": "41 42",
+                    "payload_ascii": "Authorization: Bearer secret",
+                }
+            )
+            packet = service.recent_packets()[0]
+        finally:
+            service.close()
+
+        self.assertEqual(packet["payload_len"], 42)
+        self.assertEqual(packet["payload_hex"], "")
+        self.assertEqual(packet["payload_ascii"], "")
+
     def test_start_times_out_when_capture_session_creation_hangs(self):
         service = SnifferService(EventBus(), capture_provider=_SlowCaptureProvider())
 

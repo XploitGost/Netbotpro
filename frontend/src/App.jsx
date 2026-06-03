@@ -457,8 +457,10 @@ function App() {
         canStartSniffer={canStartSniffer}
         interfaceCount={interfaces.length}
         error={error}
+        safeUsePolicyAccepted={Boolean(settings.safe_use_policy_accepted)}
         isBusy={loadingState.snifferAction}
         onTokenChange={setLocalToken}
+        onOpenSettings={() => setActivePage("settings")}
         onStartSniffer={startSniffer}
         onStopSniffer={stopSniffer}
         onResetData={resetSessionData}

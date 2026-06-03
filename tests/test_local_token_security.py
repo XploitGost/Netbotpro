@@ -59,6 +59,11 @@ class LocalTokenSecurityTests(unittest.TestCase):
         dependencies = {dependency.call for dependency in route.dependant.dependencies}
         self.assertIn(main.require_local_token, dependencies)
 
+    def test_sniffer_start_requires_server_safe_use_policy_dependency(self):
+        route = self._route("/api/sniffer/start", method="POST")
+        dependencies = {dependency.call for dependency in route.dependant.dependencies}
+        self.assertIn(main.require_server_safe_use_policy, dependencies)
+
 
 if __name__ == "__main__":
     unittest.main()

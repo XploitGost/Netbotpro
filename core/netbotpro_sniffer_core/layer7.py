@@ -2,18 +2,42 @@ from __future__ import annotations
 
 import binascii
 import logging
+import re
 from typing import Any
 
 from .tls import tls_fingerprints
 
 logger = logging.getLogger(__name__)
+_SENSITIVE_HEADER_RE = re.compile(
+    r"(?im)^((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)\s*:\s*)([^\r\n]*)"
+)
+_SENSITIVE_TOKEN_RE = re.compile(r"(?i)\b(?:basic|bearer)\s+[A-Za-z0-9._~+/=-]+")
+_SENSITIVE_QUERY_RE = re.compile(r"(?i)([?&](?:access_token|api_key|apikey|auth|authorization|code|password|secret|token)=)[^&#\s]+")
 
 
-def safe_bytes_preview(payload: bytes, max_len: int = 64) -> dict[str, Any]:
+def redact_sensitive_text(value: str) -> str:
+    text = str(value or "")
+    text = _SENSITIVE_HEADER_RE.sub(r"\1[REDACTED]", text)
+    text = _SENSITIVE_TOKEN_RE.sub("[REDACTED_TOKEN]", text)
+    text = _SENSITIVE_QUERY_RE.sub(r"\1[REDACTED]", text)
+    return text
+
+
+def redact_http_path(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return redact_sensitive_text(str(value))
+
+
+def safe_bytes_preview(payload: bytes, max_len: int = 64, *, enabled: bool = False) -> dict[str, Any]:
     if not payload:
         return {"payload_len": 0, "payload_hex": "", "payload_ascii": ""}
+    if not enabled:
+        return {"payload_len": len(payload), "payload_hex": "", "payload_ascii": ""}
 
-    preview = payload[:max_len]
+    preview_text = payload[:max_len].decode("utf-8", errors="ignore")
+    redacted_preview = redact_sensitive_text(preview_text).encode("utf-8", errors="ignore")[:max_len]
+    preview = redacted_preview or payload[:max_len]
     hex_text = binascii.hexlify(preview).decode("ascii")
     hex_text = " ".join(hex_text[index : index + 2] for index in range(0, len(hex_text), 2))
     ascii_text = "".join(chr(value) if 32 <= value < 127 else "." for value in preview)
@@ -81,7 +105,7 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
             if line0.startswith(("GET ", "POST ", "HEAD ", "PUT ", "DELETE ", "OPTIONS ", "PATCH ")):
                 parts = line0.split()
                 http_method = parts[0] if len(parts) > 0 else None
-                http_path = parts[1] if len(parts) > 1 else None
+                http_path = redact_http_path(parts[1]) if len(parts) > 1 else None
                 http_host = None
                 http_user_agent = None
                 for line in lines[1:50]:

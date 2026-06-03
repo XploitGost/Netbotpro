@@ -146,6 +146,15 @@ http://127.0.0.1:5173/?api=http://SERVER_IP:8765/api&ws=ws://SERVER_IP:8765/ws
 
 Remote sensor mode is not a public internet service mode. Treat it as a private, controlled sensor endpoint for systems where you have explicit authorization. Prefer VPN, SSH tunneling, private routing, or a TLS reverse proxy, and restrict inbound access to trusted operator IPs.
 
+Server Mode adds extra guardrails:
+
+- Safe Use Policy acceptance is required before remote capture starts.
+- Remote dashboard clients can be restricted with `NETBOT_REMOTE_IP_ALLOWLIST` or Settings allowlist entries.
+- Payload previews are disabled by default; when enabled, Authorization, Cookie, Basic Auth, Bearer token, and sensitive query values are redacted.
+- Alert-only mode keeps payload previews empty while still allowing detection metadata.
+- Retention settings can automatically remove old packet history and generated reports.
+- Capture start/stop, exports, report downloads, and successful remote dashboard authentication are written to `audit.jsonl`.
+
 ## Verification
 
 ```powershell
@@ -167,12 +176,14 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 
 - Loopback-only by default for local development and desktop mode.
 - Remote access is opt-in and requires both `NETBOT_REMOTE_ACCESS=1` and `NETBOT_LOCAL_TOKEN`.
+- Optional `NETBOT_REMOTE_IP_ALLOWLIST` limits remote dashboard clients by IP/CIDR.
 - Remote sensor mode is documented as an authorized-use-only deployment path, not a general hosted SaaS mode.
 - Desktop mode generates a cryptographically secure random token when no token is provided.
 - Electron exposes runtime config through a narrow IPC preload bridge with `contextIsolation`, `sandbox`, and `nodeIntegration: false`.
 - Sensitive HTTP routes require `X-NetBot-Token`.
 - Websocket sessions prefer the `netbot.auth.*` subprotocol instead of query-string tokens.
 - Downloads are constrained to generated safe file types inside the NetBotPro log directory.
+- Payload previews are off by default and sensitive HTTP/token fields are redacted when previews are enabled.
 
 ## Limitations
 

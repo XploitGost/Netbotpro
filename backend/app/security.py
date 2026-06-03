@@ -92,6 +92,88 @@ def check_local_token(provided: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
+def normalize_ip_network_csv(value: str, *, max_items: int = 128) -> str:
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw in str(value or "").split(","):
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            if "/" in text:
+                normalized = str(ipaddress.ip_network(text, strict=False))
+            else:
+                normalized = str(ipaddress.ip_address(text))
+        except ValueError:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+        if len(items) >= max_items:
+            break
+    return ", ".join(items)
+
+
+def _remote_allowlist_items() -> list[ipaddress._BaseNetwork | ipaddress._BaseAddress]:
+    raw_items: list[str] = []
+    env_value = os.environ.get("NETBOT_REMOTE_IP_ALLOWLIST", "").strip()
+    if env_value:
+        raw_items.extend(item.strip() for item in env_value.split(",") if item.strip())
+    try:
+        from backend.app.services.settings_service import get_settings_snapshot
+
+        configured = str(get_settings_snapshot().get("remote_dashboard_allowlist") or "").strip()
+        if configured:
+            raw_items.extend(item.strip() for item in configured.split(",") if item.strip())
+    except Exception:
+        pass
+
+    normalized: list[ipaddress._BaseNetwork | ipaddress._BaseAddress] = []
+    for item in raw_items[:128]:
+        try:
+            if "/" in item:
+                normalized.append(ipaddress.ip_network(item, strict=False))
+            else:
+                normalized.append(ipaddress.ip_address(item))
+        except ValueError:
+            continue
+    return normalized
+
+
+def is_remote_ip_allowed(client_host: str) -> bool:
+    allowlist = _remote_allowlist_items()
+    if not allowlist:
+        return True
+    try:
+        parsed = ipaddress.ip_address(_strip_brackets(client_host).split("%", 1)[0])
+    except ValueError:
+        return False
+    for item in allowlist:
+        if isinstance(item, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
+            if parsed in item:
+                return True
+        elif parsed == item:
+            return True
+    return False
+
+
+def is_safe_use_policy_accepted() -> bool:
+    try:
+        from backend.app.services.settings_service import get_settings_snapshot
+
+        return bool(get_settings_snapshot().get("safe_use_policy_accepted"))
+    except Exception:
+        return False
+
+
+def require_server_safe_use_policy(request: Request) -> None:
+    if not is_remote_access_enabled():
+        return
+    if not is_safe_use_policy_accepted():
+        raise HTTPException(status_code=451, detail="Safe Use Policy must be accepted before Server Mode capture")
+
+
 def require_local_token(request: Request) -> None:
     provided = request.headers.get("X-NetBot-Token", "").strip()
     if not check_local_token(provided):
@@ -104,11 +186,19 @@ def require_trusted_client(request: Request) -> None:
         return
     if not is_remote_access_enabled():
         raise HTTPException(status_code=403, detail="Local access only")
+    if not is_remote_ip_allowed(client_host):
+        raise HTTPException(status_code=403, detail="Remote dashboard IP is not allowlisted")
     if not is_local_token_enabled():
         raise HTTPException(status_code=403, detail="Remote access requires NETBOT_LOCAL_TOKEN")
     provided = request.headers.get("X-NetBot-Token", "").strip()
     if not check_local_token(provided):
         raise HTTPException(status_code=401, detail="Invalid local token")
+    try:
+        from backend.app.services.audit_service import audit_event
+
+        audit_event("remote_login", actor=client_host, success=True, detail={"path": request.url.path})
+    except Exception:
+        pass
 
 
 def enforce_rate_limit(request: Request, scope: str, limit: int, window_sec: int) -> None:
@@ -254,4 +344,4 @@ def is_allowed_websocket_origin(origin: str | None) -> bool:
 def is_trusted_websocket_client(client_host: str, token: str) -> bool:
     if is_loopback_host(client_host):
         return check_local_token(token)
-    return is_remote_access_enabled() and is_local_token_enabled() and check_local_token(token)
+    return is_remote_access_enabled() and is_remote_ip_allowed(client_host) and is_local_token_enabled() and check_local_token(token)

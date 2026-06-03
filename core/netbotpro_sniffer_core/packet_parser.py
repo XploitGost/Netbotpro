@@ -37,6 +37,7 @@ class PacketMetadataBuilder:
     mac_vendor_provider: Any | None = None
     process_mapper: Any | None = None
     timestamp_factory: TimestampFactory | None = None
+    capture_payload_preview: bool = True
 
     def __post_init__(self) -> None:
         if self.geoip_provider is None:
@@ -102,7 +103,7 @@ class PacketMetadataBuilder:
             "summary": summary,
         }
         meta.update(layer7)
-        meta.update(safe_bytes_preview(payload))
+        meta.update(safe_bytes_preview(payload, enabled=self.capture_payload_preview))
         return meta
 
     def _extract_macs(self, pkt: Any) -> tuple[str | None, str | None]:

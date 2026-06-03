@@ -175,6 +175,11 @@ class SettingsPayload(BaseModel):
     auto_block: bool | None = None
     persist_logs: bool | None = None
     whitelist_ips: str | None = None
+    retention_minutes: int | None = None
+    payload_capture_enabled: bool | None = None
+    alert_only_mode: bool | None = None
+    safe_use_policy_accepted: bool | None = None
+    remote_dashboard_allowlist: str | None = None
 
 
 class EventEnvelope(BaseModel):

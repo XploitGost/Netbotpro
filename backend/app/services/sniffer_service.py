@@ -55,6 +55,7 @@ class SnifferService:
         preflight = self.capture_preflight()
         if not preflight.get("ready"):
             raise CaptureStartUnavailableError(self._first_blocking_preflight_detail(preflight), preflight=preflight)
+        iface = self._resolve_local_interface_or_raise(iface)
 
         result: dict[str, Any] = {}
         error: dict[str, BaseException] = {}
@@ -85,22 +86,63 @@ class SnifferService:
             ) from error["exc"]
         return result["engine"], result["iface"]
 
+    def _resolve_local_interface_or_raise(self, iface: str | None) -> str | None:
+        candidate = str(iface or "").strip()
+        if not candidate or candidate in {"iface=default", "default"}:
+            return None
+        interfaces = self._capture_provider.list_interfaces()
+        aliases: set[str] = set()
+        values: set[str] = set()
+        for item in interfaces.get("items", []):
+            value = str(item.get("value") or "").strip()
+            if value:
+                values.add(value)
+            for key in ("value", "name", "network_name", "label"):
+                alias = str(item.get(key) or "").strip()
+                if alias:
+                    aliases.add(alias)
+        if candidate not in aliases:
+            raise CaptureStartUnavailableError(
+                "Capture interface must be one of the local interfaces reported by this server.",
+                preflight=self.capture_preflight(),
+            )
+        resolved = self._capture_provider.resolve_interface(candidate)
+        if resolved and resolved in values:
+            return resolved
+        if candidate in values:
+            return candidate
+        raise CaptureStartUnavailableError(
+            "Capture interface could not be resolved to a local server adapter.",
+            preflight=self.capture_preflight(),
+        )
+
     def _on_packet(self, meta: dict[str, Any]) -> None:
         packet = dict(meta)
         packet.setdefault("ts", datetime.utcnow().isoformat() + "Z")
         packet.setdefault("id", self._next_packet_id())
+        settings = get_settings_snapshot()
+        self._apply_payload_policy(packet, settings)
         try:
             alerts = self._detection_pipeline.analyze(packet)
         except Exception:
             logger.exception("Packet analysis pipeline crashed")
             alerts = []
         alerts = self._assign_alert_ids(packet, alerts)
+        for alert in alerts:
+            self._apply_payload_policy(alert, settings)
 
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
         self._persistence.persist(packet, alerts)
         self._publisher.publish_packet(packet)
         self._publisher.publish_alerts(alerts)
+
+    @staticmethod
+    def _apply_payload_policy(row: dict[str, Any], settings: dict[str, Any]) -> None:
+        if bool(settings.get("payload_capture_enabled")) and not bool(settings.get("alert_only_mode")):
+            return
+        row["payload_hex"] = ""
+        row["payload_ascii"] = ""
 
     def start(self, iface: str | None = None) -> dict[str, Any]:
         with self._lock:

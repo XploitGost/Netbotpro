@@ -19,6 +19,11 @@ const defaultSettings = {
   auto_block: false,
   persist_logs: false,
   whitelist_ips: "",
+  retention_minutes: 0,
+  payload_capture_enabled: false,
+  alert_only_mode: false,
+  safe_use_policy_accepted: false,
+  remote_dashboard_allowlist: "",
 };
 
 function initialActivePage() {
@@ -761,6 +766,11 @@ export function useDashboardController() {
         auto_block: Boolean(settings.auto_block),
         persist_logs: Boolean(settings.persist_logs),
         whitelist_ips: settings.whitelist_ips,
+        retention_minutes: Number(settings.retention_minutes || 0),
+        payload_capture_enabled: Boolean(settings.payload_capture_enabled),
+        alert_only_mode: Boolean(settings.alert_only_mode),
+        safe_use_policy_accepted: Boolean(settings.safe_use_policy_accepted),
+        remote_dashboard_allowlist: settings.remote_dashboard_allowlist,
       });
       setSettings((current) => ({ ...current, ...data, iface: data.iface || current.iface || "iface=default" }));
       setStatusMessage("Settings saved");

@@ -38,9 +38,18 @@ NetBotPro treats these as sensitive boundaries:
 - Keep the default loopback-only mode for local analysis.
 - Enable remote sensor mode only on systems and networks you own or administer.
 - Use strong `NETBOT_LOCAL_TOKEN` values for any remote deployment.
+- Use `NETBOT_REMOTE_IP_ALLOWLIST` or the Settings page allowlist to restrict remote dashboard clients by IP/CIDR.
+- Accept the Safe Use Policy before starting capture in Server Mode.
+- Leave payload preview capture disabled unless you explicitly need redacted payload snippets for a controlled investigation.
+- Use Alert-only mode when you want detection metadata without packet payload previews.
+- Configure retention windows for packet history and generated reports when running long-lived sensors.
 - Prefer VPN, SSH tunneling, private routing, or a TLS reverse proxy.
 - Restrict inbound access with firewall rules or allowlisted operator IPs.
 - Run elevated/admin only when live capture or firewall operations require it.
+
+## Audit Events
+
+NetBotPro writes defensive audit events to `audit.jsonl` in the configured log directory for capture start/stop, export creation, report downloads, and successful remote dashboard authentication. Audit records redact token-like fields and are best-effort so audit failures do not interrupt capture.
 
 ## Out Of Scope
 

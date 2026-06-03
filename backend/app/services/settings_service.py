@@ -4,7 +4,7 @@ import threading
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
-from backend.app.security import normalize_ip_csv, sanitize_iface_name
+from backend.app.security import normalize_ip_csv, normalize_ip_network_csv, sanitize_iface_name
 
 ensure_project_root_on_path()
 
@@ -22,6 +22,9 @@ BOOL_KEYS = {
     "safe_mode",
     "persist_logs",
     "mask_ip_logs",
+    "payload_capture_enabled",
+    "alert_only_mode",
+    "safe_use_policy_accepted",
 }
 
 FLOAT_KEYS = {
@@ -111,6 +114,8 @@ def update_settings(data: dict[str, Any]) -> dict[str, Any]:
             current[key] = sanitize_iface_name(str(value))
         elif key == "whitelist_ips":
             current[key] = normalize_ip_csv(str(value))
+        elif key == "remote_dashboard_allowlist":
+            current[key] = normalize_ip_network_csv(str(value))
     save_settings(current)
     current = _replace_cache(current)
     _apply_runtime_settings(current)

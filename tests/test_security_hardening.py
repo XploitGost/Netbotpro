@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 from base64 import urlsafe_b64encode
 from pathlib import Path
@@ -15,7 +16,9 @@ from backend.app.security import (
     extract_websocket_token,
     is_allowed_websocket_origin,
     is_loopback_host,
+    is_remote_ip_allowed,
     is_trusted_websocket_client,
+    normalize_ip_network_csv,
     require_trusted_client,
     validate_report_download_path,
 )
@@ -90,6 +93,22 @@ class SecurityHardeningTests(unittest.TestCase):
 
             self.assertEqual([item["name"] for item in items], ["report_a.html"])
 
+    def test_report_service_retention_removes_old_supported_reports(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old_report = root / "old_report.html"
+            fresh_report = root / "fresh_report.html"
+            old_report.write_text("old", encoding="utf-8")
+            fresh_report.write_text("fresh", encoding="utf-8")
+            old_ts = time.time() - 3600
+            os.utime(old_report, (old_ts, old_ts))
+            with patch("backend.app.services.report_service.LOG_DIR", td):
+                removed = ReportService().cleanup_retention(30)
+
+            self.assertEqual(removed, 1)
+            self.assertFalse(old_report.exists())
+            self.assertTrue(fresh_report.exists())
+
     def test_validate_report_download_path_rejects_unsafe_paths(self):
         with self.assertRaises(HTTPException):
             validate_report_download_path("../report.html")
@@ -123,6 +142,26 @@ class SecurityHardeningTests(unittest.TestCase):
     def test_loopback_helper_accepts_ipv4_mapped_ipv6(self):
         self.assertTrue(is_loopback_host("::ffff:127.0.0.1"))
         self.assertFalse(is_loopback_host("::ffff:10.0.0.8"))
+
+    def test_remote_allowlist_accepts_ip_and_cidr(self):
+        with patch.dict(os.environ, {"NETBOT_REMOTE_IP_ALLOWLIST": "10.0.0.5, 192.168.10.0/24"}, clear=False):
+            self.assertTrue(is_remote_ip_allowed("10.0.0.5"))
+            self.assertTrue(is_remote_ip_allowed("192.168.10.44"))
+            self.assertFalse(is_remote_ip_allowed("192.168.11.44"))
+
+    def test_remote_allowlist_rejects_non_allowlisted_dashboard_client(self):
+        with patch.dict(
+            os.environ,
+            {"NETBOT_REMOTE_ACCESS": "1", "NETBOT_LOCAL_TOKEN": "secret", "NETBOT_REMOTE_IP_ALLOWLIST": "10.0.0.5"},
+            clear=False,
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                require_trusted_client(self._build_request("10.0.0.6", {"X-NetBot-Token": "secret"}))
+
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_normalize_ip_network_csv_filters_invalid_entries(self):
+        self.assertEqual(normalize_ip_network_csv("10.0.0.1, bad, 192.168.1.0/24, 10.0.0.1"), "10.0.0.1, 192.168.1.0/24")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from backend.app.bootstrap import ensure_project_root_on_path
 
 ensure_project_root_on_path()
 
-from log_manager import insert_batch, is_persist_enabled  # noqa: E402
+from log_manager import cleanup_retention, insert_batch, is_persist_enabled  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ class SnifferPersistence:
         self._last_queue_drift_ms = 0.0
         self._drain_completed = 0
         self._shutdown_flush_timeout = 0
+        self._last_retention_cleanup = 0.0
         self._worker.start()
 
     def persist(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> None:
@@ -268,10 +269,23 @@ class SnifferPersistence:
                     self._avg_batch_size = round(((self._avg_batch_size * (self._flush_batches - 1)) + len(packet_rows)) / self._flush_batches, 2)
                     self._flush_retries += retries
                     self._last_queue_drift_ms = drift_ms
+                self._run_retention_cleanup()
             except Exception:
                 with self._lock:
                     self._flush_errors += 1
                 logger.exception("Failed to persist packet batch")
+
+    def _run_retention_cleanup(self) -> None:
+        now = time.time()
+        if now - self._last_retention_cleanup < 60.0:
+            return
+        self._last_retention_cleanup = now
+        try:
+            from backend.app.services.settings_service import get_settings_snapshot
+
+            cleanup_retention(int(get_settings_snapshot().get("retention_minutes") or 0))
+        except Exception:
+            logger.debug("retention cleanup skipped", exc_info=True)
 
     def _target_batch_size(self) -> int:
         queue_size = self._queue.qsize()
