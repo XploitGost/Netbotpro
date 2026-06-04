@@ -60,6 +60,7 @@ export function useApiClient(localToken) {
     getAgentsOverview: () => request("/agents/overview"),
     getAgentAlertsSummary: () => request("/agents/alerts/summary"),
     getAgentRiskSummary: () => request("/agents/risk/summary"),
+    getAgentFleetSummary: () => request("/agents/reports/fleet-summary"),
     getAgent: (id) => request(`/agents/${encodeURIComponent(id)}`),
     getAgentTelemetry: (id, range = "24h") => request(`/agents/${encodeURIComponent(id)}/telemetry?range=${encodeURIComponent(range)}`),
     getAgentHealthHistory: (id, range = "24h") => request(`/agents/${encodeURIComponent(id)}/health/history?range=${encodeURIComponent(range)}`),

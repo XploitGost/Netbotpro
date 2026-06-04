@@ -941,10 +941,62 @@ th {
   gap: 1rem;
 }
 
+.agent-state,
+.agent-demo-banner,
+.agent-empty-state {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.agent-state {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.agent-state-error {
+  border-color: rgba(255, 107, 107, 0.28);
+}
+
+.agent-demo-banner {
+  align-items: center;
+  border-color: rgba(255, 211, 107, 0.22);
+  color: var(--warn);
+  display: flex;
+  gap: 0.75rem;
+}
+
+.agent-demo-banner span {
+  color: var(--muted);
+}
+
+.agent-empty-state {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.agent-empty-state h3 {
+  margin: 0;
+}
+
+.agent-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.agent-hidden-table {
+  display: none;
+}
+
 .agent-overview-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .agent-metric-card {
@@ -1003,6 +1055,26 @@ th {
   min-height: 34px;
   padding: 0 0.8rem;
   text-transform: capitalize;
+}
+
+.agent-skeleton-row span {
+  animation: agentPulse 1.2s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  display: block;
+  height: 18px;
+  width: 100%;
+}
+
+@keyframes agentPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+
+  50% {
+    opacity: 0.95;
+  }
 }
 
 .agent-status {

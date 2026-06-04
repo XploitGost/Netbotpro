@@ -1,10 +1,14 @@
+import gc
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.app.services.agent_demo import seed_demo_data
 from backend.app.services.agent_registry import AgentRegistry, compute_agent_risk
 
 
@@ -166,6 +170,70 @@ class AgentRegistryTests(unittest.TestCase):
             compute_agent_risk(alerts={"critical_count": 3})["severity"],
             "critical",
         )
+
+    def test_seed_demo_data_creates_agents_and_redacted_history(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "agents.db"
+            result = seed_demo_data(db_path, count=4, reset=True)
+            registry = AgentRegistry(db_path)
+            agents = registry.list_agents()
+            public_text = json.dumps(
+                {
+                    "agents": agents,
+                    "overview": registry.overview(),
+                    "summary": registry.fleet_summary_report(),
+                },
+                ensure_ascii=False,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["created_agents"], 4)
+        self.assertEqual(len(agents), 4)
+        self.assertIn("demo_data", public_text)
+        self.assertNotIn("netbotpro-demo-token", public_text)
+        self.assertNotIn("Authorization", public_text)
+
+    def test_history_ranges_include_1h_24h_7d_30d(self):
+        with tempfile.TemporaryDirectory() as td:
+            registry = AgentRegistry(Path(td) / "agents.db")
+            registry.register({"agent_id": "range-agent"}, "tok")
+            registry.telemetry("range-agent", {"health": {"cpu_percent": 33}})
+
+            counts = {
+                name: len(registry.history("range-agent", "health", name))
+                for name in ["1h", "24h", "7d", "30d"]
+            }
+
+        self.assertEqual(counts, {"1h": 1, "24h": 1, "7d": 1, "30d": 1})
+
+    def test_cleanup_history_removes_old_rows_but_keeps_agents(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "agents.db"
+            registry = AgentRegistry(db_path)
+            registry.register({"agent_id": "cleanup-agent"}, "tok")
+            registry.telemetry("cleanup-agent", {"health": {"cpu_percent": 20}})
+            old_time = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    "UPDATE agent_health_snapshots SET received_at = ? WHERE agent_id = ?",
+                    (old_time, "cleanup-agent"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            dry_run = registry.cleanup_history(30, dry_run=True)
+            result = registry.cleanup_history(30)
+            agent = registry.get_agent("cleanup-agent")
+            health = registry.history("cleanup-agent", "health", "30d")
+            del registry
+            gc.collect()
+
+        self.assertEqual(dry_run["deleted"]["agent_health_snapshots"], 1)
+        self.assertEqual(result["deleted"]["agent_health_snapshots"], 1)
+        self.assertIsNotNone(agent)
+        self.assertEqual(health, [])
 
 
 if __name__ == "__main__":

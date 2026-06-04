@@ -118,6 +118,21 @@ function TrendList({ items = [], value }) {
   );
 }
 
+function AgentSkeletonRows() {
+  return Array.from({ length: 4 }, (_, index) => (
+    <tr key={index} className="agent-skeleton-row">
+      <td><span /></td>
+      <td><span /></td>
+      <td><span /></td>
+      <td><span /></td>
+      <td><span /></td>
+      <td><span /></td>
+      <td><span /></td>
+      <td><span /></td>
+    </tr>
+  ));
+}
+
 export function AgentsPanel({
   agents = [],
   overview = null,
@@ -130,8 +145,10 @@ export function AgentsPanel({
   selectedAgentId = "",
   historyRange = "24h",
   isLoading = false,
+  error = "",
   onRefresh,
   onSelectAgent,
+  onExportFleetSummary,
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [focusFilter, setFocusFilter] = useState("all");
@@ -162,9 +179,32 @@ export function AgentsPanel({
       return Number(risk(right).score || 0) - Number(risk(left).score || 0);
     });
   }, [agents, focusFilter, osFilter, sortBy, statusFilter]);
+  const hasAgents = agents.length > 0;
 
   return (
     <div className="agents-panel">
+      {error ? (
+        <div className="agent-state agent-state-error">
+          <div>
+            <p className="eyebrow">Agent API</p>
+            <strong>Fleet data could not be loaded.</strong>
+            <p className="muted">
+              {error} Confirm the central backend is running and retry.
+            </p>
+          </div>
+          <button type="button" className="secondary" onClick={onRefresh}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {overview?.demo_data ? (
+        <div className="agent-demo-banner">
+          <strong>Demo data</strong>
+          <span>Not live production telemetry.</span>
+        </div>
+      ) : null}
+
       <div className="agent-overview-grid">
         <MetricCard
           label="Fleet"
@@ -189,6 +229,12 @@ export function AgentsPanel({
           value={`${riskSummary?.buckets?.critical ?? 0} critical`}
           hint={`${riskSummary?.buckets?.high ?? 0} high / ${riskSummary?.buckets?.medium ?? 0} medium`}
           tone="neutral"
+        />
+        <MetricCard
+          label="Avg Health"
+          value={`${formatPercent(overview?.average_cpu_percent)} CPU`}
+          hint={`${formatPercent(overview?.average_memory_percent)} RAM / ${formatPercent(overview?.average_disk_percent)} disk`}
+          tone="calm"
         />
       </div>
 
@@ -237,10 +283,28 @@ export function AgentsPanel({
           <button type="button" className="secondary" disabled={isLoading} onClick={onRefresh}>
             Refresh
           </button>
+          <button type="button" className="secondary" disabled={isLoading || !hasAgents} onClick={onExportFleetSummary}>
+            Export summary
+          </button>
         </div>
       </div>
 
-      <div className="table-wrap">
+      {!hasAgents && !isLoading ? (
+        <div className="agent-empty-state">
+          <p className="eyebrow">No Agents Registered</p>
+          <h3>Agent Mode is ready for read-only server monitoring.</h3>
+          <p className="muted">
+            Start a real agent with scripts/dev/start-agent.ps1, or seed a demo fleet with scripts/dev/seed-agent-demo.ps1 -Reset -Count 4.
+          </p>
+          <div className="agent-empty-actions">
+            <button type="button" className="primary" onClick={onRefresh}>
+              Refresh
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className={`table-wrap ${!hasAgents && !isLoading ? "agent-hidden-table" : ""}`}>
         <table>
           <thead>
             <tr>
@@ -255,6 +319,7 @@ export function AgentsPanel({
             </tr>
           </thead>
           <tbody>
+            {isLoading && !filteredAgents.length ? <AgentSkeletonRows /> : null}
             {filteredAgents.map((agent) => (
               <tr key={agent.agent_id} className={agent.agent_id === selectedAgentId ? "selected-row" : ""}>
                 <td>
@@ -287,7 +352,9 @@ export function AgentsPanel({
             ))}
             {!filteredAgents.length ? (
               <tr>
-                <td colSpan="8" className="table-empty">No agents match the current filters.</td>
+                <td colSpan="8" className="table-empty">
+                  {isLoading ? "Loading agents..." : "No agents match the current filters."}
+                </td>
               </tr>
             ) : null}
           </tbody>
@@ -331,11 +398,17 @@ export function AgentsPanel({
                 <strong>{historyRange}</strong>
               </div>
               <div className="agent-filter-row">
+                <button type="button" className="secondary" onClick={() => onSelectAgent(selectedAgent.agent_id, "1h")}>
+                  1h
+                </button>
                 <button type="button" className="secondary" onClick={() => onSelectAgent(selectedAgent.agent_id, "24h")}>
                   24h
                 </button>
                 <button type="button" className="secondary" onClick={() => onSelectAgent(selectedAgent.agent_id, "7d")}>
                   7d
+                </button>
+                <button type="button" className="secondary" onClick={() => onSelectAgent(selectedAgent.agent_id, "30d")}>
+                  30d
                 </button>
               </div>
             </div>

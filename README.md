@@ -25,6 +25,8 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 - Traceroute, export, report, and investigation packaging flows.
 - Desktop mode with a generated secure local token and an isolated Electron preload bridge.
 - Remote sensor mode for legally authorized servers and networks.
+- Agent Mode for summary-only server telemetry, fleet history, demo data, and
+  read-only multi-server dashboards.
 
 ## Feature Matrix
 
@@ -37,6 +39,7 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 | Offline PCAP analysis | Active | Restricted file types and upload size limits. |
 | Reports and exports | Active | Safe generated downloads inside the log directory. |
 | Remote sensor mode | Controlled/opt-in | Requires `NETBOT_REMOTE_ACCESS=1`, a strong token, and authorized infrastructure. |
+| Agent Mode | Active read-only monitoring | Summary-only agents, SQLite history, fleet dashboard, and demo/QA tooling. |
 | Windows packaging | Active | Built and smoke-tested first. |
 | Linux/macOS packaging | Staged | Scripts exist; production release validation is still pending. |
 
@@ -124,6 +127,13 @@ flowchart LR
 - `scripts/qa/` - smoke, acceptance, security, packaged backend, and release readiness checks.
 - `packaging/` - Windows/Linux/macOS packaging scripts and PyInstaller configuration.
 - `tests/` - backend, security, capture, persistence, desktop-path, and packaging smoke tests.
+
+## Operational Guides
+
+- [Agent Mode](docs/AGENT_MODE.md)
+- [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
+- [Remote Sensor](docs/REMOTE_SENSOR.md)
+- [Capture Modes](docs/CAPTURE_MODES.md)
 
 ## Setup
 

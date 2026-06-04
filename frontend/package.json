@@ -10,7 +10,7 @@
     "acceptance": "node ../scripts/qa/local_acceptance.mjs",
     "security": "node ../scripts/qa/security_smoke.mjs",
     "smoke": "node ../scripts/qa/frontend_smoke.mjs",
-    "test:ui": "vitest run"
+    "test:ui": "node scripts/run-vitest.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

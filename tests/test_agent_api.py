@@ -109,6 +109,85 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(risk_summary.status_code, 200)
         self.assertIn("buckets", risk_summary.json())
 
+    def test_fleet_summary_report_is_redacted_and_audited(self):
+        with patch.dict(os.environ, {"NETBOT_AGENT_TOKEN": "agent-token"}, clear=False):
+            self.client.post(
+                "/api/agents/register",
+                headers=self._headers(),
+                json={"hostname": "api-host"},
+            )
+            self.client.post(
+                "/api/agents/telemetry",
+                headers=self._headers(),
+                json={
+                    "health": {"cpu_percent": 91},
+                    "alerts_summary": {
+                        "total_alerts": 1,
+                        "critical_count": 1,
+                        "recent_alerts": [
+                            {"detail": "Authorization: Bearer report-secret"}
+                        ],
+                    },
+                },
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "NETBOT_AGENT_TOKEN": "agent-token",
+                    "NETBOT_REMOTE_ACCESS": "1",
+                    "NETBOT_LOCAL_TOKEN": "local-token",
+                },
+                clear=False,
+            ), patch("backend.app.main.audit_event") as audit:
+                report = self.client.get(
+                    "/api/agents/reports/fleet-summary",
+                    headers={"X-NetBot-Token": "local-token"},
+                )
+                csv_report = self.client.get(
+                    "/api/agents/reports/fleet-summary.csv",
+                    headers={"X-NetBot-Token": "local-token"},
+                )
+
+        report_text = report.text
+        self.assertEqual(report.status_code, 200)
+        self.assertEqual(csv_report.status_code, 200)
+        self.assertIn("agent_fleet_report_generated", str(audit.call_args_list))
+        self.assertNotIn("report-secret", report_text)
+        self.assertNotIn("report-secret", csv_report.text)
+        self.assertEqual(report.json()["total_agents"], 1)
+
+    def test_history_endpoints_support_all_ranges(self):
+        with patch.dict(os.environ, {"NETBOT_AGENT_TOKEN": "agent-token"}, clear=False):
+            self.client.post(
+                "/api/agents/register",
+                headers=self._headers(),
+                json={"hostname": "api-host"},
+            )
+            self.client.post(
+                "/api/agents/telemetry",
+                headers=self._headers(),
+                json={"health": {"cpu_percent": 44}},
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "NETBOT_AGENT_TOKEN": "agent-token",
+                    "NETBOT_REMOTE_ACCESS": "1",
+                    "NETBOT_LOCAL_TOKEN": "local-token",
+                },
+                clear=False,
+            ):
+                responses = [
+                    self.client.get(
+                        f"/api/agents/agent-api-1/health/history?range={range_name}",
+                        headers={"X-NetBot-Token": "local-token"},
+                    )
+                    for range_name in ["1h", "24h", "7d", "30d"]
+                ]
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertTrue(all(response.json()["items"] for response in responses))
+
     def test_heartbeat_rejects_missing_or_wrong_token(self):
         with patch.dict(os.environ, {"NETBOT_AGENT_TOKEN": "agent-token"}, clear=False):
             self.client.post(

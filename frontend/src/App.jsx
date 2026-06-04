@@ -116,6 +116,7 @@ function App() {
     agentAlertsHistory,
     agentRiskHistory,
     agentHistoryRange,
+    agentError,
     connectionState,
     connectionLabel,
     statusMessage,
@@ -150,6 +151,7 @@ function App() {
     loadAlertDetail,
     loadAgents,
     selectAgent,
+    exportAgentFleetSummary,
     openPacketDetailById,
     openAlertDetailById,
     applyPacketFilters,
@@ -455,8 +457,10 @@ function App() {
           agentRiskHistory={agentRiskHistory}
           historyRange={agentHistoryRange}
           isLoading={loadingState.agents}
+          error={agentError}
           onRefresh={() => loadAgents(selectedAgentId)}
           onSelectAgent={selectAgent}
+          onExportFleetSummary={exportAgentFleetSummary}
         />
       </PageSection>
     </section>

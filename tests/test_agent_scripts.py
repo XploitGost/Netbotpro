@@ -74,6 +74,39 @@ class AgentScriptTests(unittest.TestCase):
         self.assertIn("invalid stale PID file removed", completed.stdout)
         self.assertFalse(pid_exists_after_run)
 
+    def test_demo_and_cleanup_scripts_do_not_print_tokens(self):
+        for name in [
+            "seed-agent-demo.ps1",
+            "start-agent-demo-fleet.ps1",
+            "status-agent-demo-fleet.ps1",
+            "stop-agent-demo-fleet.ps1",
+            "cleanup-agent-history.ps1",
+        ]:
+            script = self._read_script(name)
+            self.assertNotIn('Write-Host "Agent token: $AgentToken"', script)
+            self.assertNotIn('Write-Host "Token:', script)
+            self.assertIn(
+                "tokens", script.lower(), f"{name} should state tokens are hidden"
+            )
+
+    def test_demo_fleet_scripts_use_shared_runtime_and_separate_logs(self):
+        start_script = self._read_script("start-agent-demo-fleet.ps1")
+        status_script = self._read_script("status-agent-demo-fleet.ps1")
+        stop_script = self._read_script("stop-agent-demo-fleet.ps1")
+
+        for script in [start_script, status_script, stop_script]:
+            self.assertIn('"agent-demo-fleet"', script)
+            self.assertIn('"logs"', script)
+        self.assertIn("NETBOT_AGENT_DISPLAY_NAME", start_script)
+        self.assertIn("Remove-Item -Force $PidFile", stop_script)
+
+    def test_cleanup_agent_history_supports_dry_run(self):
+        script = self._read_script("cleanup-agent-history.ps1")
+
+        self.assertIn("[switch]$DryRun", script)
+        self.assertIn("cleanup_agent_history", script)
+        self.assertIn("RetentionDays", script)
+
 
 if __name__ == "__main__":
     unittest.main()

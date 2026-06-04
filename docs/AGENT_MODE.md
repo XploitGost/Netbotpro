@@ -103,6 +103,7 @@ Agent environment variables:
 | `NETBOT_AGENT_TOKEN` | yes | Shared secret used in `X-NetBot-Agent-Token`. |
 | `NETBOT_AGENT_ID` | no | Pre-provisioned UUID. If omitted, a stable local UUID is created. |
 | `NETBOT_AGENT_MODE` | no | Enables explicit agent-mode runtime intent when set to `1`, `true`, `yes`, or `on`. |
+| `NETBOT_AGENT_DISPLAY_NAME` | no | Friendly display name, mainly useful for local demo fleets. |
 | `NETBOT_AGENT_HEARTBEAT_INTERVAL` | no | Heartbeat seconds, clamped by config loader. |
 | `NETBOT_AGENT_TELEMETRY_INTERVAL` | no | Telemetry seconds, clamped by config loader. |
 
@@ -113,6 +114,8 @@ Central backend environment:
 | `NETBOT_AGENT_TOKEN` | recommended | Rejects agent registration and telemetry unless the submitted token matches. |
 | `NETBOT_LOCAL_TOKEN` | recommended | Protects dashboard reads including `/api/agents`. |
 | `NETBOT_REMOTE_ACCESS` | remote only | Enables non-loopback dashboard clients when explicitly needed. |
+| `NETBOT_AGENT_OFFLINE_AFTER_SECONDS` | no | Marks agents offline when `last_seen` is older than this threshold. Default: `90`. |
+| `NETBOT_AGENT_HISTORY_RETENTION_DAYS` | no | Default retention window for history cleanup. Default: `30`. |
 
 ## Run On Windows
 
@@ -212,7 +215,9 @@ The central backend stores:
 - capture status history inside the redacted telemetry envelope;
 - risk score history.
 
-History endpoints support `range=24h` and `range=7d`:
+History endpoints support `range=1h`, `range=24h`, `range=7d`, and
+`range=30d`. Sparse data returns an empty or partial result rather than an
+error.
 
 ```text
 GET /api/agents/{agent_id}/telemetry?range=24h
@@ -228,6 +233,62 @@ GET /api/agents/overview
 GET /api/agents/alerts/summary
 GET /api/agents/risk/summary
 ```
+
+## Demo Data
+
+Use the seed script when you need to show the Fleet Dashboard without real
+servers:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\seed-agent-demo.ps1 -Reset -Count 4
+```
+
+The script writes realistic, redacted records to:
+
+```text
+.runtime/logs/agents.db
+```
+
+The seeded fleet includes:
+
+- a healthy low-risk web server;
+- a database server under CPU/RAM pressure;
+- an API server with critical alerts;
+- an offline file server.
+
+The script does not print raw tokens, credentials, cookies, authorization
+headers, raw payloads, raw packets, or PCAP paths. Demo records include a `demo`
+capability so the UI can show a `Demo data` indicator.
+
+## Local Multi-Agent Simulation
+
+For operational QA against a running central backend, start several local agent
+runners:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-agent-demo-fleet.ps1 `
+  -Count 3 `
+  -CentralApi "http://127.0.0.1:8765/api" `
+  -Interval 15 `
+  -AgentToken "use-a-long-random-token"
+```
+
+Check or stop the local fleet:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\status-agent-demo-fleet.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\stop-agent-demo-fleet.ps1
+```
+
+The fleet scripts create per-agent PID files and logs under:
+
+```text
+.runtime/agent-demo-fleet/
+.runtime/agent-demo-fleet/logs/
+```
+
+Status output shows running/stopped state, PID, log path, and last log write
+time. It never prints the raw agent token.
 
 ## Offline Detection
 
@@ -266,7 +327,8 @@ record for fast fleet sorting.
 
 The Agents page is a read-only multi-server dashboard:
 
-- total, online, offline, high-risk, total alert, and critical alert counts;
+- total, online, offline, high-risk, total alert, critical alert, average CPU,
+  average RAM, and average disk counts;
 - top risky servers;
 - status, hostname, OS, last seen, CPU, RAM, disk, capture mode, capture state,
   alerts today, and risk score;
@@ -276,6 +338,80 @@ The Agents page is a read-only multi-server dashboard:
 - detail view with health, network, capture status, recent alerts, flow summary,
   risk, health history, alert trend, risk trend, last heartbeat, and last
   telemetry.
+- empty, loading, and error states for operational demos;
+- a demo data indicator when seeded records are present;
+- a fleet summary export button.
+
+The UI must not render agent tokens, raw packet data, raw payloads, credentials,
+cookies, authorization headers, or PCAP forwarding controls.
+
+## Fleet Summary Report
+
+Operators can generate a redacted fleet summary:
+
+```text
+GET /api/agents/reports/fleet-summary
+GET /api/agents/reports/fleet-summary.csv
+```
+
+The JSON report includes:
+
+- `generated_at`;
+- total, online, offline, high-risk, and critical alert counts;
+- top risky agents;
+- an agent table summary;
+- risk distribution;
+- alert distribution;
+- health summary;
+- recommended actions.
+
+Report generation records an audit event:
+
+```text
+event_type = agent_fleet_report_generated
+```
+
+Report output is redacted and must not include tokens, credentials, raw payloads,
+raw packets, or PCAP data.
+
+## History Retention
+
+Cleanup is intentionally limited to history tables. It does not delete agent
+identity rows from the `agents` table.
+
+Run a dry-run cleanup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\cleanup-agent-history.ps1 `
+  -DbPath ".runtime/logs/agents.db" `
+  -RetentionDays 30 `
+  -DryRun
+```
+
+Run cleanup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\cleanup-agent-history.ps1 `
+  -DbPath ".runtime/logs/agents.db" `
+  -RetentionDays 30
+```
+
+The internal function is:
+
+```text
+cleanup_agent_history(retention_days)
+```
+
+In code this is implemented as `AgentRegistry.cleanup_history(retention_days)`.
+The script reports per-table deletion counts and does not print tokens.
+
+## Operational QA
+
+Use `docs/AGENT_QA_CHECKLIST.md` before customer demos or release candidates.
+It covers backend startup, single-agent and multi-agent runs, register,
+heartbeat, telemetry, offline detection, risk scoring, SQLite persistence,
+dashboard overview, detail view, filters, fleet summary report, retention
+cleanup, log sanitization, demo seed data, and frontend build.
 
 ## Logging
 
@@ -311,19 +447,20 @@ Use Agent Mode only on systems and networks where you have explicit permission.
 Expose the central backend through trusted private networking, VPN, SSH tunnel,
 or a TLS reverse proxy. Keep `NETBOT_AGENT_TOKEN` long, random, and out of logs.
 
-Phase one is intentionally telemetry-only. Remote commands, file collection,
-and raw capture forwarding are separate future work and must keep the same
-authorization, audit, and redaction boundaries.
+Agent Mode is currently read-only monitoring. This phase does not add
+command/control, remote command execution, shell access, file collection, raw
+packet forwarding, raw payload forwarding, PCAP forwarding, credential
+collection, or browser/session capture.
 
-This history phase keeps the same limitation: no command/control, no remote
-command execution, no file collection, no raw packet forwarding, no raw payload
-forwarding, and no PCAP forwarding.
+Any future command queue belongs in a separate phase with explicit design,
+authorization, audit, and operator confirmation. It is documented only as future
+work, not implemented in executable code in this phase.
 
 ## Next Phase Checklist
 
 Before Agent Mode grows beyond summary telemetry, add:
 
-- SQLite-backed registry storage with migrations and retention.
+- SQLite migration versioning beyond the current auto-init schema.
 - Per-agent token rotation or per-agent token hashes instead of one shared
   fleet token.
 - Explicit enrollment and revocation workflow.

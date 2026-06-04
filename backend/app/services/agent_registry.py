@@ -75,8 +75,12 @@ def _offline_after_seconds() -> int:
 def _range_start(range_name: str) -> str:
     text = str(range_name or "24h").strip().lower()
     now = datetime.now(timezone.utc)
+    if text == "1h":
+        return (now - timedelta(hours=1)).isoformat()
     if text == "7d":
         return (now - timedelta(days=7)).isoformat()
+    if text == "30d":
+        return (now - timedelta(days=30)).isoformat()
     return (now - timedelta(hours=24)).isoformat()
 
 
@@ -712,6 +716,109 @@ class AgentRegistry:
             table, agent_id, payload_column, range_name, limit
         )
 
+    def cleanup_history(
+        self,
+        retention_days: int | str | None = None,
+        *,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            days = int(
+                retention_days
+                if retention_days is not None
+                else os.environ.get("NETBOT_AGENT_HISTORY_RETENTION_DAYS", "30")
+            )
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(3650, days))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        tables = [
+            "agent_heartbeats",
+            "agent_telemetry",
+            "agent_health_snapshots",
+            "agent_alert_snapshots",
+            "agent_flow_snapshots",
+            "agent_risk_snapshots",
+        ]
+        if self._use_jsonl:
+            return {
+                "dry_run": dry_run,
+                "retention_days": days,
+                "cutoff": cutoff,
+                "deleted": {table: 0 for table in tables},
+                "storage": "jsonl",
+            }
+        deleted: dict[str, int] = {}
+        with self._lock:
+            with self._connection() as conn:
+                for table in tables:
+                    count = conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE received_at < ?",
+                        (cutoff,),
+                    ).fetchone()[0]
+                    deleted[table] = int(count or 0)
+                    if not dry_run and count:
+                        conn.execute(
+                            f"DELETE FROM {table} WHERE received_at < ?",
+                            (cutoff,),
+                        )
+        return {
+            "dry_run": dry_run,
+            "retention_days": days,
+            "cutoff": cutoff,
+            "deleted": deleted,
+            "storage": "sqlite",
+        }
+
+    def delete_demo_agents(self) -> int:
+        demo_ids = [
+            agent_id
+            for agent_id, agent in self._agents.items()
+            if agent_id.startswith("demo-agent-")
+            or "demo" in {str(item).lower() for item in agent.get("capabilities", [])}
+        ]
+        if not demo_ids:
+            return 0
+        with self._lock:
+            for agent_id in demo_ids:
+                self._agents.pop(agent_id, None)
+                self._telemetry.pop(agent_id, None)
+            if not self._use_jsonl:
+                placeholders = ",".join("?" for _ in demo_ids)
+                tables = [
+                    "agent_heartbeats",
+                    "agent_telemetry",
+                    "agent_health_snapshots",
+                    "agent_alert_snapshots",
+                    "agent_flow_snapshots",
+                    "agent_risk_snapshots",
+                    "agents",
+                ]
+                with self._connection() as conn:
+                    for table in tables:
+                        conn.execute(
+                            f"DELETE FROM {table} WHERE agent_id IN ({placeholders})",
+                            demo_ids,
+                        )
+        return len(demo_ids)
+
+    def set_agent_last_seen(
+        self,
+        agent_id: str,
+        last_seen: str,
+        *,
+        status: str = "online",
+    ) -> None:
+        with self._lock:
+            if agent_id not in self._agents:
+                raise KeyError(agent_id)
+            record = dict(self._agents[agent_id])
+            record["last_seen"] = last_seen
+            record["status"] = status
+            self._agents[agent_id] = record
+            if not self._use_jsonl:
+                self._upsert_agent(record)
+
     def _history_payloads(
         self,
         table: str,
@@ -751,11 +858,24 @@ class AgentRegistry:
         ]
         total_alerts = 0
         critical_alerts = 0
+        cpu_values: list[float] = []
+        memory_values: list[float] = []
+        disk_values: list[float] = []
         for agent in agents:
             telemetry = agent.get("last_telemetry") or {}
             alerts = telemetry.get("alerts_summary") or {}
+            health = telemetry.get("health") or {}
             total_alerts += _count(alerts, "total_alerts", "total", "count")
             critical_alerts += _count(alerts, "critical_count", "critical")
+            for key, bucket in (
+                ("cpu_percent", cpu_values),
+                ("memory_percent", memory_values),
+                ("disk_percent", disk_values),
+            ):
+                try:
+                    bucket.append(float(health.get(key)))
+                except (TypeError, ValueError):
+                    pass
         top_risky = sorted(
             agents,
             key=lambda agent: int((agent.get("risk") or {}).get("score") or 0),
@@ -768,6 +888,21 @@ class AgentRegistry:
             "high_risk_agents": len(high_risk),
             "total_alerts": total_alerts,
             "critical_alerts": critical_alerts,
+            "average_cpu_percent": (
+                round(sum(cpu_values) / len(cpu_values), 1) if cpu_values else 0
+            ),
+            "average_memory_percent": (
+                round(sum(memory_values) / len(memory_values), 1)
+                if memory_values
+                else 0
+            ),
+            "average_disk_percent": (
+                round(sum(disk_values) / len(disk_values), 1) if disk_values else 0
+            ),
+            "demo_data": any(
+                "demo" in {str(item).lower() for item in agent.get("capabilities", [])}
+                for agent in agents
+            ),
             "top_risky_agents": top_risky,
         }
 
@@ -799,3 +934,85 @@ class AgentRegistry:
             "buckets": buckets,
             "top_risky_agents": self.overview()["top_risky_agents"],
         }
+
+    def fleet_summary_report(self) -> dict[str, Any]:
+        agents = self.list_agents()
+        overview = self.overview()
+        alerts = self.alerts_summary()
+        risk = self.risk_summary()
+        health_summary = {
+            "average_cpu_percent": overview["average_cpu_percent"],
+            "average_memory_percent": overview["average_memory_percent"],
+            "average_disk_percent": overview["average_disk_percent"],
+        }
+        rows = []
+        for agent in agents:
+            telemetry = agent.get("last_telemetry") or {}
+            alert_summary = telemetry.get("alerts_summary") or {}
+            health = telemetry.get("health") or {}
+            capture = telemetry.get("capture") or {}
+            rows.append(
+                {
+                    "agent_id": agent.get("agent_id"),
+                    "hostname": agent.get("hostname"),
+                    "display_name": agent.get("display_name"),
+                    "status": agent.get("status"),
+                    "os": agent.get("os") or agent.get("platform"),
+                    "last_seen": agent.get("last_seen"),
+                    "cpu_percent": health.get("cpu_percent"),
+                    "memory_percent": health.get("memory_percent"),
+                    "disk_percent": health.get("disk_percent"),
+                    "capture_running": bool(
+                        capture.get("capture_running") or capture.get("running")
+                    ),
+                    "capture_mode": capture.get("capture_mode")
+                    or capture.get("mode")
+                    or "metadata",
+                    "total_alerts": _count(alert_summary, "total_alerts", "total"),
+                    "critical_alerts": _count(
+                        alert_summary, "critical_count", "critical"
+                    ),
+                    "risk_score": (agent.get("risk") or {}).get("score", 0),
+                    "risk_severity": (agent.get("risk") or {}).get("severity", "low"),
+                }
+            )
+        recommendations = []
+        if overview["offline_agents"]:
+            recommendations.append("Review offline agents and confirm service health.")
+        if overview["critical_alerts"]:
+            recommendations.append("Prioritize agents with critical alert activity.")
+        if overview["high_risk_agents"]:
+            recommendations.append(
+                "Inspect high-risk servers and recent telemetry trends."
+            )
+        if not recommendations:
+            recommendations.append(
+                "Fleet is currently stable; continue routine monitoring."
+            )
+        return _redact(
+            {
+                "generated_at": _now(),
+                "total_agents": overview["total_agents"],
+                "online_agents": overview["online_agents"],
+                "offline_agents": overview["offline_agents"],
+                "high_risk_agents": overview["high_risk_agents"],
+                "critical_alerts": overview["critical_alerts"],
+                "top_risky_agents": overview["top_risky_agents"],
+                "agents": rows,
+                "risk_distribution": risk["buckets"],
+                "alert_distribution": alerts,
+                "health_summary": health_summary,
+                "recommended_actions": recommendations,
+                "demo_data": overview["demo_data"],
+            }
+        )
+
+
+def cleanup_agent_history(
+    retention_days: int | str | None = None,
+    *,
+    storage_path: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    registry = AgentRegistry(storage_path)
+    return registry.cleanup_history(retention_days, dry_run=dry_run)

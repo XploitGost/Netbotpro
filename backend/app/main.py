@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import csv
+import io
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -19,7 +21,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.schemas import (
@@ -308,6 +310,67 @@ def api_agents_risk_summary(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return agent_registry.risk_summary()
+
+
+@app.get("/api/agents/reports/fleet-summary")
+def api_agents_fleet_summary_report(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    report = agent_registry.fleet_summary_report()
+    audit_event(
+        "agent_fleet_report_generated",
+        actor=_actor_from_request(request),
+        detail={
+            "format": "json",
+            "total_agents": report.get("total_agents", 0),
+        },
+    )
+    return report
+
+
+@app.get("/api/agents/reports/fleet-summary.csv")
+def api_agents_fleet_summary_report_csv(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> Response:
+    report = agent_registry.fleet_summary_report()
+    output = io.StringIO()
+    fieldnames = [
+        "agent_id",
+        "display_name",
+        "hostname",
+        "status",
+        "os",
+        "last_seen",
+        "cpu_percent",
+        "memory_percent",
+        "disk_percent",
+        "capture_running",
+        "capture_mode",
+        "total_alerts",
+        "critical_alerts",
+        "risk_score",
+        "risk_severity",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(report.get("agents") or [])
+    audit_event(
+        "agent_fleet_report_generated",
+        actor=_actor_from_request(request),
+        detail={
+            "format": "csv",
+            "total_agents": report.get("total_agents", 0),
+        },
+    )
+    return Response(
+        output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=agent-fleet-summary.csv"},
+    )
 
 
 @app.get("/api/agents/{agent_id}")

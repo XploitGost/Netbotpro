@@ -40,7 +40,7 @@ def run_agent() -> int:
     identity_path = default_identity_path(Path.cwd())
     agent_id = load_or_create_agent_id(identity_path, config.agent_id)
     client = AgentClient(config.central_api, agent_id, config.agent_token)
-    registration = build_registration_payload(agent_id)
+    registration = build_registration_payload(agent_id, config.display_name)
     backoff = 2
     next_heartbeat = 0.0
     next_telemetry = 0.0

@@ -202,6 +202,7 @@ export function useDashboardController() {
   const [agentAlertsHistory, setAgentAlertsHistory] = useState([]);
   const [agentRiskHistory, setAgentRiskHistory] = useState([]);
   const [agentHistoryRange, setAgentHistoryRange] = useState("24h");
+  const [agentError, setAgentError] = useState("");
   const [connectionState, setConnectionState] = useState("connecting");
   const [statusMessage, setStatusMessage] = useState("Connecting to local backend...");
   const [observability, setObservability] = useState({});
@@ -476,6 +477,7 @@ export function useDashboardController() {
 
   async function loadAgents(selectAgentId = selectedAgentId) {
     setLoading("agents", true);
+    setAgentError("");
     try {
       const [data, overview, alertsSummary, riskSummary] = await Promise.all([
         api.getAgents(),
@@ -507,6 +509,8 @@ export function useDashboardController() {
         setAgentAlertsHistory([]);
         setAgentRiskHistory([]);
       }
+    } catch (err) {
+      setAgentError(normalizeErrorMessage(err, "Unable to load agent fleet data"));
     } finally {
       setLoading("agents", false);
     }
@@ -516,6 +520,7 @@ export function useDashboardController() {
     setSelectedAgentId(agentId);
     setAgentHistoryRange(range);
     setLoading("agents", true);
+    setAgentError("");
     try {
       const [telemetry, health, alerts, risk] = await Promise.all([
         api.getAgentTelemetry(agentId, range),
@@ -527,6 +532,33 @@ export function useDashboardController() {
       setAgentHealthHistory(health.items || []);
       setAgentAlertsHistory(alerts.items || []);
       setAgentRiskHistory(risk.items || []);
+    } catch (err) {
+      setAgentError(normalizeErrorMessage(err, "Unable to load agent history"));
+    } finally {
+      setLoading("agents", false);
+    }
+  }
+
+  async function exportAgentFleetSummary() {
+    setLoading("agents", true);
+    setAgentError("");
+    try {
+      const report = await api.getAgentFleetSummary();
+      const blob = new Blob([JSON.stringify(report, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "agent-fleet-summary.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setStatusMessage("Agent fleet summary exported");
+      return report;
+    } catch (err) {
+      setAgentError(normalizeErrorMessage(err, "Unable to export fleet summary"));
     } finally {
       setLoading("agents", false);
     }
@@ -1196,6 +1228,7 @@ export function useDashboardController() {
     agentAlertsHistory,
     agentRiskHistory,
     agentHistoryRange,
+    agentError,
     connectionState,
     connectionLabel,
     statusMessage,
@@ -1231,6 +1264,7 @@ export function useDashboardController() {
     loadAlertDetail,
     loadAgents,
     selectAgent,
+    exportAgentFleetSummary,
     openPacketDetailById,
     openAlertDetailById,
     applyPacketFilters,
