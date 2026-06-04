@@ -1,25 +1,25 @@
 :root {
   color-scheme: dark;
-  --bg: #07111e;
-  --bg-soft: #0e2034;
-  --panel: rgba(13, 30, 50, 0.74);
-  --panel-strong: rgba(12, 26, 43, 0.92);
-  --panel-muted: rgba(255, 255, 255, 0.045);
-  --line: rgba(164, 204, 245, 0.17);
-  --line-strong: rgba(185, 219, 255, 0.28);
-  --text: #eff6ff;
-  --muted: #a6bad1;
-  --muted-strong: #c5d5e6;
-  --accent: #66ead0;
-  --accent-2: #8bc5ff;
-  --accent-ink: #03213a;
-  --danger: #ff8a8a;
-  --warn: #ffd77d;
-  --info: #9eb5d2;
-  --shadow-soft: 0 24px 80px rgba(0, 0, 0, 0.28);
-  --shadow-lift: 0 28px 90px rgba(3, 13, 26, 0.42);
-  --radius-lg: 28px;
-  --radius-md: 20px;
+  --bg: #08111d;
+  --bg-soft: #101b2a;
+  --panel: rgba(13, 25, 40, 0.86);
+  --panel-strong: rgba(12, 22, 36, 0.96);
+  --panel-muted: rgba(255, 255, 255, 0.04);
+  --line: rgba(174, 201, 229, 0.14);
+  --line-strong: rgba(190, 220, 247, 0.26);
+  --text: #f2f7fb;
+  --muted: #9fb3c8;
+  --muted-strong: #c6d6e7;
+  --accent: #54dcc7;
+  --accent-2: #82bdf4;
+  --accent-ink: #031d2e;
+  --danger: #ff8f8f;
+  --warn: #ffd37a;
+  --info: #9bb4cf;
+  --shadow-soft: 0 16px 48px rgba(0, 0, 0, 0.24);
+  --shadow-lift: 0 20px 58px rgba(3, 13, 26, 0.34);
+  --radius-lg: 16px;
+  --radius-md: 12px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -31,10 +31,8 @@ body {
   margin: 0;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   background:
-    radial-gradient(circle at 82% -8%, rgba(139, 197, 255, 0.24), transparent 32%),
-    radial-gradient(circle at 12% 18%, rgba(102, 234, 208, 0.16), transparent 28%),
-    radial-gradient(circle at 78% 74%, rgba(255, 215, 125, 0.08), transparent 24%),
-    linear-gradient(150deg, #04101c 0%, var(--bg) 48%, var(--bg-soft) 100%);
+    linear-gradient(180deg, rgba(130, 189, 244, 0.08), transparent 34%),
+    linear-gradient(135deg, #06101b 0%, var(--bg) 52%, var(--bg-soft) 100%);
   color: var(--text);
   min-height: 100vh;
   text-rendering: optimizeLegibility;
@@ -47,10 +45,10 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent 78%);
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.58), transparent 72%);
 }
 
 button,
@@ -66,7 +64,7 @@ select {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.055);
   color: var(--text);
-  border-radius: 16px;
+  border-radius: 10px;
   padding: 12px 14px;
   outline: none;
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
@@ -82,7 +80,7 @@ select:focus {
 .shell {
   width: min(1280px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 26px 0 56px;
+  padding: 22px 0 54px;
   animation: shell-enter 520ms var(--ease-out) both;
 }
 
@@ -91,13 +89,14 @@ select:focus {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 14px 16px;
-  margin-bottom: 18px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
   position: sticky;
   top: 12px;
   z-index: 20;
-  background: rgba(8, 20, 35, 0.72);
-  box-shadow: 0 18px 70px rgba(0, 0, 0, 0.24);
+  background: rgba(8, 18, 31, 0.82);
+  border-color: rgba(190, 220, 247, 0.18);
+  box-shadow: 0 14px 46px rgba(0, 0, 0, 0.22);
 }
 
 .app-nav-copy {
@@ -113,8 +112,8 @@ select:focus {
 }
 
 .nav-button {
-  min-width: 104px;
-  padding: 11px 15px;
+  min-width: 96px;
+  padding: 10px 14px;
 }
 
 .card,
@@ -124,7 +123,7 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(22px) saturate(1.08);
+  backdrop-filter: blur(18px) saturate(1.04);
 }
 
 .page-card,
@@ -142,13 +141,13 @@ select:focus {
   border-radius: inherit;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 24%),
-    radial-gradient(circle at top right, rgba(139, 197, 255, 0.09), transparent 38%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 24%),
+    linear-gradient(135deg, rgba(130, 189, 244, 0.055), transparent 42%);
 }
 
 .page-card:hover,
 .stat-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-1px);
   border-color: var(--line-strong);
   box-shadow: var(--shadow-lift);
 }
@@ -157,21 +156,14 @@ select:focus {
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
   align-items: stretch;
-  gap: 18px;
-  padding: 20px;
+  gap: 16px;
+  padding: 18px;
   overflow: hidden;
   position: relative;
 }
 
 .hero::after {
-  content: "";
-  position: absolute;
-  width: 360px;
-  height: 360px;
-  right: -120px;
-  top: -180px;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(102, 234, 208, 0.15), transparent 65%);
+  content: none;
 }
 
 .hero-copy {
@@ -192,7 +184,7 @@ select:focus {
   gap: 14px;
   margin-top: 6px;
   padding: 16px;
-  border-radius: 24px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -224,7 +216,7 @@ select:focus {
   gap: 3px;
   min-height: 54px;
   padding: 10px 12px;
-  border-radius: 16px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted-strong);
@@ -260,7 +252,7 @@ select:focus {
   margin: 0;
   font-size: clamp(1.35rem, 1.1rem + 1.1vw, 2.15rem);
   line-height: 1.1;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .hero-side {
@@ -270,7 +262,7 @@ select:focus {
   justify-content: end;
   gap: 12px;
   padding: 18px;
-  border-radius: 24px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.07);
   z-index: 1;
@@ -281,7 +273,7 @@ select:focus {
   gap: 6px;
   grid-column: 1 / -1;
   padding: 12px 14px;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -365,14 +357,14 @@ p {
 button {
   border: 0;
   border-radius: 999px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   cursor: pointer;
   transition: transform 160ms var(--ease-out), opacity 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease;
   font-weight: 700;
 }
 
 button:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 button:focus-visible {
@@ -405,32 +397,32 @@ button:focus-visible {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 20px;
+  gap: 14px;
+  margin-top: 18px;
 }
 
 .stat-card {
-  padding: 24px;
+  padding: 20px;
 }
 
 .stat-card h2 {
   font-size: clamp(2rem, 1.55rem + 1.3vw, 3rem);
   margin-bottom: 8px;
-  letter-spacing: -0.055em;
+  letter-spacing: 0;
 }
 
 .workspace-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 .page-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  margin-top: 24px;
+  margin-top: 20px;
   align-items: start;
 }
 
@@ -443,7 +435,7 @@ button:focus-visible {
 }
 
 .page-card {
-  padding: 22px;
+  padding: 20px;
 }
 
 .page-card-wide {
@@ -457,7 +449,7 @@ button:focus-visible {
 .page-card-head {
   display: grid;
   gap: 7px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .page-card-head-with-actions {
@@ -486,7 +478,7 @@ button:focus-visible {
   align-items: flex-start;
   gap: 14px;
   text-align: left;
-  background: linear-gradient(180deg, rgba(124, 183, 255, 0.08), rgba(255, 255, 255, 0.01));
+  background: linear-gradient(180deg, rgba(124, 183, 255, 0.065), rgba(255, 255, 255, 0.01));
   padding: 18px 20px;
 }
 
@@ -606,7 +598,7 @@ button:focus-visible {
 }
 
 .mini-panel {
-  padding: 18px 20px;
+  padding: 16px 18px;
   position: relative;
 }
 
@@ -639,10 +631,10 @@ button:focus-visible {
 .table-wrap {
   overflow: auto;
   margin-top: 14px;
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.032);
-  padding: 0 14px;
+  padding: 0 12px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
@@ -672,14 +664,14 @@ table {
 th,
 td {
   text-align: left;
-  padding: 13px 0;
+  padding: 12px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   vertical-align: top;
 }
 
 th {
   color: var(--muted-strong);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -695,7 +687,7 @@ th {
 }
 
 .click-row:hover {
-  background: rgba(255, 255, 255, 0.045);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .row-selected {
@@ -765,11 +757,10 @@ th {
   max-width: 620px;
   margin: 10px auto;
   padding: 26px 18px;
-  border-radius: 24px;
+  border-radius: var(--radius-md);
   border: 1px dashed rgba(139, 197, 255, 0.22);
   background:
-    radial-gradient(circle at top, rgba(139, 197, 255, 0.1), transparent 48%),
-    rgba(255, 255, 255, 0.028);
+    linear-gradient(180deg, rgba(139, 197, 255, 0.07), rgba(255, 255, 255, 0.028));
 }
 
 .empty-state-alerts {
@@ -830,7 +821,7 @@ th {
 
 .detail-group {
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   background: var(--panel-muted);
 }
@@ -888,7 +879,7 @@ th {
 }
 
 .inspect-summary-card {
-  border-radius: 22px;
+  border-radius: var(--radius-md);
   padding: 16px 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
@@ -898,7 +889,7 @@ th {
 }
 
 .inspect-summary-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.055);
 }
@@ -1444,7 +1435,7 @@ th {
   align-items: flex-start;
   gap: 16px;
   padding: 16px 18px;
-  border-radius: 22px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
 }
@@ -1483,7 +1474,7 @@ th {
 .focus-stat,
 .focus-alert {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   background: rgba(255, 255, 255, 0.04);
 }
