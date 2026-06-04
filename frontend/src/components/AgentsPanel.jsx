@@ -13,6 +13,12 @@ function formatPercent(value) {
   return `${Math.round(number)}%`;
 }
 
+function percentValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, Math.round(number)));
+}
+
 function latestTelemetry(agent) {
   return agent?.last_telemetry && typeof agent.last_telemetry === "object"
     ? agent.last_telemetry
@@ -55,14 +61,57 @@ function captureMode(agent) {
   return item.mode || item.capture_mode || "metadata";
 }
 
+function MetricCard({ label, value, hint, tone = "neutral" }) {
+  return (
+    <div className={`agent-metric-card agent-metric-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{hint}</small>
+    </div>
+  );
+}
+
+function RiskBadge({ value }) {
+  const item = value || { score: 0, severity: "low" };
+  return (
+    <span className={`agent-risk agent-risk-${item.severity || "low"}`}>
+      <span className="agent-risk-dot" />
+      {item.score ?? 0} {item.severity || "low"}
+    </span>
+  );
+}
+
+function HealthBars({ agent }) {
+  const metrics = [
+    ["CPU", healthValue(agent, "cpu_percent")],
+    ["RAM", healthValue(agent, "memory_percent")],
+    ["Disk", healthValue(agent, "disk_percent")],
+  ];
+  return (
+    <div className="agent-health-bars">
+      {metrics.map(([label, value]) => (
+        <div key={label} className="agent-health-bar">
+          <span>{label}</span>
+          <div className="agent-health-track">
+            <i style={{ width: `${percentValue(value)}%` }} />
+          </div>
+          <em>{formatPercent(value)}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TrendList({ items = [], value }) {
   const sample = items.slice(-12);
   return (
     <div className="agent-trend-row">
       {sample.map((item, index) => (
-        <span key={`${item.received_at || index}-${index}`}>
-          {value(item)}
-        </span>
+        <span
+          key={`${item.received_at || index}-${index}`}
+          style={{ height: `${Math.max(12, Math.min(72, Number(value(item)) || 0))}px` }}
+          title={`${value(item)}`}
+        />
       ))}
       {!sample.length ? <p className="muted">No history yet.</p> : null}
     </div>
@@ -117,45 +166,63 @@ export function AgentsPanel({
   return (
     <div className="agents-panel">
       <div className="agent-overview-grid">
-        <div className="ops-summary-card">
-          <span>Total Agents</span>
-          <strong>{overview?.total_agents ?? agents.length}</strong>
-          <small>{overview?.online_agents ?? 0} online / {overview?.offline_agents ?? 0} offline</small>
-        </div>
-        <div className="ops-summary-card">
-          <span>High Risk</span>
-          <strong>{overview?.high_risk_agents ?? 0}</strong>
-          <small>High or critical servers</small>
-        </div>
-        <div className="ops-summary-card">
-          <span>Total Alerts</span>
-          <strong>{alertsSummary?.total_alerts ?? overview?.total_alerts ?? 0}</strong>
-          <small>{alertsSummary?.critical_count ?? overview?.critical_alerts ?? 0} critical</small>
-        </div>
-        <div className="ops-summary-card">
-          <span>Risk Mix</span>
-          <strong>{riskSummary?.buckets?.critical ?? 0} critical</strong>
-          <small>{riskSummary?.buckets?.high ?? 0} high / {riskSummary?.buckets?.medium ?? 0} medium</small>
-        </div>
+        <MetricCard
+          label="Fleet"
+          value={overview?.total_agents ?? agents.length}
+          hint={`${overview?.online_agents ?? 0} online / ${overview?.offline_agents ?? 0} offline`}
+          tone="calm"
+        />
+        <MetricCard
+          label="High Risk"
+          value={overview?.high_risk_agents ?? 0}
+          hint="High or critical servers"
+          tone="warning"
+        />
+        <MetricCard
+          label="Alerts"
+          value={alertsSummary?.total_alerts ?? overview?.total_alerts ?? 0}
+          hint={`${alertsSummary?.critical_count ?? overview?.critical_alerts ?? 0} critical`}
+          tone="active"
+        />
+        <MetricCard
+          label="Risk Mix"
+          value={`${riskSummary?.buckets?.critical ?? 0} critical`}
+          hint={`${riskSummary?.buckets?.high ?? 0} high / ${riskSummary?.buckets?.medium ?? 0} medium`}
+          tone="neutral"
+        />
       </div>
 
-      <div className="panel-toolbar">
+      <div className="agent-command-bar">
         <div>
           <p className="eyebrow">Agent Fleet</p>
           <strong>{filteredAgents.length} visible host{filteredAgents.length === 1 ? "" : "s"}</strong>
         </div>
         <div className="agent-filter-row">
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="all">All status</option>
-            <option value="online">Online</option>
-            <option value="offline">Offline</option>
-          </select>
-          <select value={focusFilter} onChange={(event) => setFocusFilter(event.target.value)}>
-            <option value="all">All agents</option>
-            <option value="high-risk">High risk</option>
-            <option value="critical-alerts">Critical alerts</option>
-            <option value="capture-running">Capture running</option>
-          </select>
+          {["all", "online", "offline"].map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={statusFilter === item ? "primary agent-chip" : "secondary agent-chip"}
+              onClick={() => setStatusFilter(item)}
+            >
+              {item === "all" ? "All" : item}
+            </button>
+          ))}
+          {[
+            ["all", "Any"],
+            ["high-risk", "High risk"],
+            ["critical-alerts", "Critical alerts"],
+            ["capture-running", "Capturing"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={focusFilter === value ? "primary agent-chip" : "secondary agent-chip"}
+              onClick={() => setFocusFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
           <select value={osFilter} onChange={(event) => setOsFilter(event.target.value)}>
             <option value="all">All OS</option>
             {osOptions.map((os) => (
@@ -203,20 +270,17 @@ export function AgentsPanel({
                 </td>
                 <td>{agent.os || agent.platform || "-"}</td>
                 <td>
-                  CPU {formatPercent(healthValue(agent, "cpu_percent"))}
-                  <div className="table-subline">
-                    RAM {formatPercent(healthValue(agent, "memory_percent"))} / Disk {formatPercent(healthValue(agent, "disk_percent"))}
-                  </div>
+                  <HealthBars agent={agent} />
                 </td>
                 <td>
-                  {captureMode(agent)}
-                  <div className="table-subline">{captureRunning(agent) ? "running" : "stopped"}</div>
+                  <span className={captureRunning(agent) ? "agent-capture-on" : "agent-capture-off"}>
+                    {captureRunning(agent) ? "running" : "stopped"}
+                  </span>
+                  <div className="table-subline">{captureMode(agent)}</div>
                 </td>
                 <td>{alertTotal(agent)} / {criticalTotal(agent)} critical</td>
                 <td>
-                  <span className={`agent-risk agent-risk-${risk(agent).severity}`}>
-                    {risk(agent).score ?? 0} {risk(agent).severity}
-                  </span>
+                  <RiskBadge value={risk(agent)} />
                 </td>
                 <td>{formatDate(agent.last_seen)}</td>
               </tr>
@@ -232,9 +296,19 @@ export function AgentsPanel({
 
       {selectedAgent ? (
         <div className="agents-detail-grid">
-          <div className="mini-panel">
-            <p className="eyebrow">Agent Details</p>
-            <h3>{selectedAgent.display_name || selectedAgent.hostname || selectedAgent.agent_id}</h3>
+          <div className="mini-panel agent-detail-hero">
+            <div className="agent-detail-title">
+              <div>
+                <p className="eyebrow">Agent Details</p>
+                <h3>{selectedAgent.display_name || selectedAgent.hostname || selectedAgent.agent_id}</h3>
+              </div>
+              <RiskBadge value={risk(selectedAgent)} />
+            </div>
+            <div className="agent-detail-metrics">
+              <MetricCard label="CPU" value={formatPercent(healthValue(selectedAgent, "cpu_percent"))} hint="Latest sample" />
+              <MetricCard label="RAM" value={formatPercent(healthValue(selectedAgent, "memory_percent"))} hint="Latest sample" />
+              <MetricCard label="Disk" value={formatPercent(healthValue(selectedAgent, "disk_percent"))} hint="Latest sample" />
+            </div>
             <dl className="detail-grid">
               <dt>Hostname</dt>
               <dd>{selectedAgent.hostname || "-"}</dd>
@@ -266,11 +340,11 @@ export function AgentsPanel({
               </div>
             </div>
             <p className="muted">Health</p>
-            <TrendList items={agentHealthHistory} value={(item) => `CPU ${formatPercent(item.cpu_percent)}`} />
+            <TrendList items={agentHealthHistory} value={(item) => percentValue(item.cpu_percent)} />
             <p className="muted">Alerts</p>
-            <TrendList items={agentAlertsHistory} value={(item) => `${item.total_alerts || 0}`} />
+            <TrendList items={agentAlertsHistory} value={(item) => Number(item.total_alerts || 0) * 8} />
             <p className="muted">Risk</p>
-            <TrendList items={agentRiskHistory} value={(item) => `${item.score ?? 0}`} />
+            <TrendList items={agentRiskHistory} value={(item) => Number(item.score ?? 0)} />
           </div>
           <div className="mini-panel">
             <p className="eyebrow">Recent Alerts</p>
