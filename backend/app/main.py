@@ -286,6 +286,30 @@ def api_agents(
     return agent_registry.list_agents()
 
 
+@app.get("/api/agents/overview")
+def api_agents_overview(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return agent_registry.overview()
+
+
+@app.get("/api/agents/alerts/summary")
+def api_agents_alerts_summary(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return agent_registry.alerts_summary()
+
+
+@app.get("/api/agents/risk/summary")
+def api_agents_risk_summary(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return agent_registry.risk_summary()
+
+
 @app.get("/api/agents/{agent_id}")
 def api_agent_detail(
     agent_id: str,
@@ -301,6 +325,7 @@ def api_agent_detail(
 @app.get("/api/agents/{agent_id}/telemetry")
 def api_agent_telemetry_history(
     agent_id: str,
+    range: str = "24h",
     limit: int = 20,
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
@@ -310,7 +335,62 @@ def api_agent_telemetry_history(
         raise HTTPException(status_code=404, detail="Agent not found")
     return {
         "agent": agent,
-        "items": agent_registry.get_telemetry(agent_id, limit=limit),
+        "items": agent_registry.get_telemetry(
+            agent_id,
+            limit=limit,
+            range_name=range,
+        ),
+    }
+
+
+@app.get("/api/agents/{agent_id}/health/history")
+def api_agent_health_history(
+    agent_id: str,
+    range: str = "24h",
+    limit: int = 200,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    agent = agent_registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "agent": agent,
+        "items": agent_registry.history(agent_id, "health", range, limit),
+    }
+
+
+@app.get("/api/agents/{agent_id}/alerts/history")
+def api_agent_alerts_history(
+    agent_id: str,
+    range: str = "24h",
+    limit: int = 200,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    agent = agent_registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "agent": agent,
+        "items": agent_registry.history(agent_id, "alerts", range, limit),
+    }
+
+
+@app.get("/api/agents/{agent_id}/risk/history")
+def api_agent_risk_history(
+    agent_id: str,
+    range: str = "24h",
+    limit: int = 200,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    agent = agent_registry.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "agent": agent,
+        "items": agent_registry.history(agent_id, "risk", range, limit),
     }
 
 

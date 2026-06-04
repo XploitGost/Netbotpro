@@ -193,8 +193,15 @@ export function useDashboardController() {
   const [exportInfo, setExportInfo] = useState(null);
   const [reports, setReports] = useState([]);
   const [agents, setAgents] = useState([]);
+  const [agentOverview, setAgentOverview] = useState(null);
+  const [agentAlertsSummary, setAgentAlertsSummary] = useState(null);
+  const [agentRiskSummary, setAgentRiskSummary] = useState(null);
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [agentTelemetry, setAgentTelemetry] = useState([]);
+  const [agentHealthHistory, setAgentHealthHistory] = useState([]);
+  const [agentAlertsHistory, setAgentAlertsHistory] = useState([]);
+  const [agentRiskHistory, setAgentRiskHistory] = useState([]);
+  const [agentHistoryRange, setAgentHistoryRange] = useState("24h");
   const [connectionState, setConnectionState] = useState("connecting");
   const [statusMessage, setStatusMessage] = useState("Connecting to local backend...");
   const [observability, setObservability] = useState({});
@@ -311,11 +318,22 @@ export function useDashboardController() {
           return;
         }
 
-        const [dashboardData, settingsData, interfacesData, agentsData] = await Promise.all([
+        const [
+          dashboardData,
+          settingsData,
+          interfacesData,
+          agentsData,
+          agentsOverviewData,
+          agentAlertsSummaryData,
+          agentRiskSummaryData,
+        ] = await Promise.all([
           api.getDashboard(),
           api.getSettings(),
           api.getInterfaces().catch(() => ({ recommended: "", items: [], preflight: null })),
           api.getAgents().catch(() => []),
+          api.getAgentsOverview().catch(() => null),
+          api.getAgentAlertsSummary().catch(() => null),
+          api.getAgentRiskSummary().catch(() => null),
         ]);
         if (!active) return;
         clearHistoryCaches();
@@ -340,6 +358,9 @@ export function useDashboardController() {
         setReports(reportsData || []);
         const agentItems = Array.isArray(agentsData) ? agentsData : [];
         setAgents(agentItems);
+        setAgentOverview(agentsOverviewData);
+        setAgentAlertsSummary(agentAlertsSummaryData);
+        setAgentRiskSummary(agentRiskSummaryData);
         setSelectedAgentId((current) => current || agentItems[0]?.agent_id || "");
         setStatusMessage("Dashboard synced");
       } catch (err) {
@@ -456,28 +477,56 @@ export function useDashboardController() {
   async function loadAgents(selectAgentId = selectedAgentId) {
     setLoading("agents", true);
     try {
-      const data = await api.getAgents();
+      const [data, overview, alertsSummary, riskSummary] = await Promise.all([
+        api.getAgents(),
+        api.getAgentsOverview().catch(() => null),
+        api.getAgentAlertsSummary().catch(() => null),
+        api.getAgentRiskSummary().catch(() => null),
+      ]);
       const items = Array.isArray(data) ? data : [];
       const nextSelected = selectAgentId || items[0]?.agent_id || "";
       setAgents(items);
+      setAgentOverview(overview);
+      setAgentAlertsSummary(alertsSummary);
+      setAgentRiskSummary(riskSummary);
       setSelectedAgentId(nextSelected);
       if (nextSelected) {
-        const telemetry = await api.getAgentTelemetry(nextSelected);
+        const [telemetry, health, alerts, risk] = await Promise.all([
+          api.getAgentTelemetry(nextSelected, agentHistoryRange),
+          api.getAgentHealthHistory(nextSelected, agentHistoryRange),
+          api.getAgentAlertsHistory(nextSelected, agentHistoryRange),
+          api.getAgentRiskHistory(nextSelected, agentHistoryRange),
+        ]);
         setAgentTelemetry(telemetry.items || []);
+        setAgentHealthHistory(health.items || []);
+        setAgentAlertsHistory(alerts.items || []);
+        setAgentRiskHistory(risk.items || []);
       } else {
         setAgentTelemetry([]);
+        setAgentHealthHistory([]);
+        setAgentAlertsHistory([]);
+        setAgentRiskHistory([]);
       }
     } finally {
       setLoading("agents", false);
     }
   }
 
-  async function selectAgent(agentId) {
+  async function selectAgent(agentId, range = agentHistoryRange) {
     setSelectedAgentId(agentId);
+    setAgentHistoryRange(range);
     setLoading("agents", true);
     try {
-      const telemetry = await api.getAgentTelemetry(agentId);
+      const [telemetry, health, alerts, risk] = await Promise.all([
+        api.getAgentTelemetry(agentId, range),
+        api.getAgentHealthHistory(agentId, range),
+        api.getAgentAlertsHistory(agentId, range),
+        api.getAgentRiskHistory(agentId, range),
+      ]);
       setAgentTelemetry(telemetry.items || []);
+      setAgentHealthHistory(health.items || []);
+      setAgentAlertsHistory(alerts.items || []);
+      setAgentRiskHistory(risk.items || []);
     } finally {
       setLoading("agents", false);
     }
@@ -1138,8 +1187,15 @@ export function useDashboardController() {
     exportInfo,
     reports,
     agents,
+    agentOverview,
+    agentAlertsSummary,
+    agentRiskSummary,
     selectedAgentId,
     agentTelemetry,
+    agentHealthHistory,
+    agentAlertsHistory,
+    agentRiskHistory,
+    agentHistoryRange,
     connectionState,
     connectionLabel,
     statusMessage,

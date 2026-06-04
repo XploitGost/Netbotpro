@@ -950,6 +950,19 @@ th {
   gap: 1rem;
 }
 
+.agent-overview-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.agent-filter-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
 .agent-status {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -967,6 +980,31 @@ th {
 .agent-status-offline {
   border-color: rgba(255, 184, 107, 0.45);
   color: var(--warn);
+}
+
+.agent-risk {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  text-transform: capitalize;
+}
+
+.agent-risk-low {
+  color: var(--good);
+}
+
+.agent-risk-medium {
+  color: var(--accent);
+}
+
+.agent-risk-high {
+  color: var(--warn);
+}
+
+.agent-risk-critical {
+  color: var(--danger);
 }
 
 .agents-detail-grid {
@@ -989,6 +1027,33 @@ th {
   gap: 0.8rem;
   justify-content: space-between;
   padding: 0.7rem 0.8rem;
+}
+
+.agent-trend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.45rem 0 0.8rem;
+}
+
+.agent-trend-row span {
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.agent-json-preview {
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted-strong);
+  font-size: 0.78rem;
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.75rem;
+  white-space: pre-wrap;
 }
 
 .mini-list-link {
@@ -1519,6 +1584,7 @@ button:disabled {
   .analysis-grid,
   .inspect-summary-grid,
   .agents-detail-grid,
+  .agent-overview-grid,
   .graph-summary-grid,
   .ops-summary-grid,
   .ops-metric-grid {

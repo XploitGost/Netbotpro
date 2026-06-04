@@ -107,8 +107,15 @@ function App() {
     exportInfo,
     reports,
     agents,
+    agentOverview,
+    agentAlertsSummary,
+    agentRiskSummary,
     selectedAgentId,
     agentTelemetry,
+    agentHealthHistory,
+    agentAlertsHistory,
+    agentRiskHistory,
+    agentHistoryRange,
     connectionState,
     connectionLabel,
     statusMessage,
@@ -438,8 +445,15 @@ function App() {
       <PageSection title="Servers / Agents" subtitle="Registered telemetry agents and redacted host summaries" wide>
         <AgentsPanel
           agents={agents}
+          overview={agentOverview}
+          alertsSummary={agentAlertsSummary}
+          riskSummary={agentRiskSummary}
           selectedAgentId={selectedAgentId}
           agentTelemetry={agentTelemetry}
+          agentHealthHistory={agentHealthHistory}
+          agentAlertsHistory={agentAlertsHistory}
+          agentRiskHistory={agentRiskHistory}
+          historyRange={agentHistoryRange}
           isLoading={loadingState.agents}
           onRefresh={() => loadAgents(selectedAgentId)}
           onSelectAgent={selectAgent}

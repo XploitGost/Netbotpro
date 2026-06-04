@@ -161,24 +161,121 @@ pre-provisioned identity.
 
 ## Storage
 
-Phase one stores append-only registry events in:
+Agent history now uses SQLite by default:
+
+```text
+.runtime/logs/agents.db
+```
+
+The database is initialized automatically on startup. The schema is intentionally
+split by analytical surface so the dashboard can query fleet summaries without
+replaying raw telemetry blobs.
+
+Tables:
+
+- `agents`
+- `agent_heartbeats`
+- `agent_telemetry`
+- `agent_health_snapshots`
+- `agent_alert_snapshots`
+- `agent_flow_snapshots`
+- `agent_risk_snapshots`
+
+`agent_telemetry` keeps the redacted full summary envelope. The snapshot tables
+store focused history for health trends, alert trends, flow trends, capture
+status analysis, and risk scoring.
+
+Append-only JSONL is still available as a development fallback when the registry
+is explicitly constructed with a `.jsonl` path:
 
 ```text
 .runtime/logs/agents.jsonl
 ```
 
-The file contains redacted public records, telemetry summaries, timestamps, and
-a SHA-256 token hash for local verification when no central `NETBOT_AGENT_TOKEN`
-is configured. The raw agent token is not stored.
+Both storage paths keep redacted public records, telemetry summaries,
+timestamps, and a SHA-256 token hash for local verification when no central
+`NETBOT_AGENT_TOKEN` is configured. The raw agent token is not stored.
 
-JSONL is intentionally simple for this staged release: it is easy to inspect,
-safe to append, and enough for small fleets. For a serious multi-agent
-deployment, SQLite should replace JSONL so the registry can support indexed
-lookups, retention, migrations, compaction, integrity checks, and concurrent
-read patterns without replaying a growing log file.
+SQLite is the preferred path for multi-server dashboards because it supports
+indexed history queries, retention, migrations, compaction, integrity checks,
+and concurrent read patterns without replaying a growing log file.
 
-The service boundary is already centralized in `AgentRegistry`, so a future
-SQLite implementation can keep the API routes and frontend stable.
+## Agent History
+
+The central backend stores:
+
+- heartbeat history;
+- telemetry history;
+- health history;
+- alert summary history;
+- flow summary history;
+- capture status history inside the redacted telemetry envelope;
+- risk score history.
+
+History endpoints support `range=24h` and `range=7d`:
+
+```text
+GET /api/agents/{agent_id}/telemetry?range=24h
+GET /api/agents/{agent_id}/health/history?range=24h
+GET /api/agents/{agent_id}/alerts/history?range=24h
+GET /api/agents/{agent_id}/risk/history?range=24h
+```
+
+Fleet endpoints:
+
+```text
+GET /api/agents/overview
+GET /api/agents/alerts/summary
+GET /api/agents/risk/summary
+```
+
+## Offline Detection
+
+Agents are marked offline when `last_seen` is older than the configured
+threshold:
+
+```text
+NETBOT_AGENT_OFFLINE_AFTER_SECONDS=90
+```
+
+The value is clamped to a defensive range and defaults to 90 seconds. Offline
+detection is computed when agents are listed or fetched, so stale records do not
+need a background worker to appear offline.
+
+## Risk Scoring
+
+Risk score is a bounded `0..100` value with a severity label:
+
+- `low`: `0..29`
+- `medium`: `30..59`
+- `high`: `60..79`
+- `critical`: `80..100`
+
+Inputs:
+
+- critical, high, medium, and low alert counts;
+- CPU, RAM, and disk pressure;
+- capture errors;
+- offline status;
+- traffic spike signals when flow or packet counts are available.
+
+The score is stored in `agent_risk_snapshots` and copied onto each public agent
+record for fast fleet sorting.
+
+## Dashboard Overview
+
+The Agents page is a read-only multi-server dashboard:
+
+- total, online, offline, high-risk, total alert, and critical alert counts;
+- top risky servers;
+- status, hostname, OS, last seen, CPU, RAM, disk, capture mode, capture state,
+  alerts today, and risk score;
+- filters for online/offline, high risk, critical alerts, capture running, and
+  OS;
+- sorting by risk, last seen, and alerts;
+- detail view with health, network, capture status, recent alerts, flow summary,
+  risk, health history, alert trend, risk trend, last heartbeat, and last
+  telemetry.
 
 ## Logging
 
@@ -217,6 +314,10 @@ or a TLS reverse proxy. Keep `NETBOT_AGENT_TOKEN` long, random, and out of logs.
 Phase one is intentionally telemetry-only. Remote commands, file collection,
 and raw capture forwarding are separate future work and must keep the same
 authorization, audit, and redaction boundaries.
+
+This history phase keeps the same limitation: no command/control, no remote
+command execution, no file collection, no raw packet forwarding, no raw payload
+forwarding, and no PCAP forwarding.
 
 ## Next Phase Checklist
 
