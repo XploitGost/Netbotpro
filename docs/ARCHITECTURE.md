@@ -188,4 +188,4 @@ Runtime data is local-first. Desktop mode maps config, data, and logs into the E
 
 ## Release Posture
 
-Windows is the validated desktop release target for `0.1.3`. Linux and macOS packaging scripts exist, but production validation remains staged until those artifacts are built and smoke-tested on native hosts.
+Windows is the validated desktop release target for `0.2.0`. Linux and macOS packaging scripts exist, but production validation remains staged until those artifacts are built and smoke-tested on native hosts.

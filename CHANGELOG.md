@@ -8,6 +8,55 @@
 
 ### Fixed
 
+## v0.2.0 - Agent and Fleet Monitoring Release - 2026-06-05
+
+### Added
+
+- Added read-only Agent Mode with identity, configuration, client, runner, and
+  summary-only telemetry payloads.
+- Added SQLite-backed Agent history for heartbeat, telemetry, health, alert,
+  flow, capture status, and risk snapshots.
+- Added Agent registration, heartbeat, telemetry, overview, detail, history,
+  alerts summary, risk summary, and fleet report APIs.
+- Added the Fleet Dashboard with filtering, sorting, risk badges, offline
+  detection, trend views, demo states, and JSON summary export.
+- Added realistic Demo Agent seed data and local multi-agent simulation
+  start/status/stop scripts.
+- Added Fleet Summary Report endpoints in redacted JSON and CSV formats.
+- Added Agent history retention cleanup with dry-run support.
+- Added Agent Operational QA and Release QA checklists.
+- Added Agent log sanitization and central redaction wrappers.
+
+### Security
+
+- Agent tokens are hashed before registry storage.
+- Agent logs and operational scripts do not print raw tokens.
+- Agent Mode does not forward raw packets, raw payloads, or PCAP artifacts.
+- Fleet report and export output is redacted before it is returned.
+- Demo, status, cleanup, sensor, and Agent scripts keep tokens hidden by
+  default.
+
+### Changed
+
+- Moved the default Agent registry storage from JSONL MVP storage to
+  auto-initialized SQLite storage.
+- Updated the README architecture and release/deployment guidance.
+- Improved the Agent/Fleet dashboard for operational demos and multi-server
+  review.
+
+### Testing
+
+- Expanded backend API, storage, redaction, history, retention, and release
+  consistency tests.
+- Expanded PowerShell script safety tests.
+- Added frontend Agent UI tests and production build validation.
+
+### Limitations
+
+- Agent Mode is read-only monitoring only.
+- This release has no command/control or remote command execution.
+- This release has no raw packet, raw payload, or PCAP forwarding from Agents.
+
 ## 0.1.3 - 2026-06-02
 
 ### Added

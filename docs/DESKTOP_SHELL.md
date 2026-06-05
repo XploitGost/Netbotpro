@@ -61,10 +61,11 @@ Windows artifacts are named from the package version:
 - `Netbotpro-${version}-setup-${arch}.exe`
 - `Netbotpro-${version}-portable-${arch}.exe`
 
-For `0.1.3`, the release artifacts are:
+For `0.2.0`, the release artifacts are:
 
-- `Netbotpro-0.1.3-setup-x64.exe`
-- `Netbotpro-0.1.3-portable-x64.exe`
+- `Netbotpro-0.2.0-setup-x64.exe`
+- `Netbotpro-0.2.0-portable-x64.exe`
+- `SHA256SUMS-windows.txt`
 
 ## Windows Toolchain Notes
 
@@ -75,4 +76,4 @@ For `0.1.3`, the release artifacts are:
 
 ## Staged Platforms
 
-Linux and macOS build scripts are present, but Windows is the validated release platform for `0.1.3`. Before calling Linux/macOS production-ready, build and smoke-test artifacts on native hosts, verify capture limitations, confirm signing/notarization expectations, and document platform-specific installation steps.
+Linux and macOS build scripts are present, but Windows is the validated release platform for `0.2.0`. Before calling Linux/macOS production-ready, build and smoke-test artifacts on native hosts, verify capture limitations, confirm signing/notarization expectations, and document platform-specific installation steps.

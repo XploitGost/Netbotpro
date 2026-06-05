@@ -6,8 +6,8 @@ NetBotPro is a defensive network analysis tool. Security reports, hardening sugg
 
 | Version | Support status |
 | --- | --- |
-| 0.1.3 | Current release |
-| 0.1.2 and older | Historical; upgrade recommended |
+| 0.2.0 | Current release |
+| 0.1.3 and older | Historical; upgrade recommended |
 
 ## Reporting A Security Issue
 
@@ -46,6 +46,15 @@ NetBotPro treats these as sensitive boundaries:
 - Prefer VPN, SSH tunneling, private routing, or a TLS reverse proxy.
 - Restrict inbound access with firewall rules or allowlisted operator IPs.
 - Run elevated/admin only when live capture or firewall operations require it.
+- Keep Remote Sensor and central Agent/Fleet endpoints behind a VPN, private
+  network, SSH tunnel, or secure reverse proxy.
+- Never commit, publish, screenshot, or share raw local or Agent tokens.
+- Agent Mode sends redacted summary telemetry only. It does not forward raw
+  packets, raw payloads, or PCAP artifacts.
+- Full and Forensic capture require explicit owner/admin authorization and
+  should be reviewed through audit logs.
+- Verify credentials and other sensitive text are redacted before reports or
+  exports are shared.
 
 ## Audit Events
 

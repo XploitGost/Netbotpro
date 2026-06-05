@@ -15,7 +15,18 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 | --- | --- | --- |
 | ![NetBotPro monitor dashboard](docs/assets/netbotpro-monitor.png) | ![NetBotPro inspect workspace](docs/assets/netbotpro-inspect.png) | ![NetBotPro reports workspace](docs/assets/netbotpro-reports.png) |
 
-## What It Does
+## Project Overview
+
+NetBotPro v0.2.0 is a local-first defensive network analysis and fleet
+monitoring platform. It combines packet inspection, redacted reporting,
+authorized Remote Sensor capture, and summary-only Agent/Fleet monitoring in a
+single operator dashboard.
+
+Agent Mode is intentionally read-only. It sends health, network, capture,
+alert, flow, and risk summaries without forwarding raw packets, raw payloads,
+or PCAP artifacts.
+
+## Key Features
 
 - Live packet and alert monitoring with a responsive analyst console.
 - Inspect workspace for packet, alert, flow, process, protocol, and related-activity investigation.
@@ -27,6 +38,8 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 - Remote sensor mode for legally authorized servers and networks.
 - Agent Mode for summary-only server telemetry, fleet history, demo data, and
   read-only multi-server dashboards.
+- SQLite Agent history, offline detection, risk scoring, redacted Fleet Summary
+  Reports, and operational demo/QA scripts.
 
 ## Feature Matrix
 
@@ -132,8 +145,37 @@ flowchart LR
 
 - [Agent Mode](docs/AGENT_MODE.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
+- [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)
+- [Release QA Checklist](docs/RELEASE_QA_CHECKLIST.md)
 - [Remote Sensor](docs/REMOTE_SENSOR.md)
 - [Capture Modes](docs/CAPTURE_MODES.md)
+
+## Quick Demo
+
+Install dependencies once:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+cd frontend
+npm ci
+cd ..
+```
+
+Start the backend, seed four realistic demo Agents, and optionally start the
+frontend:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-demo.ps1 -StartFrontend
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173/?page=agents
+```
+
+The demo launcher prints dashboard and log paths, but never prints the raw
+local token. The token remains in `.runtime/demo-local-token.txt`.
 
 ## Setup
 
@@ -214,10 +256,27 @@ http://127.0.0.1:5173/?api=http://SERVER_IP:8765/api&ws=ws://SERVER_IP:8765/ws
 
 Remote sensor mode is not a public internet service mode. Treat it as a private, controlled sensor endpoint for systems where you have explicit authorization. Prefer VPN, SSH tunneling, private routing, or a TLS reverse proxy, and restrict inbound access to trusted operator IPs.
 
+## Remote Sensor Mode
+
+Remote Sensor Mode runs authorized packet capture on a server while operators
+use the dashboard from another trusted machine. Remote access is opt-in,
+token-protected, allowlist-capable, and should remain behind a VPN/private
+network or secure reverse proxy. Metadata mode is the default; Full and
+Forensic capture require explicit authorization and audit.
+
+See [Remote Sensor Mode](docs/REMOTE_SENSOR.md) and
+[Capture Modes](docs/CAPTURE_MODES.md).
+
+## Agent And Fleet Mode
+
 Agent Mode is a staged, summary-only server telemetry runner. It registers an
 authorized host with the central backend and sends health, network, capture,
 alert, and flow summaries without forwarding raw packets, payload previews, or
 PCAP artifacts. See [docs/AGENT_MODE.md](docs/AGENT_MODE.md).
+
+The Fleet Dashboard provides online/offline status, health pressure, alerts,
+risk scoring, trends, filters, sorting, demo data, history retention, and
+redacted JSON/CSV fleet summary reports.
 
 Server Mode adds extra guardrails:
 
@@ -228,12 +287,38 @@ Server Mode adds extra guardrails:
 - Retention settings can automatically remove old packet history and generated reports.
 - Capture start/stop, exports, report downloads, and successful remote dashboard authentication are written to `audit.jsonl`.
 
-## Verification
+## Demo Data
+
+Seed or reset demo data without starting the full demo workflow:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-npm --prefix .\frontend run build
+powershell -ExecutionPolicy Bypass -File .\scripts\dev\seed-agent-demo.ps1 -Reset -Count 4
+```
+
+Seeded records include healthy, pressured, critical-alert, and offline Agent
+profiles. Demo data contains no raw payload, credential, cookie, authorization
+header, or token.
+
+## Deployment Options
+
+- Local demo deployment with `scripts/dev/start-demo.ps1`.
+- Local desktop/Electron operation.
+- Remote Sensor behind VPN/private routing or a TLS reverse proxy.
+- Central Agent/Fleet backend with SQLite history.
+- Linux systemd sensor deployment.
+- Windows script, Scheduled Task, or reviewed service-wrapper deployment.
+
+See [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md).
+
+## Testing
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pip check
+python -m unittest discover -s tests -v
+npm --prefix .\frontend ci
 npm --prefix .\frontend run test:ui
+npm --prefix .\frontend run build
 npm --prefix .\frontend run smoke
 npm --prefix .\frontend run security
 powershell -ExecutionPolicy Bypass -File .\scripts\qa\release_readiness.ps1
@@ -257,6 +342,10 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 - Websocket sessions prefer the `netbot.auth.*` subprotocol instead of query-string tokens.
 - Downloads are constrained to generated safe file types inside the NetBotPro log directory.
 - Payload previews are off by default and sensitive HTTP/token fields are redacted when previews are enabled.
+- Agent tokens are hashed for registry storage and excluded from script/log
+  output.
+- Agent Mode has no command/control, remote shell, file collection, raw packet
+  forwarding, raw payload forwarding, or PCAP forwarding.
 
 ## Limitations
 
@@ -272,20 +361,33 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 | --- | --- | --- |
 | `Start Sniffer` says no capture interface is available | Npcap/libpcap is missing, blocked, or not visible to Scapy | Install Npcap, reopen PowerShell as Administrator, then run `scripts\dev\doctor.ps1`. |
 | Frontend shows `ECONNREFUSED 127.0.0.1:8765` | Backend is not running or crashed | Run `scripts\dev\start-local.ps1`, then inspect `.runtime\backend-dev.err.log`. |
-| Protected API returns `401` | Missing or wrong local token | Use the token printed by `start-local.ps1`, `.runtime\local-token.txt`, or your configured `NETBOT_LOCAL_TOKEN`. |
+| Protected API returns `401` | Missing or wrong local token | Use `.runtime\local-token.txt`, `.runtime\demo-local-token.txt`, or your configured `NETBOT_LOCAL_TOKEN`. |
 | Websocket returns `403` | Token/origin mismatch | Confirm `NETBOT_ALLOWED_ORIGINS` includes the dashboard origin and the frontend sends the local token. |
 | Electron launches but backend fails | Packaged runtime or Python dev runtime is missing | Run `scripts\qa\release_readiness.ps1`, then rebuild with `packaging\windows\build.ps1`. |
 | Remote dashboard cannot connect to sensor | Firewall, origin, token, or bind address mismatch | Use `start-sensor.ps1`, set `AllowedOrigins`, keep `NETBOT_REMOTE_ACCESS=1`, and test over VPN/private network first. |
 
-## Legal And Defensive Use Notice
+## Roadmap
+
+- Versioned SQLite schema migrations and longer-lived deployment operations.
+- Per-Agent enrollment, rotation, and revocation workflows.
+- Signed desktop artifacts when release signing infrastructure is available.
+- Additional Linux/macOS release validation.
+
+Command/control, remote shell, file collection, raw packet forwarding, raw
+payload forwarding, PCAP forwarding, and Agent auto-update are not part of
+v0.2.0.
+
+## Safe And Authorized Use Notice
 
 NetBotPro is intended for defensive monitoring, troubleshooting, education, and authorized security analysis. Only capture, inspect, or analyze traffic on systems, accounts, servers, and networks where you have explicit legal permission. Do not use this project for unauthorized surveillance, intrusion, credential theft, evasion, or abuse.
 
 ## Release
 
-GitHub Actions builds CI on push and pull request. Desktop release artifacts are produced by the `Release Desktop` workflow. Pushing a version tag such as `v0.1.3` triggers the release workflow and publishes the generated artifacts to GitHub Releases.
+Current release target: `v0.2.0`.
 
-## More Docs
+GitHub Actions builds CI on push and pull request. Desktop release artifacts are produced by the `Release Desktop` workflow. Pushing a version tag such as `v0.2.0` triggers the release workflow, generates SHA256 checksums, and publishes versioned artifacts with release notes from `CHANGELOG.md`.
+
+## Documentation Links
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security policy](SECURITY.md)
@@ -294,6 +396,10 @@ GitHub Actions builds CI on push and pull request. Desktop release artifacts are
 - [Capture modes](docs/CAPTURE_MODES.md)
 - [Server deployment](docs/SERVER_DEPLOYMENT.md)
 - [Remote sensor mode](docs/REMOTE_SENSOR.md)
+- [Agent mode](docs/AGENT_MODE.md)
+- [Agent QA checklist](docs/AGENT_QA_CHECKLIST.md)
+- [Deployment overview](docs/DEPLOYMENT_OVERVIEW.md)
+- [Release QA checklist](docs/RELEASE_QA_CHECKLIST.md)
 - [Desktop shell](docs/DESKTOP_SHELL.md)
 - [Web migration notes](docs/WEB_MIGRATION.md)
 - [Contributing](CONTRIBUTING.md)

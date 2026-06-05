@@ -10,6 +10,7 @@ NetBotPro is intended for defensive monitoring, troubleshooting, education, auth
 - Running remote sensor mode on servers where you have explicit administrative permission.
 - Running Full or Forensic capture only on authorized servers with owner/admin permission.
 - Generating reports for internal defensive investigation.
+- Running summary-only Agent/Fleet monitoring on authorized servers.
 
 ## Disallowed Use
 
@@ -17,6 +18,7 @@ NetBotPro is intended for defensive monitoring, troubleshooting, education, auth
 - Using NetBotPro for credential theft, surveillance, evasion, intrusion, or unauthorized reconnaissance.
 - Exposing remote sensor mode as a public service without access control.
 - Sharing packet captures, reports, tokens, or sensitive telemetry publicly without authorization.
+- Committing or sharing local, sensor, or Agent tokens.
 
 ## Remote Sensor Rules
 
@@ -26,6 +28,19 @@ NetBotPro is intended for defensive monitoring, troubleshooting, education, auth
 - Restrict inbound access through VPN, SSH tunnel, private routing, allowlisted IPs, or a TLS reverse proxy.
 - Do not rely on the local token alone as the only protection for internet-exposed deployments.
 - Full/Forensic capture may collect sensitive packet content. Enable it only with explicit authorization, audit logging, retention limits, and redaction for non-raw outputs.
+
+## Agent Mode Rules
+
+- Agent Mode is read-only monitoring in v0.2.0.
+- Agent Mode does not provide command/control, remote command execution, remote
+  shell, file collection, or Agent auto-update.
+- Agent Mode does not forward raw packets, raw payloads, or PCAP artifacts.
+- Keep the central Agent API behind a VPN/private network or secure reverse
+  proxy.
+- Keep Agent tokens out of source control, logs, screenshots, and shared
+  messages.
+- Redact credentials and sensitive text before telemetry, reports, or exports
+  are stored or shared.
 
 ## Evidence Handling
 

@@ -53,11 +53,20 @@ jobs:
         run: npm ci
       - name: Run Windows packaging script
         run: powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
+      - name: Generate Windows SHA256 checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem desktop/electron/dist/Netbotpro-*.exe |
+            Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } |
+            Set-Content desktop/electron/dist/SHA256SUMS-windows.txt
       - name: Upload Windows desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: netbotpro-windows-artifacts
-          path: desktop/electron/dist/Netbotpro-*.exe
+          name: netbotpro-${{ github.ref_name }}-windows-artifacts
+          path: |
+            desktop/electron/dist/Netbotpro-*.exe
+            desktop/electron/dist/SHA256SUMS-windows.txt
           if-no-files-found: error
 
   package-linux:
@@ -89,13 +98,18 @@ jobs:
         run: npm ci
       - name: Run Linux packaging script
         run: bash packaging/linux/build.sh
+      - name: Generate Linux SHA256 checksums
+        run: |
+          cd desktop/electron/dist
+          sha256sum ./*.AppImage ./*.deb > SHA256SUMS-linux.txt
       - name: Upload Linux desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: netbotpro-linux-artifacts
+          name: netbotpro-${{ github.ref_name }}-linux-artifacts
           path: |
             desktop/electron/dist/*.AppImage
             desktop/electron/dist/*.deb
+            desktop/electron/dist/SHA256SUMS-linux.txt
           if-no-files-found: error
 
   publish-windows:
@@ -104,10 +118,11 @@ jobs:
     needs: package-windows
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.target_os == 'windows' && github.event.inputs.publish_release == 'true')
     steps:
+      - uses: actions/checkout@v4
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          name: netbotpro-windows-artifacts
+          name: netbotpro-${{ github.ref_name }}-windows-artifacts
           path: release-artifacts
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -115,6 +130,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          body_path: CHANGELOG.md
           files: release-artifacts/*
 
   publish-linux:
@@ -123,10 +139,11 @@ jobs:
     needs: package-linux
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.target_os == 'linux' && github.event.inputs.publish_release == 'true'
     steps:
+      - uses: actions/checkout@v4
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
-          name: netbotpro-linux-artifacts
+          name: netbotpro-${{ github.ref_name }}-linux-artifacts
           path: release-artifacts
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -134,4 +151,5 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          body_path: CHANGELOG.md
           files: release-artifacts/*
