@@ -43,18 +43,22 @@ or PCAP artifacts.
 
 ## Feature Matrix
 
-| Area | Status | Notes |
-| --- | --- | --- |
-| Local web dashboard | Stable dev path | React/Vite console on `127.0.0.1:5173`. |
-| Electron desktop shell | Windows-ready | Secure preload bridge, packaged backend, setup and portable artifacts. |
-| Live packet capture | Environment-dependent | Requires Npcap/libpcap and elevated privileges where needed. |
-| Inspect workspace | Active | Packet, alert, flow, process, protocol, and related-activity context. |
-| Offline PCAP analysis | Active | Restricted file types and upload size limits. |
-| Reports and exports | Active | Safe generated downloads inside the log directory. |
-| Remote sensor mode | Controlled/opt-in | Requires `NETBOT_REMOTE_ACCESS=1`, a strong token, and authorized infrastructure. |
-| Agent Mode | Active read-only monitoring | Summary-only agents, SQLite history, fleet dashboard, and demo/QA tooling. |
-| Windows packaging | Active | Built and smoke-tested first. |
-| Linux/macOS packaging | Staged | Scripts exist; production release validation is still pending. |
+| Capability | v0.2.0 status | Validation | Security and operational boundary |
+| --- | --- | --- | --- |
+| Local web dashboard | Ready | React/Vite build and UI tests run on Windows, Linux, and macOS CI. | Sensitive API and websocket access is token-protected when configured. |
+| Electron desktop shell | Windows-ready | Windows packaged-backend smoke test runs in CI. | Hardened preload bridge; no Node.js access from the renderer. |
+| Live packet capture | Environment-dependent | Core capture and policy paths are covered by backend tests. | Requires Npcap/libpcap, sufficient privileges, and authorized use. |
+| Inspect and investigation workspace | Ready | Packet, alert, flow, protocol, process, and context models are tested. | UI-visible text and generated investigation artifacts pass through central redaction. |
+| Offline PCAP analysis | Ready | Upload validation and offline-analysis paths are tested. | Restricted file types and upload size limits; analysis remains local. |
+| Reports and exports | Ready | JSON, CSV, report, and investigation export paths are tested. | Generated downloads use safe paths; readable content is centrally redacted. |
+| Remote Sensor Mode | Controlled opt-in | Capture-mode, sensor-script, and policy tests are included. | Requires explicit remote access, strong token, allowlist controls, and owner/admin permission. |
+| Full and Forensic capture | Guarded opt-in | Safe-use, allow-full, duration, and raw-export gates are tested. | Authorized servers only; raw PCAP export is never available in Metadata mode. |
+| Agent and Fleet Mode | Ready, read-only | Registry/API/history tests plus Agents UI tests run in CI. | Summary telemetry only; no command/control, file collection, raw packet, payload, or PCAP forwarding. |
+| Agent history and risk | Ready | SQLite auto-init, history, offline detection, redaction, and risk scoring are tested. | Redacted history with configurable retention and `90s` default offline threshold. |
+| Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
+| Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
+| Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
+| macOS desktop packaging | Planned | Frontend/backend CI runs on macOS; desktop artifact workflow is not yet provided. | Not advertised as a production desktop release target. |
 
 ## Architecture
 
@@ -62,73 +66,83 @@ or PCAP artifacts.
 flowchart LR
     Operator["Analyst / Operator"]
 
-    subgraph Client["Client Runtime"]
-        Browser["React Analyst Console"]
+    subgraph Clients["Operator Clients"]
+        Web["React Analyst Console"]
         Desktop["Electron Desktop Shell"]
-        Preload["Hardened Preload Bridge"]
-        Token["Local Token Store"]
+        Bridge["Hardened Preload Bridge"]
+        LocalToken["Local Token Store"]
     end
 
-    subgraph Central["Central / Local Control Plane"]
-        API["FastAPI Control Plane"]
-        WS["WebSocket Event Stream"]
-        Policy["Remote Access / Token / Allowlist"]
-        AgentAPI["Agent Registry API"]
-        AgentStore["Agent Telemetry Store"]
-        Audit["Audit Log"]
+    subgraph Control["Authenticated Control Plane"]
+        Trust["Token / Origin / Allowlist / Rate Limits"]
+        API["FastAPI REST API"]
+        Events["Authenticated WebSocket Events"]
+        AgentAPI["Read-only Agent Registry API"]
+        Audit["Redacted Audit Log"]
     end
 
-    subgraph Sensor["Authorized Remote Sensor Host"]
-        SensorAPI["Sensor FastAPI Backend"]
-        CapturePolicy["Capture Policy<br/>metadata / full / forensic"]
+    subgraph Analysis["Local Analysis Data Plane"]
+        Capture["Scapy / Npcap / libpcap"]
+        Policy["Capture Policy<br/>metadata / full / forensic"]
+        Parse["Packet + Protocol Enrichment"]
+        Detect["IDS Rules + ML Scoring"]
+        Redact["Central Redaction"]
+        LocalHistory["Packet / Alert SQLite History"]
+        Reports["Redacted Reports / Exports"]
+        RawPcap["Guarded Raw PCAP Export"]
     end
 
-    subgraph Core["Core Network Pipeline"]
-        Capture["Scapy / Npcap Capture Provider"]
-        Parser["Packet Parser + Layer 7 Metadata"]
-        Redaction["Central Redaction"]
-        Detection["IDS Rules / ML Scoring"]
-        ProcessMap["Process Attribution"]
+    subgraph Fleet["Authorized Agent Hosts"]
+        Runner["Agent Runner"]
+        Summary["Health / Network / Capture / Alert Summaries"]
+        Identity["Stable Agent Identity"]
     end
 
-    subgraph Data["Local Data Plane"]
-        History["SQLite History Repository"]
-        Reports["Redacted Reports / JSON / ZIP"]
-        Raw["Guarded Raw PCAP Export"]
+    subgraph FleetData["Fleet Monitoring Plane"]
+        Registry["Agent Registry"]
+        Risk["Offline Detection + Risk Scoring"]
+        AgentHistory["Agent SQLite History"]
+        FleetView["Fleet Overview + Trends + Summary Reports"]
     end
 
-    subgraph Agents["Agent Mode Hosts"]
-        AgentRunner["Agent Runner"]
-        AgentIdentity["Stable Agent Identity"]
-        AgentHealth["Health / Network / Capture Summary"]
+    subgraph Sensor["Authorized Remote Sensor"]
+        SensorAPI["Sensor FastAPI Runtime"]
+        SensorPolicy["Explicit Remote Access + Capture Gates"]
     end
 
-    Operator --> Browser
-    Desktop --> Preload --> Browser
-    Desktop --> Token
-    Token --> Browser
-    Browser -->|"X-NetBot-Token"| API
-    Browser -->|"netbot.auth subprotocol"| WS
-    Browser -->|"Fleet View"| AgentAPI
-    Policy --> API
+    Operator --> Web
+    Desktop --> Bridge --> Web
+    Desktop --> LocalToken --> Web
+    Web --> Trust --> API
+    Web --> Trust --> Events
+    Web --> Trust --> AgentAPI
     API --> Audit
-    API --> SensorAPI
-    SensorAPI --> CapturePolicy
-    SensorAPI --> Audit
-    SensorAPI --> Capture --> Parser --> Redaction --> Detection
-    Parser --> ProcessMap
-    Redaction --> History
-    Detection --> History
-    History --> Reports
-    CapturePolicy --> Raw
-    API --> Reports
-    API --> Raw
-    AgentRunner --> AgentIdentity
-    AgentRunner --> AgentHealth
-    AgentRunner -->|"register / heartbeat / redacted telemetry"| AgentAPI
-    AgentAPI --> AgentStore
     AgentAPI --> Audit
+
+    API --> Policy --> Capture --> Parse
+    Parse --> Detect
+    Parse --> Redact
+    Detect --> LocalHistory
+    Redact --> LocalHistory --> Reports
+    Policy --> RawPcap
+
+    Runner --> Identity
+    Runner --> Summary
+    Runner -->|"register / heartbeat / redacted telemetry"| AgentAPI
+    AgentAPI --> Registry --> Risk --> AgentHistory --> FleetView
+    FleetView --> AgentAPI
+
+    API --> SensorAPI --> SensorPolicy --> Capture
+    SensorAPI --> Events
 ```
+
+The architecture deliberately separates two remote paths:
+
+- **Remote Sensor Mode** runs the capture backend on an authorized server and
+  remains subject to capture-mode and raw-export policy gates.
+- **Agent and Fleet Mode** sends only redacted summary telemetry into a
+  read-only registry and history plane. It cannot execute commands or forward
+  raw packets, payloads, files, or PCAP artifacts.
 
 ## Repository Layout
 

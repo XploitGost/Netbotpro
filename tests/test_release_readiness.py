@@ -82,6 +82,34 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("body_path: CHANGELOG.md", workflow)
         self.assertIn("Netbotpro-*.exe", workflow)
 
+    def test_github_workflows_use_current_action_runtimes(self):
+        workflows = "\n".join(
+            [
+                self._read(".github/workflows/ci.yml"),
+                self._read(".github/workflows/release-desktop.yml"),
+            ]
+        )
+
+        for action in [
+            "actions/checkout@v6",
+            "actions/setup-python@v6",
+            "actions/setup-node@v6",
+            "actions/upload-artifact@v7",
+            "actions/download-artifact@v8",
+            "softprops/action-gh-release@v3",
+        ]:
+            self.assertIn(action, workflows)
+
+        for legacy_action in [
+            "actions/checkout@v4",
+            "actions/setup-python@v5",
+            "actions/setup-node@v4",
+            "actions/upload-artifact@v4",
+            "actions/download-artifact@v4",
+            "softprops/action-gh-release@v2",
+        ]:
+            self.assertNotIn(legacy_action, workflows)
+
 
 if __name__ == "__main__":
     unittest.main()
