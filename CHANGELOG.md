@@ -1,14 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Added
-
-### Changed
-
-### Fixed
-
-## v0.2.0 - Agent and Fleet Monitoring Release - 2026-06-05
+## v0.2.0 - Agent & Fleet Monitoring Release - 2026-06-05
 
 ### Added
 
@@ -26,6 +18,8 @@
 - Added Agent history retention cleanup with dry-run support.
 - Added Agent Operational QA and Release QA checklists.
 - Added Agent log sanitization and central redaction wrappers.
+- Added deployment overview and official v0.2.0 release notes.
+- Polished the README Feature Matrix and architecture diagrams.
 
 ### Security
 
@@ -35,6 +29,8 @@
 - Fleet report and export output is redacted before it is returned.
 - Demo, status, cleanup, sensor, and Agent scripts keep tokens hidden by
   default.
+- Remote Sensor mode keeps explicit token, allowlist, remote-access, capture
+  policy, and authorization guardrails.
 
 ### Changed
 
@@ -43,6 +39,7 @@
 - Updated the README architecture and release/deployment guidance.
 - Improved the Agent/Fleet dashboard for operational demos and multi-server
   review.
+- Upgraded GitHub Actions to current supported major versions.
 
 ### Testing
 
@@ -50,6 +47,10 @@
   consistency tests.
 - Expanded PowerShell script safety tests.
 - Added frontend Agent UI tests and production build validation.
+- Validated backend tests and frontend builds on Windows, Linux, and macOS CI.
+- Validated the packaged Windows backend with Desktop Smoke.
+- Added release-readiness checks for version, documentation, workflow, and
+  safety consistency.
 
 ### Limitations
 

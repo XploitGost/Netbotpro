@@ -48,7 +48,9 @@ candidate.
 - [ ] Confirm artifact filenames include version `0.2.0`.
 - [ ] Confirm SHA256 checksum files are generated.
 - [ ] Confirm the GitHub Release workflow accepts `v*` tags.
-- [ ] Confirm release notes include `CHANGELOG.md`.
+- [ ] Confirm the published release uses `docs/RELEASE_NOTES_v0.2.0.md`.
+- [ ] Download release artifacts and verify them against
+  `SHA256SUMS-windows.txt`.
 - [ ] Confirm the release candidate contains no committed tokens or runtime
   secrets.
 

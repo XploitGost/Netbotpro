@@ -161,6 +161,7 @@ The architecture deliberately separates two remote paths:
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)
 - [Release QA Checklist](docs/RELEASE_QA_CHECKLIST.md)
+- [v0.2.0 Release Notes](docs/RELEASE_NOTES_v0.2.0.md)
 - [Remote Sensor](docs/REMOTE_SENSOR.md)
 - [Capture Modes](docs/CAPTURE_MODES.md)
 

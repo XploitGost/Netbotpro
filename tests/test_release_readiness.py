@@ -34,7 +34,11 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertEqual(electron_lock["packages"][""]["version"], TARGET_VERSION)
         self.assertRegex(
             changelog,
-            rf"## v{re.escape(TARGET_VERSION)} - Agent and Fleet Monitoring Release",
+            rf"## v{re.escape(TARGET_VERSION)} - Agent & Fleet Monitoring Release",
+        )
+        self.assertEqual(
+            changelog.splitlines()[2],
+            f"## v{TARGET_VERSION} - Agent & Fleet Monitoring Release - 2026-06-05",
         )
 
     def test_demo_scripts_do_not_print_raw_tokens(self):
@@ -54,9 +58,12 @@ class ReleaseReadinessTests(unittest.TestCase):
         for relative_path in [
             "docs/DEPLOYMENT_OVERVIEW.md",
             "docs/RELEASE_QA_CHECKLIST.md",
+            "docs/RELEASE_NOTES_v0.2.0.md",
         ]:
             self.assertTrue((REPO_ROOT / relative_path).is_file())
             self.assertIn(relative_path, readme)
+
+        self.assertIn(f"v{TARGET_VERSION}", readme)
 
     def test_agent_release_safety_is_explicit(self):
         combined = "\n".join(
@@ -72,6 +79,16 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("raw payload", combined)
         self.assertIn("pcap forwarding", combined)
         self.assertIn("read-only monitoring", combined)
+
+        release_notes = self._read("docs/RELEASE_NOTES_v0.2.0.md").lower()
+        for forbidden_feature in [
+            "no command/control",
+            "no raw packet",
+            "raw payload forwarding",
+            "pcap forwarding",
+            "agent auto-update",
+        ]:
+            self.assertIn(forbidden_feature, release_notes)
 
     def test_release_workflow_has_tags_notes_and_checksums(self):
         workflow = self._read(".github/workflows/release-desktop.yml")
