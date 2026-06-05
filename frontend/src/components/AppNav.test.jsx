@@ -16,6 +16,7 @@ describe("AppNav", () => {
     expect(screen.getByText("NetBotPro Web")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Monitor" }).className).toContain("primary");
     expect(screen.getByRole("button", { name: "Inspect" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Flows" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reports" })).toBeTruthy();
   });
 

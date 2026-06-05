@@ -9,6 +9,7 @@ from typing import Any
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.event_bus import EventBus
 from backend.app.services.capture_policy import current_capture_policy
+from backend.app.services.flow_service import FlowService
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
@@ -30,7 +31,12 @@ class CaptureStartUnavailableError(RuntimeError):
 
 
 class SnifferService:
-    def __init__(self, event_bus: EventBus, capture_provider: CaptureProvider | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        capture_provider: CaptureProvider | None = None,
+        flow_service: FlowService | None = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._event_bus = event_bus
         self._capture_provider = capture_provider or SystemCaptureProvider()
@@ -42,6 +48,7 @@ class SnifferService:
         self._detection_pipeline = SnifferDetectionPipeline(settings_provider=get_settings_snapshot)
         self._persistence = SnifferPersistence()
         self._publisher = SnifferEventPublisher(event_bus)
+        self._flow_service = flow_service or FlowService()
 
     @staticmethod
     def _first_blocking_preflight_detail(preflight: dict[str, Any]) -> str:
@@ -132,6 +139,7 @@ class SnifferService:
         for alert in alerts:
             self._apply_payload_policy(alert, policy.to_public_dict())
 
+        self._flow_service.ingest(packet, alerts)
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
         self._persistence.persist(packet, alerts)
@@ -199,6 +207,7 @@ class SnifferService:
             running = self._engine is not None
             iface = self._iface
         self._state.reset()
+        self._flow_service.reset()
         state = self._state.state(running=running, iface=iface)
         state["observability"] = self.observability()
         self._publisher.publish_state("sniffer:reset", state)
@@ -216,6 +225,10 @@ class SnifferService:
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }
+
+    @property
+    def flow_service(self) -> FlowService:
+        return self._flow_service
 
     def capture_interfaces(self) -> dict[str, Any]:
         payload = self._capture_provider.list_interfaces()

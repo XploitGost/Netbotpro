@@ -71,6 +71,11 @@ class OfflineAnalyzerTests(unittest.TestCase):
         self.assertEqual(result["summary"]["attack_types"], 1)
         self.assertEqual(result["top_attack_types"][0]["attack_type"], "Suspicious TLS Burst")
         self.assertEqual(result["alerts"][0]["packet_id"], "pcap-pkt-1")
+        self.assertIn("flow_summary", result)
+        self.assertIn("top_conversations", result)
+        self.assertIn("top_risky_flows", result)
+        self.assertIn("protocol_summary", result)
+        self.assertIn("risk_distribution", result)
 
 
 if __name__ == "__main__":

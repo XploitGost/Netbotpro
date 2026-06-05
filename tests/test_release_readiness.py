@@ -65,6 +65,19 @@ class ReleaseReadinessTests(unittest.TestCase):
 
         self.assertIn(f"v{TARGET_VERSION}", readme)
 
+    def test_flow_analysis_docs_and_architecture_are_linked(self):
+        readme = self._read("README.md")
+        architecture = self._read("docs/ARCHITECTURE.md")
+        flow_docs = self._read("docs/FLOW_ANALYSIS.md").lower()
+
+        self.assertIn("docs/FLOW_ANALYSIS.md", readme)
+        self.assertIn("Flow Analysis", readme)
+        self.assertIn("Flow Engine", architecture)
+        self.assertIn("Protocol Intelligence", architecture)
+        self.assertIn("Conversation Timeline", architecture)
+        self.assertIn("no tls decryption", flow_docs)
+        self.assertIn("agent mode remains telemetry-only", flow_docs)
+
     def test_agent_release_safety_is_explicit(self):
         combined = "\n".join(
             [

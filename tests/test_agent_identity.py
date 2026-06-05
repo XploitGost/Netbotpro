@@ -38,6 +38,9 @@ class AgentIdentityTests(unittest.TestCase):
         self.assertIn("health", payload["capabilities"])
         self.assertIn("alerts_summary", payload["capabilities"])
         self.assertNotIn("raw_pcap", payload["capabilities"])
+        self.assertNotIn("raw_packet", payload["capabilities"])
+        self.assertNotIn("raw_payload", payload["capabilities"])
+        self.assertNotIn("command_control", payload["capabilities"])
 
 
 if __name__ == "__main__":

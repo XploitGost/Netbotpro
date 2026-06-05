@@ -52,6 +52,10 @@ flowchart TB
         Provider["Capture Provider<br/>Scapy / Npcap / libpcap"]
         Parser["Packet Parser"]
         Layer7["Layer 7 / TLS Metadata"]
+        ProtocolIntel["Protocol Intelligence"]
+        FlowEngine["Flow Engine"]
+        Conversation["Conversation Timeline"]
+        FlowRisk["Flow Risk Scoring"]
         Redaction["Central Redaction"]
         Detection["IDS Rules + ML Scoring"]
         Process["Process Attribution"]
@@ -95,7 +99,12 @@ flowchart TB
     Routes --> AgentAPI
     Events --> LiveClient
     CapturePolicy --> Provider
-    Provider --> Parser --> Layer7 --> Redaction
+    Provider --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
+    FlowEngine --> Conversation
+    FlowEngine --> FlowRisk
+    ProtocolIntel --> Redaction
+    Conversation --> Redaction
+    FlowRisk --> Redaction
     Redaction --> Detection
     Parser --> Process
     Detection --> History
@@ -154,6 +163,23 @@ servers with owner or administrator approval.
 Raw PCAP artifacts are not treated like normal reports. They are exposed only
 through the guarded raw export path, require Full or Forensic mode, require Safe
 Use acceptance, require token authorization, and create audit records.
+
+## Flow And Protocol Intelligence
+
+The Flow Engine consumes the same enriched packet metadata used by live
+detection and offline PCAP analysis. It builds directional flow IDs from
+endpoint, port, transport, and direction fields, then joins reverse directions
+into a conversation ID.
+
+Protocol Intelligence classifies DNS, HTTP, visible TLS metadata, SSH, RDP,
+SMB, mail protocols, ICMP, and unknown traffic using decoded metadata, safe
+signatures, and port hints. It does not perform TLS decryption, MITM, key
+extraction, or credential collection.
+
+Conversation Timeline correlates protocol detection, DNS/HTTP/TLS metadata,
+alerts, and unusual destinations. Flow Risk Scoring creates a bounded score and
+explainable reasons. Redacted snapshots are persisted separately in
+`.runtime/logs/flows.db`; raw payloads are not stored in this database.
 
 ## Agent And Fleet Monitoring Plane
 

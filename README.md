@@ -55,6 +55,11 @@ or PCAP artifacts.
 | Full and Forensic capture | Guarded opt-in | Safe-use, allow-full, duration, and raw-export gates are tested. | Authorized servers only; raw PCAP export is never available in Metadata mode. |
 | Agent and Fleet Mode | Ready, read-only | Registry/API/history tests plus Agents UI tests run in CI. | Summary telemetry only; no command/control, file collection, raw packet, payload, or PCAP forwarding. |
 | Agent history and risk | Ready | SQLite auto-init, history, offline detection, redaction, and risk scoring are tested. | Redacted history with configurable retention and `90s` default offline threshold. |
+| Flow Analysis | Active | Live packets are grouped into directional flows and bidirectional conversations. | Flow snapshots contain redacted metadata, not raw payloads or credentials. |
+| Protocol Intelligence | Active MVP | DNS, HTTP, TLS metadata, SSH, RDP, SMB, mail, ICMP, and unknown traffic are classified. | Metadata-safe detection only; no TLS decryption, MITM, or key extraction. |
+| Conversation Timeline | Active | Protocol, alert, destination, and lifecycle events are correlated per flow. | Timeline summaries and metadata pass through central redaction. |
+| Flow Risk Scoring | Active | Explainable `0..100` scoring covers alerts, volume, DNS failures, unusual protocols/ports, and destinations. | Risk is an investigation aid, not an automated verdict. |
+| Offline PCAP Flow Summary | Active | Offline analysis returns flows, conversations, protocol summaries, timelines, and risk distribution. | Existing API response fields remain compatible; output stays redacted. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -148,6 +153,7 @@ The architecture deliberately separates two remote paths:
 
 - `backend/` - FastAPI routes, service layer, websocket event stream, desktop backend entrypoint.
 - `core/` - capture providers, packet parsing, IDS logic, scoring, traceroute, firewall helpers, offline analyzer.
+- `core/flow_engine.py` and `core/protocol_intelligence.py` - metadata-safe flow, conversation, protocol, timeline, and risk analysis.
 - `frontend/` - React/Vite web console.
 - `desktop/electron/` - Electron shell, secure preload bridge, packaged desktop runtime.
 - `scripts/dev/` - local setup, doctor, start/stop, Npcap install, remote sensor start.
@@ -158,6 +164,7 @@ The architecture deliberately separates two remote paths:
 ## Operational Guides
 
 - [Agent Mode](docs/AGENT_MODE.md)
+- [Flow Analysis And Protocol Intelligence](docs/FLOW_ANALYSIS.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)
 - [Release QA Checklist](docs/RELEASE_QA_CHECKLIST.md)

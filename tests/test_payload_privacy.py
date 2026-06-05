@@ -2,6 +2,7 @@ import unittest
 
 from backend.app.services.redaction import redact_http_path as service_redact_http_path
 from backend.app.services.redaction import (
+    redact_sensitive_data,
     redact_sensitive_text as service_redact_sensitive_text,
 )
 from core.netbotpro_logging.privacy import alert_rows_to_df, packet_rows_to_df
@@ -15,6 +16,18 @@ from core.privacy_redaction import redact_sensitive_text as core_redact_sensitiv
 
 
 class PayloadPrivacyTests(unittest.TestCase):
+    def test_recursive_redaction_masks_sensitive_mapping_values(self):
+        redacted = redact_sensitive_data(
+            {
+                "authorization": "Bearer real-secret",
+                "nested": {"cookie": "session=real-secret"},
+                "items": ["password=real-secret"],
+            }
+        )
+
+        self.assertNotIn("real-secret", str(redacted))
+        self.assertEqual(redacted["authorization"], "[REDACTED]")
+
     def test_payload_preview_is_off_by_default(self):
         payload = b"GET / HTTP/1.1\r\nAuthorization: Bearer secret-token\r\n\r\n"
 

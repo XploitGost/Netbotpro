@@ -5,6 +5,7 @@ import { AppNav } from "./components/AppNav";
 import { DetailPanel } from "./components/DetailPanel";
 import { ExportPanel } from "./components/ExportPanel";
 import { FocusedIpPanel } from "./components/FocusedIpPanel";
+import { FlowsPanel } from "./components/FlowsPanel";
 import { HeroPanel } from "./components/HeroPanel";
 import { LiveGraphPanel } from "./components/LiveGraphPanel";
 import { MiniList } from "./components/MiniList";
@@ -77,6 +78,7 @@ function createInvestigationExportPayload({ kind, id, model }) {
 function App() {
   const {
     localToken,
+    api,
     setLocalToken,
     activePage,
     setActivePage,
@@ -442,6 +444,14 @@ function App() {
     </section>
   );
 
+  const flowsPage = (
+    <section className="page-grid page-grid-single">
+      <PageSection title="Flows / Conversations" subtitle="Protocol-aware sessions, timelines, and explainable risk" wide>
+        <FlowsPanel api={api} />
+      </PageSection>
+    </section>
+  );
+
   const agentsPage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Servers / Agents" subtitle="Registered telemetry agents and redacted host summaries" wide>
@@ -518,6 +528,7 @@ function App() {
   const currentPage = {
     monitor: monitorPage,
     inspect: inspectPage,
+    flows: flowsPage,
     agents: agentsPage,
     settings: settingsPage,
     traceroute: traceroutePage,

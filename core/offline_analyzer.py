@@ -10,6 +10,8 @@ ensure_project_root_on_path()
 
 from config.settings_manager import load_settings  # noqa: E402
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline  # noqa: E402
+from core.flow_engine import FlowEngine  # noqa: E402
+from core.privacy_redaction import redact_sensitive_data  # noqa: E402
 from core.netbotpro_sniffer_core.packet_parser import PacketLayers, PacketMetadataBuilder  # noqa: E402
 
 
@@ -91,6 +93,7 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
     protocol_counter: Counter = Counter()
     severity_counter: Counter = Counter()
     time_buckets: defaultdict[str, int] = defaultdict(int)
+    flow_engine = FlowEngine()
 
     for index, pkt in enumerate(packets):
         meta = _build_meta(pkt, builder, index)
@@ -127,11 +130,14 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
                 attack_counter[str(row["attack_type"])] += 1
             if row.get("severity"):
                 severity_counter[str(row["severity"]).upper()] += 1
+        flow_engine.ingest(meta, packet_alerts)
 
     timeline = [{"time": key, "count": time_buckets[key]} for key in sorted(time_buckets)]
     suspicious = bool(alerts)
+    flow_summary = flow_engine.summary()
+    conversations = flow_engine.conversations()
 
-    return {
+    return redact_sensitive_data({
         "summary": {
             "total_packets": len(packets),
             "total_alerts": len(alerts),
@@ -148,4 +154,23 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
         "top_protocols": _top_pairs(protocol_counter, "protocol"),
         "severity_breakdown": _top_pairs(severity_counter, "severity"),
         "timeline": timeline,
-    }
+        "flows": flow_engine.list_flows(limit=500),
+        "flow_summary": flow_summary,
+        "top_conversations": conversations[:20],
+        "top_risky_flows": flow_summary["top_risky_flows"],
+        "protocol_summary": {
+            "top_protocols": flow_summary["top_protocols"],
+            "bytes_by_protocol": flow_summary["bytes_by_protocol"],
+            "alerts_by_protocol": flow_summary["alerts_by_protocol"],
+        },
+        "risk_distribution": flow_summary["risk_distribution"],
+        "conversation_timeline": [
+            {
+                "conversation_id": item["conversation_id"],
+                "timeline": (
+                    flow_engine.get_conversation(item["conversation_id"]) or {}
+                ).get("timeline", []),
+            }
+            for item in conversations[:20]
+        ],
+    })

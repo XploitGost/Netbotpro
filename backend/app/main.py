@@ -57,6 +57,7 @@ from backend.app.services.capture_policy import (
 )
 from backend.app.services.event_bus import EventBus
 from backend.app.services.export_service import ExportService
+from backend.app.services.flow_service import FlowService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
 from backend.app.services.investigation_export_service import InvestigationExportService
 from backend.app.services.report_service import ReportService
@@ -75,7 +76,12 @@ from log_manager import LOG_DIR  # noqa: E402
 
 event_bus = EventBus()
 capture_provider = SystemCaptureProvider()
-sniffer_service = SnifferService(event_bus, capture_provider=capture_provider)
+flow_service = FlowService()
+sniffer_service = SnifferService(
+    event_bus,
+    capture_provider=capture_provider,
+    flow_service=flow_service,
+)
 traceroute_service = TracerouteService()
 export_service = ExportService()
 investigation_export_service = InvestigationExportService()
@@ -463,6 +469,149 @@ def api_get_settings(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return get_settings()
+
+
+@app.get("/api/flows")
+def api_flows(
+    protocol: str = "",
+    risk: str = "",
+    src_ip: str = "",
+    dst_ip: str = "",
+    direction: str = "",
+    port: int = 0,
+    has_alerts: bool = False,
+    since: str = "",
+    limit: int = 100,
+    sort: str = "last_seen",
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    items = flow_service.list_flows(
+        protocol=protocol,
+        risk=risk,
+        src_ip=src_ip,
+        dst_ip=dst_ip,
+        direction=direction,
+        port=port,
+        has_alerts=has_alerts,
+        since=since,
+        limit=limit,
+        sort=sort,
+    )
+    return {"items": items, "total": len(items)}
+
+
+@app.get("/api/flows/summary")
+def api_flows_summary(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return flow_service.summary()
+
+
+@app.get("/api/flows/top")
+def api_flows_top(
+    limit: int = 10,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> list[dict[str, Any]]:
+    return flow_service.list_flows(sort="risk", limit=limit)
+
+
+@app.get("/api/flows/{flow_id}")
+def api_flow_detail(
+    flow_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    flow = flow_service.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    return flow
+
+
+@app.get("/api/flows/{flow_id}/timeline")
+def api_flow_timeline(
+    flow_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    flow = flow_service.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    return {"flow_id": flow_id, "items": flow_service.timeline(flow_id)}
+
+
+@app.get("/api/conversations")
+def api_conversations(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> list[dict[str, Any]]:
+    return flow_service.conversations()
+
+
+@app.get("/api/conversations/{conversation_id}")
+def api_conversation_detail(
+    conversation_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    conversation = flow_service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+
+@app.get("/api/protocols/summary")
+def api_protocols_summary(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return flow_service.protocols_summary()
+
+
+@app.get("/api/protocols/{protocol}/flows")
+def api_protocol_flows(
+    protocol: str,
+    limit: int = 100,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    items = flow_service.list_flows(protocol=protocol, limit=limit)
+    return {"protocol": protocol.upper(), "items": items, "total": len(items)}
+
+
+@app.get("/api/reports/flows/summary")
+def api_flow_summary_report(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    report = flow_service.report()
+    audit_event(
+        "flow_summary_report_generated",
+        actor=_actor_from_request(request),
+        detail={"format": "json", "total_flows": report["total_flows"]},
+    )
+    return report
+
+
+@app.get("/api/reports/flows/summary.csv")
+def api_flow_summary_report_csv(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> Response:
+    audit_event(
+        "flow_summary_report_generated",
+        actor=_actor_from_request(request),
+        detail={"format": "csv"},
+    )
+    return Response(
+        flow_service.report_csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=flow-summary.csv"},
+    )
 
 
 @app.get("/api/interfaces")

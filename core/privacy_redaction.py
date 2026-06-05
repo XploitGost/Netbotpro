@@ -31,3 +31,38 @@ def redact_http_path(value: str | None) -> str | None:
     if value is None:
         return None
     return redact_sensitive_text(str(value))
+
+
+def redact_sensitive_data(value):
+    if isinstance(value, str):
+        return redact_sensitive_text(value)
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if normalized in {
+                "authorization",
+                "proxy_authorization",
+                "cookie",
+                "set_cookie",
+                "password",
+                "passwd",
+                "token",
+                "access_token",
+                "refresh_token",
+                "api_key",
+                "apikey",
+                "secret",
+                "session",
+                "sessionid",
+                "jwt",
+            }:
+                redacted[key] = "[REDACTED]"
+            else:
+                redacted[key] = redact_sensitive_data(item)
+        return redacted
+    if isinstance(value, list):
+        return [redact_sensitive_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [redact_sensitive_data(item) for item in value]
+    return value

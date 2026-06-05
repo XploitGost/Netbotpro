@@ -5,7 +5,7 @@ import { useLiveEvents } from "./useLiveEvents";
 import { getPeerInfo, isPrivateIp } from "../lib/networkView";
 
 export const PAGE_SIZE = 25;
-const VALID_PAGES = new Set(["monitor", "inspect", "agents", "settings", "traceroute", "exports", "reports", "offline"]);
+const VALID_PAGES = new Set(["monitor", "inspect", "flows", "agents", "settings", "traceroute", "exports", "reports", "offline"]);
 const TIMELINE_BUCKETS = 30;
 const TIMELINE_BUCKET_MS = 2_000;
 const HISTORY_CACHE_TTL_MS = 5_000;
