@@ -24,7 +24,6 @@ export function HeroPanel({
   onResetData,
 }) {
   const snapshot = buildOpsSnapshot(observability);
-  const summaryCards = snapshot.summaryCards.slice(0, 4);
   const captureRecommendations = Array.isArray(capturePreflight?.recommendations)
     ? capturePreflight.recommendations.filter((item) => String(item || "").trim())
     : [];
@@ -56,27 +55,20 @@ export function HeroPanel({
             Redaction {payloadCaptureEnabled ? "on for previews" : "metadata-only"}
           </span>
         </div>
-        <div className="hero-metrics">
-          {summaryCards.map((card) => (
-            <span key={card.label} className={`graph-chip ${levelClass(card.level)}`}>
-              {card.label}: {card.value}
-            </span>
-          ))}
-        </div>
         <div className={`capture-readiness capture-readiness-${readinessState}`}>
           <div>
             <p className="eyebrow">First Run Readiness</p>
             <h3>{readinessTitle}</h3>
             <p className="muted">{readinessHint}</p>
           </div>
-          <div className="capture-check-grid">
-            {checks.map((check) => (
+          {failedChecks.length ? <div className="capture-check-grid">
+            {failedChecks.map((check) => (
               <span key={check.code} className={`capture-check ${check.ok ? "capture-check-ok" : check.severity === "warning" ? "capture-check-warn" : "capture-check-fail"}`}>
                 <strong>{check.ok ? "OK" : check.severity === "warning" ? "Warn" : "Fix"}</strong>
                 {check.label}
               </span>
             ))}
-          </div>
+          </div> : null}
         </div>
       </div>
       <div className="hero-side">

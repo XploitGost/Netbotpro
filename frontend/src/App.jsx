@@ -545,35 +545,39 @@ function App() {
     <main className="shell">
       <AppNav activePage={activePage} onNavigate={setActivePage} />
 
-      <HeroPanel
-        connectionLabel={connectionLabel}
-        connectionState={connectionState}
-        statusMessage={statusMessage}
-        observability={observability}
-        localToken={localToken}
-        localTokenRequired={localTokenRequired}
-        managedLocalToken={managedLocalToken}
-        capturePreflight={capturePreflight}
-        captureUnavailableDetail={captureUnavailableDetail}
-        canStartSniffer={canStartSniffer}
-        interfaceCount={interfaces.length}
-        error={error}
-        safeUsePolicyAccepted={Boolean(settings.safe_use_policy_accepted)}
-        captureMode={settings.capture_mode || "metadata"}
-        payloadCaptureEnabled={Boolean(settings.payload_capture_enabled)}
-        isBusy={loadingState.snifferAction}
-        onTokenChange={setLocalToken}
-        onOpenSettings={() => setActivePage("settings")}
-        onStartSniffer={startSniffer}
-        onStopSniffer={stopSniffer}
-        onResetData={resetSessionData}
-      />
+      {activePage === "monitor" ? (
+        <>
+          <HeroPanel
+            connectionLabel={connectionLabel}
+            connectionState={connectionState}
+            statusMessage={statusMessage}
+            observability={observability}
+            localToken={localToken}
+            localTokenRequired={localTokenRequired}
+            managedLocalToken={managedLocalToken}
+            capturePreflight={capturePreflight}
+            captureUnavailableDetail={captureUnavailableDetail}
+            canStartSniffer={canStartSniffer}
+            interfaceCount={interfaces.length}
+            error={error}
+            safeUsePolicyAccepted={Boolean(settings.safe_use_policy_accepted)}
+            captureMode={settings.capture_mode || "metadata"}
+            payloadCaptureEnabled={Boolean(settings.payload_capture_enabled)}
+            isBusy={loadingState.snifferAction}
+            onTokenChange={setLocalToken}
+            onOpenSettings={() => setActivePage("settings")}
+            onStartSniffer={startSniffer}
+            onStopSniffer={stopSniffer}
+            onResetData={resetSessionData}
+          />
 
-      <section className="stats-grid">
-        <StatCard label="Sniffer" value={sniffer.running ? "Running" : "Stopped"} hint={`Interface: ${sniffer.iface || "default"}`} />
-        <StatCard label="Packets" value={String(sniffer.total_packets || packetMeta.total || 0)} hint="Total live packets seen" />
-        <StatCard label="Alerts" value={String(sniffer.total_alerts || alertMeta.total || 0)} hint="Total alerts emitted" />
-      </section>
+          <section className="stats-grid">
+            <StatCard label="Sniffer" value={sniffer.running ? "Running" : "Stopped"} hint={`Interface: ${sniffer.iface || "default"}`} />
+            <StatCard label="Packets" value={String(sniffer.total_packets || packetMeta.total || 0)} hint="Total live packets seen" />
+            <StatCard label="Alerts" value={String(sniffer.total_alerts || alertMeta.total || 0)} hint="Total alerts emitted" />
+          </section>
+        </>
+      ) : null}
 
       {currentPage}
     </main>
