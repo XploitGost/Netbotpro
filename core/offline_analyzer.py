@@ -11,6 +11,7 @@ ensure_project_root_on_path()
 from config.settings_manager import load_settings  # noqa: E402
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline  # noqa: E402
 from core.flow_engine import FlowEngine  # noqa: E402
+from core.packet_dissector import dissect_packet  # noqa: E402
 from core.privacy_redaction import redact_sensitive_data  # noqa: E402
 from core.netbotpro_sniffer_core.packet_parser import PacketLayers, PacketMetadataBuilder  # noqa: E402
 
@@ -94,6 +95,8 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
     severity_counter: Counter = Counter()
     time_buckets: defaultdict[str, int] = defaultdict(int)
     flow_engine = FlowEngine()
+    packet_details: list[dict[str, Any]] = []
+    expert_items: list[dict[str, Any]] = []
 
     for index, pkt in enumerate(packets):
         meta = _build_meta(pkt, builder, index)
@@ -131,6 +134,16 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
             if row.get("severity"):
                 severity_counter[str(row["severity"]).upper()] += 1
         flow_engine.ingest(meta, packet_alerts)
+        if len(packet_details) < 200:
+            detail = dissect_packet(
+                meta,
+                capture_mode="metadata",
+                related_alert_ids=[
+                    str(item.get("id")) for item in packet_alerts if item.get("id")
+                ],
+            )
+            packet_details.append(detail)
+            expert_items.extend(detail["expert_items"])
 
     timeline = [{"time": key, "count": time_buckets[key]} for key in sorted(time_buckets)]
     suspicious = bool(alerts)
@@ -170,6 +183,18 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
                 "timeline": (
                     flow_engine.get_conversation(item["conversation_id"]) or {}
                 ).get("timeline", []),
+            }
+            for item in conversations[:20]
+        ],
+        "packet_details": packet_details,
+        "expert_info": expert_items,
+        "stream_summary": [
+            {
+                "conversation_id": item["conversation_id"],
+                "protocols": item["protocols"],
+                "packets_count": item["packets_count"],
+                "bytes_total": item["bytes_total"],
+                "mode": "metadata",
             }
             for item in conversations[:20]
         ],

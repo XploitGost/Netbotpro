@@ -60,6 +60,9 @@ or PCAP artifacts.
 | Conversation Timeline | Active | Protocol, alert, destination, and lifecycle events are correlated per flow. | Timeline summaries and metadata pass through central redaction. |
 | Flow Risk Scoring | Active | Explainable `0..100` scoring covers alerts, volume, DNS failures, unusual protocols/ports, and destinations. | Risk is an investigation aid, not an automated verdict. |
 | Offline PCAP Flow Summary | Active | Offline analysis returns flows, conversations, protocol summaries, timelines, and risk distribution. | Existing API response fields remain compatible; output stays redacted. |
+| Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
+| Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
+| Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -165,6 +168,7 @@ The architecture deliberately separates two remote paths:
 
 - [Agent Mode](docs/AGENT_MODE.md)
 - [Flow Analysis And Protocol Intelligence](docs/FLOW_ANALYSIS.md)
+- [Deep Packet Inspection](docs/DEEP_PACKET_INSPECTION.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)
 - [Release QA Checklist](docs/RELEASE_QA_CHECKLIST.md)

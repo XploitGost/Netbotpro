@@ -3,6 +3,7 @@ import { AlertsPanel } from "./components/AlertsPanel";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { AppNav } from "./components/AppNav";
 import { DetailPanel } from "./components/DetailPanel";
+import { DeepPacketPanel } from "./components/DeepPacketPanel";
 import { ExportPanel } from "./components/ExportPanel";
 import { FocusedIpPanel } from "./components/FocusedIpPanel";
 import { FlowsPanel } from "./components/FlowsPanel";
@@ -386,6 +387,9 @@ function App() {
               : "Select a packet from Monitor to open the inspection view."
           }
         />
+      </PageSection>
+      <PageSection title="Deep Packet Inspection" subtitle="Layer tree, redacted bytes, safe stream reconstruction, and expert warnings" wide>
+        <DeepPacketPanel api={api} packetId={selectedPacketId} />
       </PageSection>
       <PageSection title="Alert Detail" subtitle="Detection context and scoring without the monitor scroll" wide>
         <DetailPanel

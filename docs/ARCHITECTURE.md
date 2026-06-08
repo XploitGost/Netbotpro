@@ -283,4 +283,14 @@ tokens are not stored; visible text is redacted before history persistence.
 
 ## Release Posture
 
+## Deep Packet Inspection
+
+The Packet Dissector builds a structured layer tree from authorized packet
+metadata. The Display Filter Engine evaluates safe expressions without
+`eval`. The Stream Reassembler returns directional metadata or redacted
+previews, and the Expert Info Engine produces explainable packet and flow
+warnings. Packet Details APIs expose these views through the existing trusted
+client and local-token guardrails. TLS decryption and Agent raw forwarding are
+intentionally absent.
+
 Windows is the validated desktop release target for `0.2.0`. Linux and macOS packaging scripts exist, but production validation remains staged until those artifacts are built and smoke-tested on native hosts.

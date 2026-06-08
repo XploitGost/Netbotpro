@@ -60,6 +60,7 @@ from backend.app.services.export_service import ExportService
 from backend.app.services.flow_service import FlowService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
 from backend.app.services.investigation_export_service import InvestigationExportService
+from backend.app.services.packet_detail_service import PacketDetailService
 from backend.app.services.report_service import ReportService
 from backend.app.services.settings_service import get_settings, update_settings
 from backend.app.services.sniffer_service import (
@@ -72,6 +73,9 @@ from core.capture import SystemCaptureProvider
 ensure_project_root_on_path()
 
 from core.firewall_tools import block_ip  # noqa: E402
+from core.display_filter import DisplayFilterError, apply_display_filter, filter_help  # noqa: E402
+from core.expert_info import flow_expert_items, packet_expert_items  # noqa: E402
+from core.flow_engine import flow_id_for  # noqa: E402
 from log_manager import LOG_DIR  # noqa: E402
 
 event_bus = EventBus()
@@ -88,6 +92,7 @@ investigation_export_service = InvestigationExportService()
 history_service = HistoryService(sniffer_service)
 report_service = ReportService()
 agent_registry = AgentRegistry()
+packet_detail_service = PacketDetailService(history_service, sniffer_service, flow_service)
 logger = logging.getLogger("netbotpro.api")
 if not logger.handlers:
     logging.basicConfig(
@@ -480,6 +485,7 @@ def api_flows(
     direction: str = "",
     port: int = 0,
     has_alerts: bool = False,
+    filter: str = "",
     since: str = "",
     limit: int = 100,
     sort: str = "last_seen",
@@ -498,6 +504,11 @@ def api_flows(
         limit=limit,
         sort=sort,
     )
+    try:
+        if filter:
+            items = apply_display_filter(items, filter)
+    except DisplayFilterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"items": items, "total": len(items)}
 
 
@@ -542,6 +553,18 @@ def api_flow_timeline(
     return {"flow_id": flow_id, "items": flow_service.timeline(flow_id)}
 
 
+@app.get("/api/flows/{flow_id}/stream")
+def api_flow_stream(
+    flow_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    stream = packet_detail_service.flow_stream(flow_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    return stream
+
+
 @app.get("/api/conversations")
 def api_conversations(
     _: None = Depends(require_trusted_client),
@@ -560,6 +583,50 @@ def api_conversation_detail(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+@app.get("/api/conversations/{conversation_id}/stream")
+def api_conversation_stream(
+    conversation_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    stream = packet_detail_service.conversation_stream(conversation_id)
+    if not stream:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return stream
+
+
+@app.get("/api/expert/packets/{packet_id}")
+async def api_expert_packet(
+    packet_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    packet = await packet_detail_service.packet(packet_id)
+    if not packet:
+        raise HTTPException(status_code=404, detail="Packet not found")
+    return {"items": packet_expert_items(packet, flow_id_for(packet))}
+
+
+@app.get("/api/expert/flows/{flow_id}")
+def api_expert_flow(
+    flow_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    flow = flow_service.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    return {"items": flow_expert_items(flow)}
+
+
+@app.get("/api/expert/summary")
+def api_expert_summary(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return packet_detail_service.expert_summary()
 
 
 @app.get("/api/protocols/summary")
@@ -612,6 +679,26 @@ def api_flow_summary_report_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=flow-summary.csv"},
     )
+
+
+@app.get("/api/reports/packet-analysis/summary")
+def api_packet_analysis_report(
+    filter: str = "",
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    try:
+        return packet_detail_service.packet_report(filter)
+    except DisplayFilterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/reports/expert/summary")
+def api_expert_report(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return packet_detail_service.expert_summary()
 
 
 @app.get("/api/interfaces")
@@ -747,13 +834,14 @@ async def api_recent_packets(
     text: str = "",
     only_alerts: bool = False,
     only_remote: bool = False,
+    filter: str = "",
     limit: int = 50,
     offset: int = 0,
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     try:
-        return await history_service.aget_packets(
+        result = await history_service.aget_packets(
             {
                 "src": src,
                 "dst": dst,
@@ -767,8 +855,22 @@ async def api_recent_packets(
                 "offset": offset,
             }
         )
+        if filter:
+            result["items"] = apply_display_filter(result.get("items", []), filter)
+            result["total"] = len(result["items"])
+        return result
+    except DisplayFilterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HistoryRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/packets/filter/help")
+def api_packet_filter_help(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return filter_help()
 
 
 @app.get("/api/packets/{packet_id}", response_model=PacketItem)
@@ -784,6 +886,42 @@ async def api_packet_detail(
     if item is None:
         raise HTTPException(status_code=404, detail="Packet not found")
     return item
+
+
+@app.get("/api/packets/{packet_id}/details")
+async def api_packet_dissected_details(
+    packet_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    item = await packet_detail_service.details(packet_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Packet not found")
+    return item
+
+
+@app.get("/api/packets/{packet_id}/hex")
+async def api_packet_hex(
+    packet_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    item = await packet_detail_service.hex_view(packet_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Packet not found")
+    return item
+
+
+@app.get("/api/packets/{packet_id}/expert")
+async def api_packet_expert(
+    packet_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    packet = await packet_detail_service.packet(packet_id)
+    if packet is None:
+        raise HTTPException(status_code=404, detail="Packet not found")
+    return {"items": packet_expert_items(packet, flow_id_for(packet))}
 
 
 @app.get("/api/packets/{packet_id}/context", response_model=PacketFlowContext)

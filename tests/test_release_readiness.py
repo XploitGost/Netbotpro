@@ -78,6 +78,16 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("no tls decryption", flow_docs)
         self.assertIn("agent mode remains telemetry-only", flow_docs)
 
+    def test_deep_packet_inspection_docs_and_safety_are_linked(self):
+        dpi = self._read("docs/DEEP_PACKET_INSPECTION.md")
+        readme = self._read("README.md")
+        architecture = self._read("docs/ARCHITECTURE.md")
+        self.assertIn("DEEP_PACKET_INSPECTION.md", readme)
+        self.assertIn("Deep Packet Inspection", readme)
+        self.assertIn("Packet Dissector", architecture)
+        self.assertIn("No TLS decryption", dpi)
+        self.assertIn("No credential collection", dpi)
+
     def test_agent_release_safety_is_explicit(self):
         combined = "\n".join(
             [
