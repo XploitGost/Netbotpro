@@ -21,6 +21,10 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
         </span>
       </div>
       <div className="form-grid">
+        <div className="settings-section-heading full-span">
+          <strong>Capture & Analysis</strong>
+          <span>Interface, capture profile, detection sensitivity, and trace behavior.</span>
+        </div>
         <label>
           <span>Interface</span>
           {hasInterfaces ? (
@@ -66,6 +70,10 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
             <option value="ICMP">ICMP</option>
           </select>
         </label>
+        <div className="settings-section-heading full-span">
+          <strong>Access & Retention</strong>
+          <span>Trusted addresses, remote dashboard access, and local data lifetime.</span>
+        </div>
         <label className="full-span">
           <span>Whitelist</span>
           <input value={settings.whitelist_ips} onChange={(event) => onChange("whitelist_ips", event.target.value)} placeholder="127.0.0.1, 192.168.1.1" disabled={isBusy} />
@@ -85,6 +93,10 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
           <input type="number" min="0" max="1440" step="5" value={settings.forensic_duration_minutes || 0} onChange={(event) => onChange("forensic_duration_minutes", event.target.value)} disabled={isBusy || settings.capture_mode !== "forensic"} />
           <small className="field-help">Set a duration or confirm explicit-stop capture for forensic mode.</small>
         </label>
+        <div className="settings-section-heading full-span">
+          <strong>Safety Controls</strong>
+          <span>Explicit controls for storage, payload previews, and authorized capture modes.</span>
+        </div>
         <label className="toggle">
           <input type="checkbox" checked={Boolean(settings.auto_block)} onChange={(event) => onChange("auto_block", event.target.checked)} disabled={isBusy} />
           <span>Auto block high-risk alerts</span>
@@ -125,8 +137,10 @@ export function SettingsPanel({ settings, interfaceOptions = [], recommendedInte
           </div>
         ) : null}
       </div>
-      {isBusy ? <p className="table-status">Saving runtime settings...</p> : null}
-      <button className="primary wide-button" onClick={onSave} disabled={isBusy}>Save Settings</button>
+      <div className="settings-save-bar">
+        <span className="muted">{isBusy ? "Saving runtime settings..." : "Changes apply after saving."}</span>
+        <button className="primary" onClick={onSave} disabled={isBusy}>Save Settings</button>
+      </div>
     </div>
   );
 }

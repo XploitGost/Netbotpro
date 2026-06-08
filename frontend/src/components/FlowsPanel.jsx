@@ -27,12 +27,7 @@ function SummaryCard({ label, value, hint }) {
 }
 
 export function FlowsPanel({ api }) {
-  const [flows, setFlows] = useState([]);
-  const [summary, setSummary] = useState(null);
-  const [selectedId, setSelectedId] = useState("");
-  const [selectedFlow, setSelectedFlow] = useState(null);
-  const [timeline, setTimeline] = useState([]);
-  const [query, setQuery] = useState({
+  const defaultQuery = {
     protocol: "",
     risk: "",
     direction: "",
@@ -41,7 +36,13 @@ export function FlowsPanel({ api }) {
     port: "",
     has_alerts: false,
     sort: "risk",
-  });
+  };
+  const [flows, setFlows] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [selectedId, setSelectedId] = useState("");
+  const [selectedFlow, setSelectedFlow] = useState(null);
+  const [timeline, setTimeline] = useState([]);
+  const [query, setQuery] = useState(defaultQuery);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -126,9 +127,12 @@ export function FlowsPanel({ api }) {
           <input type="checkbox" checked={query.has_alerts} onChange={(event) => setQuery({ ...query, has_alerts: event.target.checked })} />
           Has alerts
         </label>
-        <button type="button" className="primary" disabled={loading} onClick={() => loadFlows(query)}>
-          {loading ? "Loading..." : "Apply"}
-        </button>
+        <div className="flow-filter-actions">
+          <button type="button" className="secondary" disabled={loading} onClick={() => { setQuery(defaultQuery); loadFlows(defaultQuery); }}>Clear</button>
+          <button type="button" className="primary" disabled={loading} onClick={() => loadFlows(query)}>
+            {loading ? "Loading..." : "Apply filters"}
+          </button>
+        </div>
       </div>
 
       {error ? <p className="error">{error}</p> : null}

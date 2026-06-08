@@ -41,6 +41,39 @@ function PageSection({ title, subtitle, children, wide = false, fullWidth = fals
   );
 }
 
+const WORKSPACE_META = {
+  monitor: { eyebrow: "Analyze", title: "Live Monitor", subtitle: "Capture status, packets, alerts, and operational health.", links: [["inspect", "Inspect packet"], ["flows", "Open flows"]] },
+  inspect: { eyebrow: "Analyze", title: "Packet Inspection", subtitle: "Investigate selected packets, alerts, streams, and protocol layers.", links: [["monitor", "Select packets"], ["flows", "Related flows"]] },
+  flows: { eyebrow: "Analyze", title: "Flows & Conversations", subtitle: "Review protocol-aware sessions, timelines, and explainable risk.", links: [["monitor", "Live packets"], ["inspect", "Inspect packet"], ["reports", "Reports"]] },
+  agents: { eyebrow: "Operations", title: "Agent Fleet", subtitle: "Read-only server health, capture status, alerts, and risk history.", links: [["reports", "Fleet reports"], ["settings", "Settings"]] },
+  traceroute: { eyebrow: "Operations", title: "Traceroute", subtitle: "Probe and review a network route from the local backend.", links: [["monitor", "Monitor"], ["inspect", "Inspect"]] },
+  offline: { eyebrow: "Operations", title: "Offline PCAP Analysis", subtitle: "Analyze an authorized capture without starting live monitoring.", links: [["inspect", "Inspect"], ["flows", "Flows"]] },
+  reports: { eyebrow: "Output", title: "Reports", subtitle: "Find and download generated analysis reports.", links: [["exports", "Create export"], ["inspect", "Inspect"]] },
+  exports: { eyebrow: "Output", title: "Exports", subtitle: "Generate redacted session and investigation artifacts.", links: [["reports", "Report archive"], ["monitor", "Monitor"]] },
+  settings: { eyebrow: "Output", title: "Runtime Settings", subtitle: "Configure capture, retention, safety, and analysis behavior.", links: [["monitor", "Monitor"], ["agents", "Agents"]] },
+};
+
+function WorkspaceHeader({ activePage, onNavigate, actions = null }) {
+  const meta = WORKSPACE_META[activePage] || WORKSPACE_META.monitor;
+  return (
+    <header className="workspace-header">
+      <div className="workspace-header-copy">
+        <p className="eyebrow">{meta.eyebrow}</p>
+        <h1>{meta.title}</h1>
+        <p className="muted">{meta.subtitle}</p>
+      </div>
+      <div className="workspace-header-tools">
+        <nav className="workspace-shortcuts" aria-label="Related workspaces">
+          {meta.links.map(([id, label]) => (
+            <button key={id} type="button" className="secondary" onClick={() => onNavigate(id)}>{label}</button>
+          ))}
+        </nav>
+        {actions}
+      </div>
+    </header>
+  );
+}
+
 function InspectSummaryCard({ label, value, hint, tone = "neutral" }) {
   return (
     <div className={`inspect-summary-card inspect-summary-${tone}`}>
@@ -310,12 +343,6 @@ function App() {
 
   const monitorPage = (
     <section className="page-grid page-grid-monitor">
-      <PageSection title="Traffic Graph" subtitle="Realtime graph for packets and alerts" fullWidth>
-        <LiveGraphPanel focusedTarget={focusedTarget} liveFollow={liveFollow} timeline={timeline} />
-      </PageSection>
-      <PageSection title="Ops Snapshot" subtitle="Health-aware runtime telemetry for stream, queries, and persistence" fullWidth>
-        <OpsPanel observability={observability} />
-      </PageSection>
       <PageSection title="Packets" subtitle="Realtime packet table with clear LAN/WAN markers" wide fullWidth>
         <PacketsPanel
           packets={packets}
@@ -352,6 +379,12 @@ function App() {
           pageSize={PAGE_SIZE}
         />
       </PageSection>
+      <PageSection title="Traffic Graph" subtitle="Realtime graph for packets and alerts" fullWidth>
+        <LiveGraphPanel focusedTarget={focusedTarget} liveFollow={liveFollow} timeline={timeline} />
+      </PageSection>
+      <PageSection title="Ops Snapshot" subtitle="Health-aware runtime telemetry for stream, queries, and persistence" fullWidth>
+        <OpsPanel observability={observability} />
+      </PageSection>
     </section>
   );
 
@@ -361,7 +394,6 @@ function App() {
         title="Analyst Summary"
         subtitle="Fast answers for the packet or alert you are inspecting"
         fullWidth
-        actions={inspectActions}
       >
         <div className="inspect-summary-grid">
           {inspectSummaryCards.map((card) => (
@@ -434,7 +466,7 @@ function App() {
 
   const settingsPage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Settings" subtitle="Runtime controls in a dedicated page" wide>
+      <PageSection title="Configuration" subtitle="Capture, analysis, access, retention, and safety controls" wide>
         <SettingsPanel
           settings={settings}
           interfaceOptions={interfaces}
@@ -450,7 +482,7 @@ function App() {
 
   const flowsPage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Flows / Conversations" subtitle="Protocol-aware sessions, timelines, and explainable risk" wide>
+      <PageSection title="Flow Explorer" subtitle="Filter sessions, compare risk, and inspect conversation timelines" wide>
         <FlowsPanel api={api} />
       </PageSection>
     </section>
@@ -458,7 +490,7 @@ function App() {
 
   const agentsPage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Servers / Agents" subtitle="Registered telemetry agents and redacted host summaries" wide>
+      <PageSection title="Fleet Overview" subtitle="Registered telemetry agents and redacted host summaries" wide>
         <AgentsPanel
           agents={agents}
           overview={agentOverview}
@@ -482,7 +514,7 @@ function App() {
 
   const traceroutePage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Traceroute" subtitle="Route probing in its own page" wide>
+      <PageSection title="Route Probe" subtitle="Configure a target and inspect the resulting route" wide>
         <TraceroutePanel
           tracerouteResult={tracerouteResult}
           tracerouteTarget={tracerouteTarget}
@@ -496,7 +528,7 @@ function App() {
 
   const exportsPage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Exports" subtitle="Session exports separated from monitoring" wide>
+      <PageSection title="Create Export" subtitle="Generate a redacted artifact from the current session" wide>
         <ExportPanel
           error={error}
           exportInfo={exportInfo}
@@ -510,7 +542,7 @@ function App() {
 
   const reportsPage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Reports" subtitle="Generated report archive" wide>
+      <PageSection title="Report Archive" subtitle="Generated reports ready for download" wide>
         <ReportsPanel isLoading={loadingState.reports} onDownload={downloadExport} reports={reports} />
       </PageSection>
     </section>
@@ -518,7 +550,7 @@ function App() {
 
   const offlinePage = (
     <section className="page-grid page-grid-single">
-      <PageSection title="Offline Analysis" subtitle="Analyze PCAP files in a dedicated workspace" wide>
+      <PageSection title="PCAP Workspace" subtitle="Upload an authorized capture and review its analysis" wide>
         <OfflineAnalysisPanel
           offlineResult={offlineResult}
           isBusy={loadingState.offlineAnalysis}
@@ -544,6 +576,11 @@ function App() {
   return (
     <main className="shell">
       <AppNav activePage={activePage} onNavigate={setActivePage} />
+      <WorkspaceHeader
+        activePage={activePage}
+        onNavigate={setActivePage}
+        actions={activePage === "inspect" ? inspectActions : null}
+      />
 
       {activePage === "monitor" ? (
         <>

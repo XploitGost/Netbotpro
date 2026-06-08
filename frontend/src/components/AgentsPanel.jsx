@@ -280,12 +280,10 @@ export function AgentsPanel({
             <option value="last_seen">Sort last seen</option>
             <option value="alerts">Sort alerts</option>
           </select>
-          <button type="button" className="secondary" disabled={isLoading} onClick={onRefresh}>
-            Refresh
-          </button>
-          <button type="button" className="secondary" disabled={isLoading || !hasAgents} onClick={onExportFleetSummary}>
-            Export summary
-          </button>
+        </div>
+        <div className="agent-command-actions">
+          <button type="button" className="secondary" disabled={isLoading} onClick={onRefresh}>Refresh fleet</button>
+          <button type="button" className="primary" disabled={isLoading || !hasAgents} onClick={onExportFleetSummary}>Export summary</button>
         </div>
       </div>
 
