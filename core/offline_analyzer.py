@@ -8,12 +8,21 @@ from backend.app.bootstrap import ensure_project_root_on_path
 
 ensure_project_root_on_path()
 
+from backend.app.services.sniffer_detection_pipeline import (  # noqa: E402
+    SnifferDetectionPipeline,
+)
 from config.settings_manager import load_settings  # noqa: E402
-from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline  # noqa: E402
+from core.dns_intelligence import analyze_dns_packets  # noqa: E402
 from core.flow_engine import FlowEngine  # noqa: E402
+from core.http_intelligence import analyze_http_packets  # noqa: E402
+from core.netbotpro_sniffer_core.packet_parser import (  # noqa: E402
+    PacketLayers,
+    PacketMetadataBuilder,
+)
 from core.packet_dissector import dissect_packet  # noqa: E402
 from core.privacy_redaction import redact_sensitive_data  # noqa: E402
-from core.netbotpro_sniffer_core.packet_parser import PacketLayers, PacketMetadataBuilder  # noqa: E402
+from core.tcp_analysis import analyze_tcp_packets  # noqa: E402
+from core.tls_intelligence import analyze_tls_packets  # noqa: E402
 
 
 class _OfflineProcessMapper:
@@ -29,7 +38,9 @@ def _read_pcap(path: str):
 
 def _packet_timestamp(pkt: Any) -> str:
     try:
-        return datetime.fromtimestamp(float(getattr(pkt, "time", 0.0))).strftime("%H:%M:%S")
+        return datetime.fromtimestamp(float(getattr(pkt, "time", 0.0))).strftime(
+            "%H:%M:%S"
+        )
     except Exception:
         return ""
 
@@ -68,8 +79,12 @@ def _build_meta(pkt: Any, builder: PacketMetadataBuilder, index: int) -> dict[st
     return meta
 
 
-def _top_pairs(counter: Counter, key_name: str, limit: int = 20) -> list[dict[str, Any]]:
-    return [{key_name: key, "count": count} for key, count in counter.most_common(limit)]
+def _top_pairs(
+    counter: Counter, key_name: str, limit: int = 20
+) -> list[dict[str, Any]]:
+    return [
+        {key_name: key, "count": count} for key, count in counter.most_common(limit)
+    ]
 
 
 def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str, Any]:
@@ -97,6 +112,7 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
     flow_engine = FlowEngine()
     packet_details: list[dict[str, Any]] = []
     expert_items: list[dict[str, Any]] = []
+    safe_packet_metadata: list[dict[str, Any]] = []
 
     for index, pkt in enumerate(packets):
         meta = _build_meta(pkt, builder, index)
@@ -134,6 +150,7 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
             if row.get("severity"):
                 severity_counter[str(row["severity"]).upper()] += 1
         flow_engine.ingest(meta, packet_alerts)
+        safe_packet_metadata.append(redact_sensitive_data(meta))
         if len(packet_details) < 200:
             detail = dissect_packet(
                 meta,
@@ -145,57 +162,67 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
             packet_details.append(detail)
             expert_items.extend(detail["expert_items"])
 
-    timeline = [{"time": key, "count": time_buckets[key]} for key in sorted(time_buckets)]
+    timeline = [
+        {"time": key, "count": time_buckets[key]} for key in sorted(time_buckets)
+    ]
     suspicious = bool(alerts)
     flow_summary = flow_engine.summary()
     conversations = flow_engine.conversations()
 
-    return redact_sensitive_data({
-        "summary": {
-            "total_packets": len(packets),
-            "total_alerts": len(alerts),
-            "attack_types": len(attack_counter),
-            "status": "attacks_detected" if suspicious else "no_attacks_detected",
-            "suspicious": suspicious,
-        },
-        "alerts": alerts,
-        "top_ips": _top_pairs(ip_counter, "ip"),
-        "top_countries": _top_pairs(country_counter, "country"),
-        "top_ports": _top_pairs(port_counter, "port"),
-        "top_attack_types": _top_pairs(attack_counter, "attack_type"),
-        "top_targets": _top_pairs(target_counter, "target"),
-        "top_protocols": _top_pairs(protocol_counter, "protocol"),
-        "severity_breakdown": _top_pairs(severity_counter, "severity"),
-        "timeline": timeline,
-        "flows": flow_engine.list_flows(limit=500),
-        "flow_summary": flow_summary,
-        "top_conversations": conversations[:20],
-        "top_risky_flows": flow_summary["top_risky_flows"],
-        "protocol_summary": {
-            "top_protocols": flow_summary["top_protocols"],
-            "bytes_by_protocol": flow_summary["bytes_by_protocol"],
-            "alerts_by_protocol": flow_summary["alerts_by_protocol"],
-        },
-        "risk_distribution": flow_summary["risk_distribution"],
-        "conversation_timeline": [
-            {
-                "conversation_id": item["conversation_id"],
-                "timeline": (
-                    flow_engine.get_conversation(item["conversation_id"]) or {}
-                ).get("timeline", []),
-            }
-            for item in conversations[:20]
-        ],
-        "packet_details": packet_details,
-        "expert_info": expert_items,
-        "stream_summary": [
-            {
-                "conversation_id": item["conversation_id"],
-                "protocols": item["protocols"],
-                "packets_count": item["packets_count"],
-                "bytes_total": item["bytes_total"],
-                "mode": "metadata",
-            }
-            for item in conversations[:20]
-        ],
-    })
+    return redact_sensitive_data(
+        {
+            "summary": {
+                "total_packets": len(packets),
+                "total_alerts": len(alerts),
+                "attack_types": len(attack_counter),
+                "status": "attacks_detected" if suspicious else "no_attacks_detected",
+                "suspicious": suspicious,
+            },
+            "alerts": alerts,
+            "top_ips": _top_pairs(ip_counter, "ip"),
+            "top_countries": _top_pairs(country_counter, "country"),
+            "top_ports": _top_pairs(port_counter, "port"),
+            "top_attack_types": _top_pairs(attack_counter, "attack_type"),
+            "top_targets": _top_pairs(target_counter, "target"),
+            "top_protocols": _top_pairs(protocol_counter, "protocol"),
+            "severity_breakdown": _top_pairs(severity_counter, "severity"),
+            "timeline": timeline,
+            "flows": flow_engine.list_flows(limit=500),
+            "flow_summary": flow_summary,
+            "top_conversations": conversations[:20],
+            "top_risky_flows": flow_summary["top_risky_flows"],
+            "protocol_summary": {
+                "top_protocols": flow_summary["top_protocols"],
+                "bytes_by_protocol": flow_summary["bytes_by_protocol"],
+                "alerts_by_protocol": flow_summary["alerts_by_protocol"],
+            },
+            "protocol_intelligence": {
+                "tcp": analyze_tcp_packets(safe_packet_metadata),
+                "dns": analyze_dns_packets(safe_packet_metadata),
+                "http": analyze_http_packets(safe_packet_metadata),
+                "tls": analyze_tls_packets(safe_packet_metadata),
+            },
+            "risk_distribution": flow_summary["risk_distribution"],
+            "conversation_timeline": [
+                {
+                    "conversation_id": item["conversation_id"],
+                    "timeline": (
+                        flow_engine.get_conversation(item["conversation_id"]) or {}
+                    ).get("timeline", []),
+                }
+                for item in conversations[:20]
+            ],
+            "packet_details": packet_details,
+            "expert_info": expert_items,
+            "stream_summary": [
+                {
+                    "conversation_id": item["conversation_id"],
+                    "protocols": item["protocols"],
+                    "packets_count": item["packets_count"],
+                    "bytes_total": item["bytes_total"],
+                    "mode": "metadata",
+                }
+                for item in conversations[:20]
+            ],
+        }
+    )

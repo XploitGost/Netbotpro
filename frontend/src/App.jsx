@@ -13,6 +13,7 @@ import { MiniList } from "./components/MiniList";
 import { OfflineAnalysisPanel } from "./components/OfflineAnalysisPanel";
 import { OpsPanel } from "./components/OpsPanel";
 import { PacketsPanel } from "./components/PacketsPanel";
+import { ProtocolIntelligencePanel } from "./components/ProtocolIntelligencePanel";
 import { ReportsPanel } from "./components/ReportsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatCard } from "./components/StatCard";
@@ -422,6 +423,9 @@ function App() {
       </PageSection>
       <PageSection title="Deep Packet Inspection" subtitle="Layer tree, redacted bytes, safe stream reconstruction, and expert warnings" wide>
         <DeepPacketPanel api={api} packetId={selectedPacketId} />
+      </PageSection>
+      <PageSection title="Protocol Intelligence" subtitle="Protocol statistics, safe packet search, and saved display filters" wide fullWidth>
+        <ProtocolIntelligencePanel api={api} />
       </PageSection>
       <PageSection title="Alert Detail" subtitle="Detection context and scoring without the monitor scroll" wide>
         <DetailPanel

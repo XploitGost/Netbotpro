@@ -53,6 +53,12 @@ flowchart TB
         Parser["Packet Parser"]
         Layer7["Layer 7 / TLS Metadata"]
         ProtocolIntel["Protocol Intelligence"]
+        TCPIntel["TCP Analysis"]
+        DNSIntel["DNS Intelligence"]
+        HTTPIntel["HTTP Intelligence"]
+        TLSIntel["TLS Metadata Intelligence"]
+        DisplayFilters["Safe Display Filters + Saved Filter Storage"]
+        ExpertSummary["Expert Summary"]
         FlowEngine["Flow Engine"]
         Conversation["Conversation Timeline"]
         FlowRisk["Flow Risk Scoring"]
@@ -100,6 +106,15 @@ flowchart TB
     Events --> LiveClient
     CapturePolicy --> Provider
     Provider --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
+    ProtocolIntel --> TCPIntel
+    ProtocolIntel --> DNSIntel
+    ProtocolIntel --> HTTPIntel
+    ProtocolIntel --> TLSIntel
+    DisplayFilters --> Routes
+    TCPIntel --> ExpertSummary
+    DNSIntel --> ExpertSummary
+    HTTPIntel --> ExpertSummary
+    TLSIntel --> ExpertSummary
     FlowEngine --> Conversation
     FlowEngine --> FlowRisk
     ProtocolIntel --> Redaction
@@ -180,6 +195,13 @@ Conversation Timeline correlates protocol detection, DNS/HTTP/TLS metadata,
 alerts, and unusual destinations. Flow Risk Scoring creates a bounded score and
 explainable reasons. Redacted snapshots are persisted separately in
 `.runtime/logs/flows.db`; raw payloads are not stored in this database.
+
+The Protocol Intelligence expansion uses focused analyzers in
+`core/tcp_analysis.py`, `core/dns_intelligence.py`,
+`core/http_intelligence.py`, and `core/tls_intelligence.py`. The same modules
+serve live capture and offline PCAP analysis. Saved Display Filters use a small
+redacted JSON store, while Expert Summary and inspection reports combine
+protocol hints without persisting raw credentials or decrypted TLS content.
 
 ## Agent And Fleet Monitoring Plane
 

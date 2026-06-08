@@ -57,6 +57,12 @@ or PCAP artifacts.
 | Agent history and risk | Ready | SQLite auto-init, history, offline detection, redaction, and risk scoring are tested. | Redacted history with configurable retention and `90s` default offline threshold. |
 | Flow Analysis | Active | Live packets are grouped into directional flows and bidirectional conversations. | Flow snapshots contain redacted metadata, not raw payloads or credentials. |
 | Protocol Intelligence | Active MVP | DNS, HTTP, TLS metadata, SSH, RDP, SMB, mail, ICMP, and unknown traffic are classified. | Metadata-safe detection only; no TLS decryption, MITM, or key extraction. |
+| TCP Analysis | Active | Handshake state, flags, resets, duplicate ACK, retransmission, and zero-window hints. | Hints are observational, not guaranteed root-cause detection. |
+| DNS Intelligence | Active | Query types, response codes, NXDOMAIN rate, repeated-query and entropy hints. | Raw payloads and sensitive-looking values are not displayed. |
+| HTTP/TLS Metadata Intelligence | Active | HTTP method/status summaries and visible TLS SNI/ALPN/version summaries. | Authorization, cookies, tokens, and TLS plaintext are not collected or displayed. |
+| Protocol Statistics | Active | Packet, flow, byte, alert, expert warning, and risk summaries by protocol. | Summaries operate on the current bounded analysis window. |
+| Saved Display Filters | Active | Built-in and custom safe filter expressions with field suggestions. | No Python or JavaScript `eval`; sensitive expressions are redacted. |
+| Packet Search | Active | Searches IP, port, protocol, redacted summary, protocol metadata, risk, and Expert fields. | Does not search unredacted raw payloads. |
 | Conversation Timeline | Active | Protocol, alert, destination, and lifecycle events are correlated per flow. | Timeline summaries and metadata pass through central redaction. |
 | Flow Risk Scoring | Active | Explainable `0..100` scoring covers alerts, volume, DNS failures, unusual protocols/ports, and destinations. | Risk is an investigation aid, not an automated verdict. |
 | Offline PCAP Flow Summary | Active | Offline analysis returns flows, conversations, protocol summaries, timelines, and risk distribution. | Existing API response fields remain compatible; output stays redacted. |

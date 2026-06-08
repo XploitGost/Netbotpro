@@ -62,6 +62,7 @@ from backend.app.services.history_service import HistoryRepositoryError, History
 from backend.app.services.investigation_export_service import InvestigationExportService
 from backend.app.services.packet_detail_service import PacketDetailService
 from backend.app.services.report_service import ReportService
+from backend.app.services.saved_filter_service import SavedFilterService
 from backend.app.services.settings_service import get_settings, update_settings
 from backend.app.services.sniffer_service import (
     CaptureStartUnavailableError,
@@ -72,9 +73,11 @@ from core.capture import SystemCaptureProvider
 
 ensure_project_root_on_path()
 
+from core.display_filter import DisplayFilterError  # noqa: E402
+from core.display_filter import apply_display_filter, filter_help, filter_suggestions
+from core.expert_info import flow_expert_items  # noqa: E402
+from core.expert_info import packet_expert_items
 from core.firewall_tools import block_ip  # noqa: E402
-from core.display_filter import DisplayFilterError, apply_display_filter, filter_help  # noqa: E402
-from core.expert_info import flow_expert_items, packet_expert_items  # noqa: E402
 from core.flow_engine import flow_id_for  # noqa: E402
 from log_manager import LOG_DIR  # noqa: E402
 
@@ -92,7 +95,10 @@ investigation_export_service = InvestigationExportService()
 history_service = HistoryService(sniffer_service)
 report_service = ReportService()
 agent_registry = AgentRegistry()
-packet_detail_service = PacketDetailService(history_service, sniffer_service, flow_service)
+packet_detail_service = PacketDetailService(
+    history_service, sniffer_service, flow_service
+)
+saved_filter_service = SavedFilterService()
 logger = logging.getLogger("netbotpro.api")
 if not logger.handlers:
     logging.basicConfig(
@@ -637,6 +643,29 @@ def api_protocols_summary(
     return flow_service.protocols_summary()
 
 
+@app.get("/api/protocols/intelligence")
+def api_protocol_intelligence(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return packet_detail_service.protocol_intelligence()
+
+
+@app.get("/api/protocols/{protocol}/summary")
+def api_protocol_specific_summary(
+    protocol: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    intelligence = packet_detail_service.protocol_intelligence()
+    key = protocol.strip().lower()
+    if key not in {"tcp", "dns", "http", "tls"}:
+        raise HTTPException(
+            status_code=404, detail="Protocol intelligence summary not found"
+        )
+    return intelligence[key]
+
+
 @app.get("/api/protocols/{protocol}/flows")
 def api_protocol_flows(
     protocol: str,
@@ -699,6 +728,34 @@ def api_expert_report(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return packet_detail_service.expert_summary()
+
+
+@app.get("/api/reports/protocols/summary")
+def api_protocol_report(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    report = packet_detail_service.protocol_intelligence()
+    audit_event("protocol_summary_report_generated", actor=_actor_from_request(request))
+    return report
+
+
+@app.get("/api/reports/inspection/summary")
+def api_inspection_report(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    report = {
+        "packet_analysis": packet_detail_service.packet_report(),
+        "protocol_intelligence": packet_detail_service.protocol_intelligence(),
+        "expert": packet_detail_service.expert_summary(),
+    }
+    audit_event(
+        "inspection_summary_report_generated", actor=_actor_from_request(request)
+    )
+    return report
 
 
 @app.get("/api/interfaces")
@@ -871,6 +928,72 @@ def api_packet_filter_help(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return filter_help()
+
+
+@app.get("/api/packets/filter/suggestions")
+def api_packet_filter_suggestions(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return filter_suggestions()
+
+
+@app.get("/api/filters")
+def api_saved_filters(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> list[dict[str, Any]]:
+    return saved_filter_service.list()
+
+
+@app.post("/api/filters")
+def api_create_saved_filter(
+    payload: dict[str, Any],
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    try:
+        return saved_filter_service.create(payload)
+    except DisplayFilterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/filters/{filter_id}")
+def api_update_saved_filter(
+    filter_id: str,
+    payload: dict[str, Any],
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    try:
+        return saved_filter_service.update(filter_id, payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Saved filter not found") from exc
+    except DisplayFilterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/filters/{filter_id}")
+def api_delete_saved_filter(
+    filter_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, bool]:
+    try:
+        saved_filter_service.delete(filter_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Saved filter not found") from exc
+    return {"ok": True}
+
+
+@app.get("/api/packets/search")
+def api_packet_search(
+    q: str = "",
+    limit: int = 100,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return packet_detail_service.search(q, limit)
 
 
 @app.get("/api/packets/{packet_id}", response_model=PacketItem)

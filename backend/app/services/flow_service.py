@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import csv
-from contextlib import contextmanager
 import io
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -22,8 +22,7 @@ class FlowService:
     ) -> None:
         self.engine = engine or FlowEngine()
         self.db_path = Path(
-            db_path
-            or os.environ.get("NETBOT_FLOW_DB_PATH", ".runtime/logs/flows.db")
+            db_path or os.environ.get("NETBOT_FLOW_DB_PATH", ".runtime/logs/flows.db")
         )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
@@ -42,8 +41,7 @@ class FlowService:
 
     def _init_schema(self) -> None:
         with self._connection() as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS flows (
                     flow_id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL,
@@ -54,8 +52,7 @@ class FlowService:
                     direction TEXT NOT NULL,
                     snapshot_json TEXT NOT NULL
                 )
-                """
-            )
+                """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_flows_last_seen ON flows(last_seen)"
             )
@@ -118,12 +115,42 @@ class FlowService:
         self.engine.reset()
 
     def protocols_summary(self) -> dict[str, Any]:
-        summary = self.summary()
-        return {
-            "top_protocols": summary["top_protocols"],
-            "bytes_by_protocol": summary["bytes_by_protocol"],
-            "alerts_by_protocol": summary["alerts_by_protocol"],
-        }
+        flows = self.list_flows(limit=500)
+        protocols: dict[str, dict[str, Any]] = {}
+        for flow in flows:
+            name = str(flow.get("app_protocol") or "UNKNOWN")
+            row = protocols.setdefault(
+                name,
+                {
+                    "protocol": name,
+                    "packet_count": 0,
+                    "flow_count": 0,
+                    "bytes_total": 0,
+                    "alert_count": 0,
+                    "expert_warning_count": 0,
+                    "risk_total": 0,
+                    "risk_max": 0,
+                },
+            )
+            risk = int(flow.get("risk_score") or 0)
+            row["packet_count"] += int(flow.get("packets_count") or 0)
+            row["flow_count"] += 1
+            row["bytes_total"] += int(flow.get("bytes_total") or 0)
+            row["alert_count"] += len(flow.get("related_alert_ids") or [])
+            row["risk_total"] += risk
+            row["risk_max"] = max(row["risk_max"], risk)
+        items = []
+        for row in protocols.values():
+            row["risk_avg"] = round(row.pop("risk_total") / row["flow_count"], 2)
+            items.append(row)
+        items.sort(key=lambda row: row["packet_count"], reverse=True)
+        return redact_sensitive_data(
+            {
+                "total_packets": sum(row["packet_count"] for row in items),
+                "total_flows": len(flows),
+                "protocols": items,
+            }
+        )
 
     def report(self) -> dict[str, Any]:
         summary = self.summary()

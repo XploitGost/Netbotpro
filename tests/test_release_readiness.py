@@ -36,9 +36,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             changelog,
             rf"## v{re.escape(TARGET_VERSION)} - Agent & Fleet Monitoring Release",
         )
-        self.assertEqual(
-            changelog.splitlines()[2],
+        self.assertIn("## Unreleased", changelog)
+        self.assertIn(
             f"## v{TARGET_VERSION} - Agent & Fleet Monitoring Release - 2026-06-05",
+            changelog,
         )
 
     def test_demo_scripts_do_not_print_raw_tokens(self):
@@ -87,6 +88,17 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Packet Dissector", architecture)
         self.assertIn("No TLS decryption", dpi)
         self.assertIn("No credential collection", dpi)
+        for feature in [
+            "Saved Display Filters",
+            "Packet Search",
+            "TCP Analysis",
+            "DNS Intelligence",
+            "HTTP/TLS Metadata Intelligence",
+            "Protocol Statistics",
+        ]:
+            self.assertIn(feature, readme)
+        self.assertIn("core/tcp_analysis.py", architecture)
+        self.assertIn("core/dns_intelligence.py", architecture)
 
     def test_agent_release_safety_is_explicit(self):
         combined = "\n".join(

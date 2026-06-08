@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Protocol Intelligence Expansion for TCP, DNS, HTTP, and visible TLS metadata.
+- Saved Display Filters with built-in recipes and safe field suggestions.
+- Protocol Statistics and safe Packet Search in the Inspect workspace.
+- Expanded Expert Info and redacted protocol/inspection summary reports.
+- Offline PCAP parity for protocol intelligence summaries.
+
 ## v0.2.0 - Agent & Fleet Monitoring Release - 2026-06-05
 
 ### Added
