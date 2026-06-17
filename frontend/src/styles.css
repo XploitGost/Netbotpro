@@ -1865,6 +1865,22 @@ a {
   padding: 6px 10px;
 }
 
+.ops-action-list {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.ops-action-list ul {
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .graph-summary-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;

@@ -46,6 +46,7 @@ describe("OpsPanel", () => {
     expect(screen.getByText("60s")).toBeTruthy();
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
     expect(screen.getByText("queue backlog high")).toBeTruthy();
+    expect(screen.getByText("Review high-risk flows for unusual destinations.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
@@ -96,5 +97,27 @@ describe("OpsPanel", () => {
 
     const flowsCard = screen.getByText("Flows").closest("article");
     expect(flowsCard?.className).toContain("ops-degraded");
+    expect(screen.getByText("Review critical flows and related alerts first.")).toBeTruthy();
+  });
+
+  it("shows a calm action when the ops snapshot is healthy", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: {
+            total: 0,
+            active: 0,
+            external: 0,
+            risk_distribution: {},
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("No immediate action needed.")).toBeTruthy();
   });
 });

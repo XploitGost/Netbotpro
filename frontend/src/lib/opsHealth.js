@@ -90,7 +90,28 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
 
   const backendLevel = normalizeLevel(operationalMetrics?.health);
   const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
+  const criticalFlows = toNumber(flows.risk_distribution?.critical);
+  const highFlows = toNumber(flows.risk_distribution?.high);
   const overall = worstLevel(backendLevel, freshnessLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const recommendedActions = [];
+
+  if (freshnessLevel !== "healthy") {
+    recommendedActions.push("Refresh the ops snapshot before making a decision.");
+  }
+  if (criticalFlows > 0) {
+    recommendedActions.push("Review critical flows and related alerts first.");
+  } else if (highFlows > 0) {
+    recommendedActions.push("Review high-risk flows for unusual destinations.");
+  }
+  if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0) {
+    recommendedActions.push("Check persistence backlog and export/report write health.");
+  }
+  if (wsDropped > 0) {
+    recommendedActions.push("Check live stream subscribers for dropped websocket events.");
+  }
+  if (!recommendedActions.length) {
+    recommendedActions.push("No immediate action needed.");
+  }
 
   const summaryCards = [
     {
@@ -115,9 +136,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       label: "Flows",
       value: String(toNumber(flows.total)),
       hint: `${toNumber(flows.active)} active | ${toNumber(flows.external)} external`,
-      level: toNumber(flows.risk_distribution?.critical) > 0
+      level: criticalFlows > 0
         ? "degraded"
-        : toNumber(flows.risk_distribution?.high) > 0
+        : highFlows > 0
           ? "warning"
           : "healthy",
     },
@@ -163,6 +184,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     overall,
     generatedAt: operationalMetrics?.generated_at || "",
     ageSeconds,
+    recommendedActions,
     capture,
     flows,
     pressureReasons,

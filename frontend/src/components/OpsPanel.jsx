@@ -83,6 +83,12 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
             {snapshot.pressureReasons.map((reason) => <span key={reason}>{reason}</span>)}
           </div>
         ) : null}
+        <div className="ops-action-list">
+          <p className="eyebrow">Recommended Actions</p>
+          <ul>
+            {snapshot.recommendedActions.map((action) => <li key={action}>{action}</li>)}
+          </ul>
+        </div>
       </AccordionPanel>
 
       <AccordionPanel
