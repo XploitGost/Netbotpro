@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OpsPanel } from "./OpsPanel";
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-06-17T10:01:00Z"));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("OpsPanel", () => {
   it("renders the protected monitoring metrics snapshot and refresh control", () => {
@@ -35,6 +43,7 @@ describe("OpsPanel", () => {
     );
 
     expect(screen.getAllByText("Runtime Health").length).toBeGreaterThan(0);
+    expect(screen.getByText("60s")).toBeTruthy();
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
     expect(screen.getByText("queue backlog high")).toBeTruthy();
 
@@ -48,5 +57,22 @@ describe("OpsPanel", () => {
     render(<OpsPanel observability={{}} isRefreshing onRefresh={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Refreshing..." }).disabled).toBe(true);
+  });
+
+  it("marks an old backend snapshot as stale", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T09:55:00Z",
+          health: "healthy",
+          capture: {},
+          flows: {},
+        }}
+      />
+    );
+
+    expect(screen.getByText("Snapshot may be stale")).toBeTruthy();
+    expect(screen.getByText("Degraded")).toBeTruthy();
   });
 });

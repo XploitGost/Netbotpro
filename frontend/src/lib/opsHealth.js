@@ -23,6 +23,13 @@ export function formatMs(value) {
   return `${toNumber(value).toFixed(1)} ms`;
 }
 
+function snapshotAgeSeconds(value, now = Date.now()) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return Math.max(0, Math.round((now - parsed) / 1000));
+}
+
 function normalizeLevel(level) {
   if (level === "critical") return "degraded";
   if (level === "degraded" || level === "warning" || level === "healthy") return level;
@@ -39,6 +46,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const pressureReasons = Array.isArray(operationalMetrics?.pressure_reasons)
     ? operationalMetrics.pressure_reasons
     : [];
+  const ageSeconds = snapshotAgeSeconds(operationalMetrics?.generated_at);
   const packetsList = history.packets_list || {};
   const alertsList = history.alerts_list || {};
   const packetDetail = history.packet_detail || {};
@@ -81,7 +89,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     : "healthy";
 
   const backendLevel = normalizeLevel(operationalMetrics?.health);
-  const overall = worstLevel(backendLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
+  const overall = worstLevel(backendLevel, freshnessLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
 
   const summaryCards = [
     {
@@ -89,6 +98,12 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       value: levelLabel(backendLevel),
       hint: pressureReasons.length ? `${pressureReasons.length} pressure signal${pressureReasons.length === 1 ? "" : "s"}` : "No pressure signals",
       level: backendLevel,
+    },
+    {
+      label: "Snapshot Age",
+      value: ageSeconds == null ? "Unknown" : `${ageSeconds}s`,
+      hint: ageSeconds == null ? "Refresh to verify freshness" : ageSeconds > 120 ? "Snapshot may be stale" : "Fresh snapshot",
+      level: freshnessLevel,
     },
     {
       label: "Capture",
@@ -143,6 +158,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   return {
     overall,
     generatedAt: operationalMetrics?.generated_at || "",
+    ageSeconds,
     capture,
     flows,
     pressureReasons,
