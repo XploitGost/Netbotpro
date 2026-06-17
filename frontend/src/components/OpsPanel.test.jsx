@@ -141,4 +141,25 @@ describe("OpsPanel", () => {
 
     expect(screen.getByText("Start capture or confirm monitoring is intentionally paused.")).toBeTruthy();
   });
+
+  it("recommends checking history storage when query latency is high", () => {
+    render(
+      <OpsPanel
+        observability={{
+          history: {
+            packets_list: { last_ms: 220, errors: 0 },
+            alerts_list: { last_ms: 20, errors: 0 },
+          },
+        }}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Check history query latency and packet/alert storage load.")).toBeTruthy();
+  });
 });

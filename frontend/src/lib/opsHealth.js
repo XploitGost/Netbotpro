@@ -109,6 +109,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0) {
     recommendedActions.push("Check persistence backlog and export/report write health.");
   }
+  if (queryLevel !== "healthy") {
+    recommendedActions.push("Check history query latency and packet/alert storage load.");
+  }
   if (wsDropped > 0) {
     recommendedActions.push("Check live stream subscribers for dropped websocket events.");
   }
