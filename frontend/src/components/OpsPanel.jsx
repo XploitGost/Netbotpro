@@ -30,7 +30,7 @@ function formatGeneratedAt(value) {
   return `Updated ${new Date(parsed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
 }
 
-export function OpsPanel({ observability, operationalMetrics = null }) {
+export function OpsPanel({ observability, operationalMetrics = null, isRefreshing = false, onRefresh = null }) {
   const snapshot = buildOpsSnapshot(observability, operationalMetrics);
   const levelFor = (label, fallback = "healthy") => snapshot.summaryCards.find((card) => card.label === label)?.level || fallback;
   const persistence = snapshot.persistence;
@@ -51,7 +51,14 @@ export function OpsPanel({ observability, operationalMetrics = null }) {
           <h3 className="ops-title">Runtime Health</h3>
           <p className="muted">{formatGeneratedAt(snapshot.generatedAt)}</p>
         </div>
-        <span className={`ops-state-pill ${levelClass(snapshot.overall)}`}>{levelLabel(snapshot.overall)}</span>
+        <div className="ops-toolbar-actions">
+          {onRefresh ? (
+            <button type="button" className="secondary" disabled={isRefreshing} onClick={onRefresh}>
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </button>
+          ) : null}
+          <span className={`ops-state-pill ${levelClass(snapshot.overall)}`}>{levelLabel(snapshot.overall)}</span>
+        </div>
       </div>
 
       <div className="ops-summary-grid">

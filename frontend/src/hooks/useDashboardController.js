@@ -217,6 +217,7 @@ export function useDashboardController() {
     exports: false,
     reports: false,
     agents: false,
+    opsMetrics: false,
     traceroute: false,
     offlineAnalysis: false,
     settings: false,
@@ -517,6 +518,19 @@ export function useDashboardController() {
       setAgentError(normalizeErrorMessage(err, "Unable to load agent fleet data"));
     } finally {
       setLoading("agents", false);
+    }
+  }
+
+  async function refreshOperationalMetrics() {
+    setLoading("opsMetrics", true);
+    try {
+      const data = await api.getMonitoringMetrics();
+      setOperationalMetrics(data || null);
+      setStatusMessage("Ops snapshot refreshed");
+    } catch (err) {
+      setError(normalizeErrorMessage(err, "Unable to refresh ops snapshot"));
+    } finally {
+      setLoading("opsMetrics", false);
     }
   }
 
@@ -1268,6 +1282,7 @@ export function useDashboardController() {
     loadPacketDetail,
     loadAlertDetail,
     loadAgents,
+    refreshOperationalMetrics,
     selectAgent,
     exportAgentFleetSummary,
     openPacketDetailById,

@@ -188,6 +188,7 @@ function App() {
     loadPacketDetail,
     loadAlertDetail,
     loadAgents,
+    refreshOperationalMetrics,
     selectAgent,
     exportAgentFleetSummary,
     openPacketDetailById,
@@ -385,7 +386,12 @@ function App() {
         <LiveGraphPanel focusedTarget={focusedTarget} liveFollow={liveFollow} timeline={timeline} />
       </PageSection>
       <PageSection title="Ops Snapshot" subtitle="Health-aware runtime telemetry for stream, queries, and persistence" fullWidth>
-        <OpsPanel observability={observability} operationalMetrics={operationalMetrics} />
+        <OpsPanel
+          observability={observability}
+          operationalMetrics={operationalMetrics}
+          isRefreshing={loadingState.opsMetrics}
+          onRefresh={refreshOperationalMetrics}
+        />
       </PageSection>
     </section>
   );
