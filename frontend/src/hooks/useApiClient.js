@@ -54,6 +54,7 @@ export function useApiClient(localToken) {
     apiBase,
     getStatus: () => request("/status"),
     getDashboard: () => request("/dashboard"),
+    getMonitoringMetrics: () => request("/monitoring/metrics"),
     getSettings: () => request("/settings"),
     getInterfaces: () => request("/interfaces"),
     getAgents: () => request("/agents"),

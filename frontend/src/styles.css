@@ -1841,6 +1841,22 @@ a {
   color: var(--muted);
 }
 
+.ops-pressure-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ops-pressure-list span {
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text);
+  font-size: 0.78rem;
+  padding: 6px 10px;
+}
+
 .graph-summary-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;

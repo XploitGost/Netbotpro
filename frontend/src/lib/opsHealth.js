@@ -23,11 +23,22 @@ export function formatMs(value) {
   return `${toNumber(value).toFixed(1)} ms`;
 }
 
-export function buildOpsSnapshot(observability) {
+function normalizeLevel(level) {
+  if (level === "critical") return "degraded";
+  if (level === "degraded" || level === "warning" || level === "healthy") return level;
+  return "healthy";
+}
+
+export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventBus = observability?.event_bus || {};
   const persistence = observability?.persistence || {};
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
+  const capture = operationalMetrics?.capture || {};
+  const flows = operationalMetrics?.flows || {};
+  const pressureReasons = Array.isArray(operationalMetrics?.pressure_reasons)
+    ? operationalMetrics.pressure_reasons
+    : [];
   const packetsList = history.packets_list || {};
   const alertsList = history.alerts_list || {};
   const packetDetail = history.packet_detail || {};
@@ -69,9 +80,28 @@ export function buildOpsSnapshot(observability) {
     ? "warning"
     : "healthy";
 
-  const overall = worstLevel(persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const backendLevel = normalizeLevel(operationalMetrics?.health);
+  const overall = worstLevel(backendLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
 
   const summaryCards = [
+    {
+      label: "Runtime Health",
+      value: levelLabel(backendLevel),
+      hint: pressureReasons.length ? `${pressureReasons.length} pressure signal${pressureReasons.length === 1 ? "" : "s"}` : "No pressure signals",
+      level: backendLevel,
+    },
+    {
+      label: "Capture",
+      value: capture.running ? "Running" : "Stopped",
+      hint: capture.interface || "No interface selected",
+      level: capture.running ? "healthy" : "warning",
+    },
+    {
+      label: "Flows",
+      value: String(toNumber(flows.total)),
+      hint: `${toNumber(flows.active)} active | ${toNumber(flows.external)} external`,
+      level: toNumber(flows.risk_distribution?.critical) > 0 || toNumber(flows.risk_distribution?.high) > 0 ? "warning" : "healthy",
+    },
     {
       label: "Queue Size",
       value: String(queueSize),
@@ -112,6 +142,10 @@ export function buildOpsSnapshot(observability) {
 
   return {
     overall,
+    generatedAt: operationalMetrics?.generated_at || "",
+    capture,
+    flows,
+    pressureReasons,
     eventBus,
     persistence,
     history,

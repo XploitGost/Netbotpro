@@ -158,6 +158,7 @@ function App() {
     connectionLabel,
     statusMessage,
     observability,
+    operationalMetrics,
     error,
     loadingState,
     localTokenRequired,
@@ -384,7 +385,7 @@ function App() {
         <LiveGraphPanel focusedTarget={focusedTarget} liveFollow={liveFollow} timeline={timeline} />
       </PageSection>
       <PageSection title="Ops Snapshot" subtitle="Health-aware runtime telemetry for stream, queries, and persistence" fullWidth>
-        <OpsPanel observability={observability} />
+        <OpsPanel observability={observability} operationalMetrics={operationalMetrics} />
       </PageSection>
     </section>
   );

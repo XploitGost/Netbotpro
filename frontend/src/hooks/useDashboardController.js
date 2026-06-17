@@ -206,6 +206,7 @@ export function useDashboardController() {
   const [connectionState, setConnectionState] = useState("connecting");
   const [statusMessage, setStatusMessage] = useState("Connecting to local backend...");
   const [observability, setObservability] = useState({});
+  const [operationalMetrics, setOperationalMetrics] = useState(null);
   const [error, setError] = useState("");
   const [loadingState, setLoadingState] = useState({
     bootstrap: true,
@@ -327,6 +328,7 @@ export function useDashboardController() {
           agentsOverviewData,
           agentAlertsSummaryData,
           agentRiskSummaryData,
+          monitoringMetricsData,
         ] = await Promise.all([
           api.getDashboard(),
           api.getSettings(),
@@ -335,6 +337,7 @@ export function useDashboardController() {
           api.getAgentsOverview().catch(() => null),
           api.getAgentAlertsSummary().catch(() => null),
           api.getAgentRiskSummary().catch(() => null),
+          api.getMonitoringMetrics().catch(() => null),
         ]);
         if (!active) return;
         clearHistoryCaches();
@@ -362,6 +365,7 @@ export function useDashboardController() {
         setAgentOverview(agentsOverviewData);
         setAgentAlertsSummary(agentAlertsSummaryData);
         setAgentRiskSummary(agentRiskSummaryData);
+        setOperationalMetrics(monitoringMetricsData);
         setSelectedAgentId((current) => current || agentItems[0]?.agent_id || "");
         setStatusMessage("Dashboard synced");
       } catch (err) {
@@ -1233,6 +1237,7 @@ export function useDashboardController() {
     connectionLabel,
     statusMessage,
     observability,
+    operationalMetrics,
     error,
     loadingState,
     localTokenRequired,

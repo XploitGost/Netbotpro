@@ -23,11 +23,21 @@ function SummaryCard({ card }) {
   );
 }
 
-export function OpsPanel({ observability }) {
-  const snapshot = buildOpsSnapshot(observability);
+function formatGeneratedAt(value) {
+  if (!value) return "Backend snapshot";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return "Backend snapshot";
+  return `Updated ${new Date(parsed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+}
+
+export function OpsPanel({ observability, operationalMetrics = null }) {
+  const snapshot = buildOpsSnapshot(observability, operationalMetrics);
+  const levelFor = (label, fallback = "healthy") => snapshot.summaryCards.find((card) => card.label === label)?.level || fallback;
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
   const autoBlock = snapshot.autoBlock;
+  const capture = snapshot.capture;
+  const flows = snapshot.flows;
   const packetsList = snapshot.packetsList;
   const alertsList = snapshot.alertsList;
   const packetDetail = snapshot.packetDetail;
@@ -39,6 +49,7 @@ export function OpsPanel({ observability }) {
         <div>
           <p className="eyebrow">Ops Monitor</p>
           <h3 className="ops-title">Runtime Health</h3>
+          <p className="muted">{formatGeneratedAt(snapshot.generatedAt)}</p>
         </div>
         <span className={`ops-state-pill ${levelClass(snapshot.overall)}`}>{levelLabel(snapshot.overall)}</span>
       </div>
@@ -48,15 +59,35 @@ export function OpsPanel({ observability }) {
       </div>
 
       <AccordionPanel
-        eyebrow="Write Path"
-        title="Persistence Engine"
-        subtitle="Queue pressure, batching behavior, retries, and shutdown drain state."
-        badge={levelLabel(snapshot.summaryCards.find((card) => card.label === "Persistence")?.level || "healthy")}
+        eyebrow="System"
+        title="Capture and Flow Pressure"
+        subtitle="Backend health snapshot from the protected monitoring metrics endpoint."
+        badge={levelLabel(levelFor("Runtime Health"))}
         defaultOpen
       >
         <dl className="ops-metric-grid">
-          <MetricRow label="Queue Size" value={String(persistence.queue_size || 0)} level={snapshot.summaryCards[0].level} hint={`High-water ${persistence.queue_high_water_mark || 0}`} />
-          <MetricRow label="Dropped Writes" value={String(persistence.dropped_writes || 0)} level={snapshot.summaryCards[1].level} hint={`Policy ${persistence.overload_policy || "drop_oldest"}`} />
+          <MetricRow label="Capture State" value={capture.running ? "Running" : "Stopped"} level={capture.running ? "healthy" : "warning"} hint={capture.interface || "No interface selected"} />
+          <MetricRow label="Packets Observed" value={String(capture.total_packets || 0)} hint={`Alerts ${capture.total_alerts || 0}`} />
+          <MetricRow label="Total Flows" value={String(flows.total || 0)} hint={`${flows.active || 0} active | ${flows.external || 0} external`} />
+          <MetricRow label="Risky Flows" value={String((flows.risk_distribution?.high || 0) + (flows.risk_distribution?.critical || 0))} level={(flows.risk_distribution?.critical || 0) > 0 ? "degraded" : (flows.risk_distribution?.high || 0) > 0 ? "warning" : "healthy"} hint={`Critical ${flows.risk_distribution?.critical || 0}`} />
+        </dl>
+        {snapshot.pressureReasons.length ? (
+          <div className="ops-pressure-list">
+            {snapshot.pressureReasons.map((reason) => <span key={reason}>{reason}</span>)}
+          </div>
+        ) : null}
+      </AccordionPanel>
+
+      <AccordionPanel
+        eyebrow="Write Path"
+        title="Persistence Engine"
+        subtitle="Queue pressure, batching behavior, retries, and shutdown drain state."
+        badge={levelLabel(levelFor("Persistence"))}
+        defaultOpen
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Queue Size" value={String(persistence.queue_size || 0)} level={levelFor("Queue Size")} hint={`High-water ${persistence.queue_high_water_mark || 0}`} />
+          <MetricRow label="Dropped Writes" value={String(persistence.dropped_writes || 0)} level={levelFor("Dropped Writes")} hint={`Policy ${persistence.overload_policy || "drop_oldest"}`} />
           <MetricRow label="Average Batch Size" value={Number(persistence.avg_batch_size || 0).toFixed(1)} hint={`Last batch ${persistence.last_batch_size || 0}`} />
           <MetricRow label="Average Flush" value={formatMs(persistence.avg_flush_ms || 0)} level={Number(persistence.avg_flush_ms || 0) >= 250 ? "warning" : "healthy"} hint={`Last flush ${formatMs(persistence.last_flush_ms || 0)}`} />
           <MetricRow label="Flush Retries" value={String(persistence.flush_retries || 0)} level={Number(persistence.flush_retries || 0) > 0 ? "warning" : "healthy"} hint={`Errors ${persistence.flush_errors || 0}`} />
@@ -83,7 +114,7 @@ export function OpsPanel({ observability }) {
         eyebrow="Stream"
         title="Event Bus and Auto Block"
         subtitle="Delivery health for websocket subscribers and automatic firewall actions."
-        badge={levelLabel(snapshot.summaryCards.find((card) => card.label === "WS Drops")?.level || "healthy")}
+        badge={levelLabel(levelFor("WS Drops"))}
       >
         <dl className="ops-metric-grid">
           <MetricRow label="WS Subscribers" value={String(eventBus.subscribers || 0)} hint={`Published ${eventBus.published_messages || 0}`} />
