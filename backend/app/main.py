@@ -60,6 +60,7 @@ from backend.app.services.export_service import ExportService
 from backend.app.services.flow_service import FlowService
 from backend.app.services.history_service import HistoryRepositoryError, HistoryService
 from backend.app.services.investigation_export_service import InvestigationExportService
+from backend.app.services.monitoring_service import build_monitoring_metrics
 from backend.app.services.packet_detail_service import PacketDetailService
 from backend.app.services.report_service import ReportService
 from backend.app.services.saved_filter_service import SavedFilterService
@@ -199,6 +200,18 @@ def api_status(_: None = Depends(require_trusted_client)) -> dict[str, Any]:
         "local_token_required": is_local_token_enabled(),
         "capture_policy": current_capture_policy().to_public_dict(),
     }
+
+
+@app.get("/api/monitoring/metrics")
+def api_monitoring_metrics(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return build_monitoring_metrics(
+        sniffer_state=sniffer_service.get_state(),
+        observability=_observability_snapshot(),
+        flow_summary=flow_service.summary(),
+    )
 
 
 def _agent_headers(
