@@ -103,6 +103,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   } else if (highFlows > 0) {
     recommendedActions.push("Review high-risk flows for unusual destinations.");
   }
+  if (!capture.running) {
+    recommendedActions.push("Start capture or confirm monitoring is intentionally paused.");
+  }
   if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0) {
     recommendedActions.push("Check persistence backlog and export/report write health.");
   }

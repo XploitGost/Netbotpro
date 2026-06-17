@@ -120,4 +120,25 @@ describe("OpsPanel", () => {
 
     expect(screen.getByText("No immediate action needed.")).toBeTruthy();
   });
+
+  it("recommends checking capture when monitoring is stopped", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: false },
+          flows: {
+            total: 0,
+            active: 0,
+            external: 0,
+            risk_distribution: {},
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Start capture or confirm monitoring is intentionally paused.")).toBeTruthy();
+  });
 });
