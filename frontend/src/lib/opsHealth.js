@@ -115,6 +115,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (wsDropped > 0) {
     recommendedActions.push("Check live stream subscribers for dropped websocket events.");
   }
+  if (autoBlockLevel !== "healthy") {
+    recommendedActions.push("Review auto-block failures and firewall permissions.");
+  }
   if (!recommendedActions.length) {
     recommendedActions.push("No immediate action needed.");
   }

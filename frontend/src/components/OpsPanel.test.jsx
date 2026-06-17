@@ -162,4 +162,24 @@ describe("OpsPanel", () => {
 
     expect(screen.getByText("Check history query latency and packet/alert storage load.")).toBeTruthy();
   });
+
+  it("recommends checking firewall permissions when auto-block fails", () => {
+    render(
+      <OpsPanel
+        observability={{
+          auto_block: {
+            failed_total: 2,
+          },
+        }}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Review auto-block failures and firewall permissions.")).toBeTruthy();
+  });
 });
