@@ -75,4 +75,26 @@ describe("OpsPanel", () => {
     expect(screen.getByText("Snapshot may be stale")).toBeTruthy();
     expect(screen.getByText("Degraded")).toBeTruthy();
   });
+
+  it("treats critical flow pressure as degraded in the summary", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: {},
+          flows: {
+            total: 2,
+            active: 1,
+            external: 1,
+            risk_distribution: { high: 0, critical: 1 },
+          },
+        }}
+      />
+    );
+
+    const flowsCard = screen.getByText("Flows").closest("article");
+    expect(flowsCard?.className).toContain("ops-degraded");
+  });
 });

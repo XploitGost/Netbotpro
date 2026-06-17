@@ -115,7 +115,11 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       label: "Flows",
       value: String(toNumber(flows.total)),
       hint: `${toNumber(flows.active)} active | ${toNumber(flows.external)} external`,
-      level: toNumber(flows.risk_distribution?.critical) > 0 || toNumber(flows.risk_distribution?.high) > 0 ? "warning" : "healthy",
+      level: toNumber(flows.risk_distribution?.critical) > 0
+        ? "degraded"
+        : toNumber(flows.risk_distribution?.high) > 0
+          ? "warning"
+          : "healthy",
     },
     {
       label: "Queue Size",
