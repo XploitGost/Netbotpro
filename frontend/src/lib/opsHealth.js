@@ -97,6 +97,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const overall = worstLevel(backendLevel, freshnessLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
   const recommendedActions = [];
 
+  if (backendLevel !== "healthy") {
+    recommendedActions.push("Review runtime pressure signals reported by the backend.");
+  }
   if (freshnessLevel !== "healthy") {
     recommendedActions.push("Refresh the ops snapshot before making a decision.");
   }

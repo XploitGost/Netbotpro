@@ -46,6 +46,7 @@ describe("OpsPanel", () => {
     expect(screen.getByText("60s")).toBeTruthy();
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
     expect(screen.getByText("queue backlog high")).toBeTruthy();
+    expect(screen.getByText("Review runtime pressure signals reported by the backend.")).toBeTruthy();
     expect(screen.getByText("Review high-risk flows for unusual destinations.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
