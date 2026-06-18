@@ -108,7 +108,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (!capture.running) {
     recommendedActions.push("Start capture or confirm monitoring is intentionally paused.");
   }
-  if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0) {
+  if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0 || queueSize >= 250) {
     recommendedActions.push("Check persistence backlog and export/report write health.");
   }
   if (queryLevel !== "healthy") {

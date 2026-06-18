@@ -204,4 +204,26 @@ describe("OpsPanel", () => {
 
     expect(screen.getByText("Open the live dashboard or verify websocket subscribers are connected.")).toBeTruthy();
   });
+
+  it("recommends checking persistence when the write queue is backing up", () => {
+    render(
+      <OpsPanel
+        observability={{
+          persistence: {
+            queue_size: 300,
+            dropped_writes: 0,
+            flush_errors: 0,
+          },
+        }}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Check persistence backlog and export/report write health.")).toBeTruthy();
+  });
 });
