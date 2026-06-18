@@ -182,4 +182,26 @@ describe("OpsPanel", () => {
 
     expect(screen.getByText("Review auto-block failures and firewall permissions.")).toBeTruthy();
   });
+
+  it("recommends checking websocket subscribers when stream events have no listeners", () => {
+    render(
+      <OpsPanel
+        observability={{
+          event_bus: {
+            subscribers: 0,
+            published_messages: 10,
+            dropped_messages: 0,
+          },
+        }}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Open the live dashboard or verify websocket subscribers are connected.")).toBeTruthy();
+  });
 });

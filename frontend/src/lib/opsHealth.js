@@ -56,6 +56,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const droppedWrites = toNumber(persistence.dropped_writes);
   const avgFlushMs = toNumber(persistence.avg_flush_ms || persistence.last_flush_ms);
   const wsDropped = toNumber(eventBus.dropped_messages);
+  const wsSubscribers = toNumber(eventBus.subscribers);
+  const wsPublished = toNumber(eventBus.published_messages);
   const queryLatencyMs = Math.max(toNumber(packetsList.last_ms), toNumber(alertsList.last_ms));
   const queryErrorCount = toNumber(packetsList.errors) + toNumber(alertsList.errors) + toNumber(packetDetail.errors) + toNumber(alertDetail.errors);
   const persistenceState = persistence.shutdown_flush_timeout
@@ -74,7 +76,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
 
   const streamLevel = wsDropped > 0
     ? "degraded"
-    : toNumber(eventBus.subscribers) === 0 && toNumber(eventBus.published_messages) > 0
+    : wsSubscribers === 0 && wsPublished > 0
       ? "warning"
       : "healthy";
 
@@ -114,6 +116,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   }
   if (wsDropped > 0) {
     recommendedActions.push("Check live stream subscribers for dropped websocket events.");
+  } else if (wsSubscribers === 0 && wsPublished > 0) {
+    recommendedActions.push("Open the live dashboard or verify websocket subscribers are connected.");
   }
   if (autoBlockLevel !== "healthy") {
     recommendedActions.push("Review auto-block failures and firewall permissions.");
@@ -178,7 +182,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     {
       label: "WS Drops",
       value: String(wsDropped),
-      hint: `Published ${toNumber(eventBus.published_messages)}`,
+      hint: `Published ${wsPublished}`,
       level: streamLevel,
     },
     {
