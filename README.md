@@ -158,6 +158,16 @@ The architecture deliberately separates two remote paths:
   read-only registry and history plane. It cannot execute commands or forward
   raw packets, payloads, files, or PCAP artifacts.
 
+## Operational Monitoring
+
+NetBotPro exposes a compact operational snapshot at `/api/monitoring/metrics`
+for local health checks and dashboard use. The snapshot reports capture state,
+packet intake queue pressure, websocket event delivery, SQLite persistence,
+history query latency, flow totals, and detection counters. Recommended actions
+in the UI are intentionally short and operational: stale snapshots, capture
+stops, queue pressure, dropped writes, websocket delivery gaps, and backend
+runtime pressure are surfaced without exposing packet payloads or secrets.
+
 ## Repository Layout
 
 - `backend/` - FastAPI routes, service layer, websocket event stream, desktop backend entrypoint.

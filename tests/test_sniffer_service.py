@@ -75,6 +75,17 @@ class _SlowCaptureProvider(_FakeCaptureProvider):
         return super().create_session(packet_callback)
 
 
+class _FakeFlowService:
+    def __init__(self) -> None:
+        self.ingested = []
+
+    def ingest(self, packet, alerts):
+        self.ingested.append((packet, alerts))
+
+    def reset(self):
+        self.ingested.clear()
+
+
 class SnifferServiceTests(unittest.TestCase):
     def test_start_uses_injected_capture_provider(self):
         provider = _FakeCaptureProvider()
@@ -115,7 +126,11 @@ class SnifferServiceTests(unittest.TestCase):
 
     @patch("backend.app.services.sniffer_service.get_settings_snapshot", return_value={"payload_capture_enabled": False, "alert_only_mode": False})
     def test_payload_preview_is_removed_by_default_before_state_and_persistence(self, _mock_settings):
-        service = SnifferService(EventBus(), capture_provider=_FakeCaptureProvider())
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+        )
         try:
             service._on_packet(
                 {
@@ -127,6 +142,7 @@ class SnifferServiceTests(unittest.TestCase):
                     "payload_ascii": "Authorization: Bearer secret",
                 }
             )
+            self.assertTrue(service.drain_packet_queue(timeout_sec=1.0))
             packet = service.recent_packets()[0]
         finally:
             service.close()

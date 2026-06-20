@@ -113,6 +113,7 @@ def _observability_snapshot() -> dict[str, Any]:
     return {
         "event_bus": event_bus.stats(),
         "history": history_service.metrics(),
+        "packet_queue": sniffer_service.packet_queue_stats(),
         "persistence": sniffer_service.persistence_stats(),
         "auto_block": sniffer_service.auto_block_stats(),
     }

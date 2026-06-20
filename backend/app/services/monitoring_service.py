@@ -37,10 +37,15 @@ def build_monitoring_metrics(
     """Build a compact operational snapshot for monitoring and benchmarks."""
 
     event_bus = dict(observability.get("event_bus") or {})
+    packet_queue = dict(observability.get("packet_queue") or {})
     persistence = dict(observability.get("persistence") or {})
     history = dict(observability.get("history") or {})
     auto_block = dict(observability.get("auto_block") or {})
 
+    packet_queue_size = _int(packet_queue.get("queue_size"))
+    packet_queue_max_size = _int(packet_queue.get("max_size"))
+    packet_queue_high_water = _int(packet_queue.get("queue_high_water_mark"))
+    packet_queue_drops = _int(packet_queue.get("dropped_packets"))
     queue_size = _int(persistence.get("queue_size"))
     queue_high_water = _int(persistence.get("queue_high_water_mark"))
     dropped_writes = _int(persistence.get("dropped_writes"))
@@ -51,6 +56,12 @@ def build_monitoring_metrics(
     history_max_ms = _max_history_metric(history, "max_ms")
 
     pressure_reasons: list[str] = []
+    if packet_queue_max_size and packet_queue_size >= max(1, int(packet_queue_max_size * 0.8)):
+        pressure_reasons.append("packet_queue_backlog")
+    if packet_queue_max_size and packet_queue_high_water >= max(1, int(packet_queue_max_size * 0.9)):
+        pressure_reasons.append("packet_queue_high_water")
+    if packet_queue_drops:
+        pressure_reasons.append("packet_queue_dropped_packets")
     if queue_size >= 1000:
         pressure_reasons.append("persistence_queue_backlog")
     if queue_high_water >= 2500:
@@ -69,7 +80,12 @@ def build_monitoring_metrics(
     health = "healthy"
     if pressure_reasons:
         health = "degraded"
-    if dropped_writes >= 100 or flush_errors >= 3 or queue_size >= 4000:
+    if (
+        packet_queue_drops >= 100
+        or dropped_writes >= 100
+        or flush_errors >= 3
+        or queue_size >= 4000
+    ):
         health = "critical"
 
     return {
@@ -91,6 +107,16 @@ def build_monitoring_metrics(
             "published_messages": _int(event_bus.get("published_messages")),
             "dropped_messages": dropped_messages,
             "dropped_subscribers": _int(event_bus.get("dropped_subscribers")),
+        },
+        "packet_queue": {
+            "max_size": packet_queue_max_size,
+            "queue_size": packet_queue_size,
+            "queue_high_water_mark": packet_queue_high_water,
+            "accepted_packets": _int(packet_queue.get("accepted_packets")),
+            "dropped_packets": packet_queue_drops,
+            "dropped_oldest": _int(packet_queue.get("dropped_oldest")),
+            "dropped_newest": _int(packet_queue.get("dropped_newest")),
+            "overflow_policy": packet_queue.get("overflow_policy") or "drop_oldest",
         },
         "persistence": {
             "queue_size": queue_size,

@@ -37,3 +37,16 @@ project/
 ├── requirements.txt
 └── .gitignore
 ```
+
+## Operational Monitoring
+
+Operational monitoring is intentionally compact. The backend exposes
+`/api/monitoring/metrics` with capture state, packet intake queue pressure,
+websocket delivery counters, SQLite persistence pressure, history query
+latency, flow totals, and detection counters.
+
+The UI uses that snapshot to show short recommended actions for stale metrics,
+stopped capture, packet queue drops, persistence backlog, websocket delivery
+gaps, and backend runtime pressure. These metrics are operational metadata only;
+they do not include raw payloads, credentials, cookies, authorization headers,
+or Agent raw packet forwarding.

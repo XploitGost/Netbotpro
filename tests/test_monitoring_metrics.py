@@ -21,6 +21,14 @@ class MonitoringMetricsTests(unittest.TestCase):
             },
             observability={
                 "event_bus": {"subscribers": 1, "published_messages": 20},
+                "packet_queue": {
+                    "max_size": 2000,
+                    "queue_size": 0,
+                    "queue_high_water_mark": 4,
+                    "accepted_packets": 12,
+                    "dropped_packets": 0,
+                    "overflow_policy": "drop_oldest",
+                },
                 "persistence": {
                     "queue_size": 0,
                     "queue_high_water_mark": 4,
@@ -50,6 +58,7 @@ class MonitoringMetricsTests(unittest.TestCase):
 
         self.assertEqual(payload["health"], "healthy")
         self.assertEqual(payload["capture"]["total_packets"], 12)
+        self.assertEqual(payload["packet_queue"]["accepted_packets"], 12)
         self.assertEqual(payload["flows"]["total_flows"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 
@@ -58,6 +67,15 @@ class MonitoringMetricsTests(unittest.TestCase):
             sniffer_state={"running": True, "packet_count": 5, "alert_count": 0},
             observability={
                 "event_bus": {"dropped_messages": 2},
+                "packet_queue": {
+                    "max_size": 100,
+                    "queue_size": 90,
+                    "queue_high_water_mark": 95,
+                    "accepted_packets": 250,
+                    "dropped_packets": 120,
+                    "dropped_oldest": 120,
+                    "overflow_policy": "drop_oldest",
+                },
                 "persistence": {
                     "queue_size": 4200,
                     "queue_high_water_mark": 5000,
@@ -77,6 +95,9 @@ class MonitoringMetricsTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["health"], "critical")
+        self.assertIn("packet_queue_backlog", payload["pressure_reasons"])
+        self.assertIn("packet_queue_high_water", payload["pressure_reasons"])
+        self.assertIn("packet_queue_dropped_packets", payload["pressure_reasons"])
         self.assertIn("persistence_queue_backlog", payload["pressure_reasons"])
         self.assertIn("websocket_dropped_messages", payload["pressure_reasons"])
         self.assertIn("history_query_latency", payload["pressure_reasons"])

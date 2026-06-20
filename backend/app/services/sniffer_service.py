@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import threading
 from datetime import datetime
 from typing import Any
@@ -10,6 +11,7 @@ from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.event_bus import EventBus
 from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.flow_service import FlowService
+from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
@@ -21,6 +23,14 @@ ensure_project_root_on_path()
 
 logger = logging.getLogger(__name__)
 CAPTURE_START_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_START_TIMEOUT_SEC", "15.0"))
+PACKET_QUEUE_MAX_SIZE = int(os.environ.get("NETBOT_PACKET_QUEUE_MAX_SIZE", "2000"))
+PACKET_QUEUE_OVERFLOW_POLICY = os.environ.get(
+    "NETBOT_PACKET_QUEUE_OVERFLOW_POLICY",
+    "drop_oldest",
+)
+PACKET_QUEUE_DRAIN_TIMEOUT_SEC = float(
+    os.environ.get("NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC", "5.0")
+)
 
 
 class CaptureStartUnavailableError(RuntimeError):
@@ -49,6 +59,17 @@ class SnifferService:
         self._persistence = SnifferPersistence()
         self._publisher = SnifferEventPublisher(event_bus)
         self._flow_service = flow_service or FlowService()
+        self._packet_queue = BoundedPacketQueue(
+            max_size=PACKET_QUEUE_MAX_SIZE,
+            overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
+        )
+        self._packet_worker_stop = threading.Event()
+        self._packet_worker = threading.Thread(
+            target=self._packet_worker_loop,
+            name="netbotpro-packet-queue",
+            daemon=True,
+        )
+        self._packet_worker.start()
 
     @staticmethod
     def _first_blocking_preflight_detail(preflight: dict[str, Any]) -> str:
@@ -125,6 +146,11 @@ class SnifferService:
         )
 
     def _on_packet(self, meta: dict[str, Any]) -> None:
+        accepted = self._packet_queue.put(meta)
+        if not accepted:
+            logger.warning("packet intake queue full; dropped newest packet")
+
+    def _process_packet(self, meta: dict[str, Any]) -> None:
         packet = dict(meta)
         packet.setdefault("ts", datetime.utcnow().isoformat() + "Z")
         packet.setdefault("id", self._next_packet_id())
@@ -145,6 +171,22 @@ class SnifferService:
         self._persistence.persist(packet, alerts)
         self._publisher.publish_packet(packet)
         self._publisher.publish_alerts(alerts)
+
+    def _packet_worker_loop(self) -> None:
+        while not self._packet_worker_stop.is_set() or not self._packet_queue.empty():
+            try:
+                item = self._packet_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                self._process_packet(item.packet)
+            except Exception:
+                logger.exception("Packet processing pipeline crashed")
+            finally:
+                self._packet_queue.task_done()
+
+    def drain_packet_queue(self, timeout_sec: float = PACKET_QUEUE_DRAIN_TIMEOUT_SEC) -> bool:
+        return self._packet_queue.wait_until_drained(timeout_sec)
 
     @staticmethod
     def _apply_payload_policy(row: dict[str, Any], settings: dict[str, Any]) -> None:
@@ -178,6 +220,10 @@ class SnifferService:
 
     def close(self) -> None:
         self.stop()
+        self.drain_packet_queue()
+        self._packet_worker_stop.set()
+        if self._packet_worker.is_alive():
+            self._packet_worker.join(timeout=1.0)
         self._persistence.close()
 
     def get_state(self) -> dict[str, Any]:
@@ -216,12 +262,16 @@ class SnifferService:
     def persistence_stats(self) -> dict[str, int | float]:
         return self._persistence.stats()
 
+    def packet_queue_stats(self) -> dict[str, int | str]:
+        return self._packet_queue.stats()
+
     def auto_block_stats(self) -> dict[str, int | float]:
         return self._detection_pipeline.stats()
 
     def observability(self) -> dict[str, Any]:
         return {
             "event_bus": self._event_bus.stats(),
+            "packet_queue": self.packet_queue_stats(),
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }
