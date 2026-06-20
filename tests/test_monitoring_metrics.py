@@ -22,12 +22,16 @@ class MonitoringMetricsTests(unittest.TestCase):
             observability={
                 "event_bus": {"subscribers": 1, "published_messages": 20},
                 "packet_queue": {
+                    "enabled": True,
                     "max_size": 2000,
-                    "queue_size": 0,
-                    "queue_high_water_mark": 4,
-                    "accepted_packets": 12,
-                    "dropped_packets": 0,
+                    "current_depth": 0,
+                    "utilization_percent": 0.0,
+                    "high_water_mark": 4,
+                    "accepted_total": 12,
+                    "dropped_total": 0,
                     "overflow_policy": "drop_oldest",
+                    "worker_alive": True,
+                    "health": "healthy",
                 },
                 "persistence": {
                     "queue_size": 0,
@@ -58,7 +62,8 @@ class MonitoringMetricsTests(unittest.TestCase):
 
         self.assertEqual(payload["health"], "healthy")
         self.assertEqual(payload["capture"]["total_packets"], 12)
-        self.assertEqual(payload["packet_queue"]["accepted_packets"], 12)
+        self.assertEqual(payload["packet_queue"]["accepted_total"], 12)
+        self.assertEqual(payload["packet_queue"]["current_depth"], 0)
         self.assertEqual(payload["flows"]["total_flows"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 
@@ -68,13 +73,18 @@ class MonitoringMetricsTests(unittest.TestCase):
             observability={
                 "event_bus": {"dropped_messages": 2},
                 "packet_queue": {
+                    "enabled": True,
                     "max_size": 100,
-                    "queue_size": 90,
-                    "queue_high_water_mark": 95,
-                    "accepted_packets": 250,
-                    "dropped_packets": 120,
-                    "dropped_oldest": 120,
+                    "current_depth": 90,
+                    "utilization_percent": 90.0,
+                    "high_water_mark": 95,
+                    "accepted_total": 250,
+                    "dropped_total": 120,
+                    "dropped_oldest_total": 120,
+                    "last_drop_reason": "queue_full_drop_oldest",
                     "overflow_policy": "drop_oldest",
+                    "worker_alive": True,
+                    "health": "critical",
                 },
                 "persistence": {
                     "queue_size": 4200,
@@ -101,6 +111,30 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertIn("persistence_queue_backlog", payload["pressure_reasons"])
         self.assertIn("websocket_dropped_messages", payload["pressure_reasons"])
         self.assertIn("history_query_latency", payload["pressure_reasons"])
+
+    def test_build_monitoring_metrics_reports_stopped_packet_worker(self):
+        payload = build_monitoring_metrics(
+            sniffer_state={"running": True, "packet_count": 5, "alert_count": 0},
+            observability={
+                "event_bus": {},
+                "packet_queue": {
+                    "enabled": True,
+                    "max_size": 100,
+                    "current_depth": 1,
+                    "utilization_percent": 1.0,
+                    "worker_alive": False,
+                    "health": "critical",
+                },
+                "persistence": {},
+                "history": {},
+                "auto_block": {},
+            },
+            flow_summary={},
+        )
+
+        self.assertEqual(payload["health"], "critical")
+        self.assertFalse(payload["packet_queue"]["worker_alive"])
+        self.assertIn("packet_queue_worker_stopped", payload["pressure_reasons"])
 
 
 class MonitoringMetricsApiTests(unittest.TestCase):

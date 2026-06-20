@@ -38,6 +38,7 @@ function normalizeLevel(level) {
 
 export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventBus = observability?.event_bus || {};
+  const packetQueue = operationalMetrics?.packet_queue || observability?.packet_queue || {};
   const persistence = observability?.persistence || {};
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
@@ -53,6 +54,11 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const alertDetail = history.alert_detail || {};
 
   const queueSize = toNumber(persistence.queue_size);
+  const packetQueueDepth = toNumber(packetQueue.current_depth ?? packetQueue.queue_size);
+  const packetQueueMaxSize = toNumber(packetQueue.max_size);
+  const packetQueueUtilization = toNumber(packetQueue.utilization_percent);
+  const packetQueueDropped = toNumber(packetQueue.dropped_total ?? packetQueue.dropped_packets);
+  const packetQueueWorkerAlive = packetQueue.worker_alive !== false;
   const droppedWrites = toNumber(persistence.dropped_writes);
   const avgFlushMs = toNumber(persistence.avg_flush_ms || persistence.last_flush_ms);
   const wsDropped = toNumber(eventBus.dropped_messages);
@@ -91,10 +97,17 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     : "healthy";
 
   const backendLevel = normalizeLevel(operationalMetrics?.health);
+  const packetQueueLevel = packetQueue.health
+    ? normalizeLevel(packetQueue.health)
+    : !packetQueueWorkerAlive || packetQueueDropped >= 100
+      ? "degraded"
+      : packetQueueDropped > 0 || packetQueueUtilization >= 80 || (packetQueueMaxSize > 0 && packetQueueDepth >= packetQueueMaxSize * 0.8)
+        ? "warning"
+        : "healthy";
   const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
   const criticalFlows = toNumber(flows.risk_distribution?.critical);
   const highFlows = toNumber(flows.risk_distribution?.high);
-  const overall = worstLevel(backendLevel, freshnessLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
   const recommendedActions = [];
 
   if (backendLevel !== "healthy") {
@@ -102,6 +115,15 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   }
   if (freshnessLevel !== "healthy") {
     recommendedActions.push("Refresh the ops snapshot before making a decision.");
+  }
+  if (!packetQueueWorkerAlive) {
+    recommendedActions.push("Packet queue worker is not running. Restart capture or inspect backend logs.");
+  }
+  if (packetQueueDropped > 0) {
+    recommendedActions.push("Packet drops were detected. Review overflow policy and capture pressure.");
+  }
+  if (packetQueueUtilization >= 80 || (packetQueueMaxSize > 0 && packetQueueDepth >= packetQueueMaxSize * 0.8)) {
+    recommendedActions.push("Increase queue size, reduce capture rate, or enable batching before heavier workloads.");
   }
   if (criticalFlows > 0) {
     recommendedActions.push("Review critical flows and related alerts first.");
@@ -159,7 +181,13 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
           : "healthy",
     },
     {
-      label: "Queue Size",
+      label: "Packet Queue",
+      value: packetQueueMaxSize ? `${packetQueueDepth}/${packetQueueMaxSize}` : String(packetQueueDepth),
+      hint: `${packetQueueUtilization.toFixed(1)}% used | Drops ${packetQueueDropped}`,
+      level: packetQueueLevel,
+    },
+    {
+      label: "Write Queue",
       value: String(queueSize),
       hint: `High-water ${toNumber(persistence.queue_high_water_mark)}`,
       level: persistenceLevel,
@@ -205,6 +233,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     flows,
     pressureReasons,
     eventBus,
+    packetQueue,
+    packetQueueLevel,
     persistence,
     history,
     autoBlock,

@@ -69,6 +69,7 @@ or PCAP artifacts.
 | Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
+| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, drop counters, overflow policy behavior, and Ops Snapshot rendering are tested. | First performance-pipeline component only; Worker Pool and WebSocket batching are not implemented yet. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -168,6 +169,19 @@ in the UI are intentionally short and operational: stale snapshots, capture
 stops, queue pressure, dropped writes, websocket delivery gaps, and backend
 runtime pressure are surfaced without exposing packet payloads or secrets.
 
+Packet intake queue tuning is controlled by:
+
+- `NETBOT_PACKET_QUEUE_MAX_SIZE`: default `2000`; use `1000` for small/local
+  runs and start around `5000` for heavier authorized capture.
+- `NETBOT_PACKET_QUEUE_OVERFLOW_POLICY`: default `drop_oldest`; allowed values
+  are `drop_oldest` and `drop_newest`.
+- `NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC`: default `5.0`; increase to `10.0`
+  when heavier capture should get more shutdown drain time.
+
+`drop_oldest` favors fresher dashboard state during bursts. `drop_newest`
+preserves already queued packet order. In both modes, drops are counted, logged,
+and surfaced in Ops Snapshot metrics.
+
 ## Repository Layout
 
 - `backend/` - FastAPI routes, service layer, websocket event stream, desktop backend entrypoint.
@@ -183,6 +197,7 @@ runtime pressure are surfaced without exposing packet payloads or secrets.
 ## Operational Guides
 
 - [Agent Mode](docs/AGENT_MODE.md)
+- [Performance Pipeline](docs/PERFORMANCE_PIPELINE.md)
 - [Flow Analysis And Protocol Intelligence](docs/FLOW_ANALYSIS.md)
 - [Deep Packet Inspection](docs/DEEP_PACKET_INSPECTION.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)

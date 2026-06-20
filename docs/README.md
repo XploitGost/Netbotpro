@@ -50,3 +50,6 @@ stopped capture, packet queue drops, persistence backlog, websocket delivery
 gaps, and backend runtime pressure. These metrics are operational metadata only;
 they do not include raw payloads, credentials, cookies, authorization headers,
 or Agent raw packet forwarding.
+
+See [Performance Pipeline](PERFORMANCE_PIPELINE.md) for the bounded packet queue
+configuration, exposed metrics, and next planned performance steps.

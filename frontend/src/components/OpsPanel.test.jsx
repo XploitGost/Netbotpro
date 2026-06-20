@@ -37,6 +37,17 @@ describe("OpsPanel", () => {
             external: 2,
             risk_distribution: { high: 1, critical: 0 },
           },
+          packet_queue: {
+            max_size: 100,
+            current_depth: 20,
+            utilization_percent: 20,
+            dropped_total: 0,
+            high_water_mark: 25,
+            accepted_total: 42,
+            overflow_policy: "drop_oldest",
+            worker_alive: true,
+            health: "healthy",
+          },
         }}
         onRefresh={onRefresh}
       />
@@ -45,6 +56,8 @@ describe("OpsPanel", () => {
     expect(screen.getAllByText("Runtime Health").length).toBeGreaterThan(0);
     expect(screen.getByText("60s")).toBeTruthy();
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
+    expect(screen.getByText("Packet Intake Queue")).toBeTruthy();
+    expect(screen.getAllByText("20/100").length).toBeGreaterThan(0);
     expect(screen.getByText("queue backlog high")).toBeTruthy();
     expect(screen.getByText("Review runtime pressure signals reported by the backend.")).toBeTruthy();
     expect(screen.getByText("Review high-risk flows for unusual destinations.")).toBeTruthy();
@@ -226,5 +239,66 @@ describe("OpsPanel", () => {
     );
 
     expect(screen.getByText("Check persistence backlog and export/report write health.")).toBeTruthy();
+  });
+
+  it("renders packet queue pressure and action", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          packet_queue: {
+            max_size: 100,
+            current_depth: 85,
+            utilization_percent: 85,
+            dropped_total: 0,
+            high_water_mark: 90,
+            overflow_policy: "drop_oldest",
+            worker_alive: true,
+            health: "degraded",
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Packet Intake Queue")).toBeTruthy();
+    expect(screen.getAllByText("85/100").length).toBeGreaterThan(0);
+    expect(screen.getByText("Increase queue size, reduce capture rate, or enable batching before heavier workloads.")).toBeTruthy();
+  });
+
+  it("renders dropped packet and worker warnings without secrets", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "critical",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          packet_queue: {
+            max_size: 100,
+            current_depth: 5,
+            utilization_percent: 5,
+            dropped_total: 2,
+            dropped_oldest_total: 1,
+            dropped_newest_total: 1,
+            high_water_mark: 95,
+            accepted_total: 200,
+            overflow_policy: "drop_newest",
+            worker_alive: false,
+            last_drop_reason: "queue_full_drop_newest",
+            health: "critical",
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Dropped Packets")).toBeTruthy();
+    expect(screen.getByText("Packet drops were detected. Review overflow policy and capture pressure.")).toBeTruthy();
+    expect(screen.getByText("Packet queue worker is not running. Restart capture or inspect backend logs.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/token|authorization|cookie|secret/i);
   });
 });

@@ -161,6 +161,34 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertIn("timed out", str(ctx.exception).lower())
         service.close()
 
+    def test_malformed_packet_does_not_stop_queue_worker(self):
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+        )
+        try:
+            service._on_packet({"src": object(), "dst": None, "proto": "TCP"})
+            self.assertTrue(service.drain_packet_queue(timeout_sec=1.0))
+            stats = service.packet_queue_stats()
+        finally:
+            service.close()
+
+        self.assertTrue(stats["worker_alive"])
+        self.assertEqual(stats["accepted_total"], 1)
+
+    def test_close_stops_packet_queue_worker_cleanly(self):
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+        )
+
+        service._on_packet({"src": "1.1.1.1", "dst": "2.2.2.2", "proto": "TCP"})
+        service.close()
+
+        self.assertFalse(service._packet_worker.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main()

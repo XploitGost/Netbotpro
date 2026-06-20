@@ -33,6 +33,7 @@ function formatGeneratedAt(value) {
 export function OpsPanel({ observability, operationalMetrics = null, isRefreshing = false, onRefresh = null }) {
   const snapshot = buildOpsSnapshot(observability, operationalMetrics);
   const levelFor = (label, fallback = "healthy") => snapshot.summaryCards.find((card) => card.label === label)?.level || fallback;
+  const packetQueue = snapshot.packetQueue;
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
   const autoBlock = snapshot.autoBlock;
@@ -92,6 +93,22 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
       </AccordionPanel>
 
       <AccordionPanel
+        eyebrow="Performance"
+        title="Packet Intake Queue"
+        subtitle="Bounded packet queue between capture and packet processing."
+        badge={levelLabel(snapshot.packetQueueLevel)}
+        defaultOpen
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Queue Depth" value={`${packetQueue.current_depth ?? packetQueue.queue_size ?? 0}/${packetQueue.max_size ?? 0}`} level={snapshot.packetQueueLevel} hint={`${Number(packetQueue.utilization_percent || 0).toFixed(1)}% used`} />
+          <MetricRow label="Dropped Packets" value={String(packetQueue.dropped_total ?? packetQueue.dropped_packets ?? 0)} level={Number(packetQueue.dropped_total ?? packetQueue.dropped_packets ?? 0) > 0 ? "degraded" : "healthy"} hint={`Oldest ${packetQueue.dropped_oldest_total ?? packetQueue.dropped_oldest ?? 0} | Newest ${packetQueue.dropped_newest_total ?? packetQueue.dropped_newest ?? 0}`} />
+          <MetricRow label="High-water Mark" value={String(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark ?? 0)} hint={`Accepted ${packetQueue.accepted_total ?? packetQueue.accepted_packets ?? 0}`} />
+          <MetricRow label="Overflow Policy" value={packetQueue.overflow_policy || "drop_oldest"} hint={packetQueue.last_drop_reason || "No drops recorded"} />
+          <MetricRow label="Worker" value={packetQueue.worker_alive === false ? "Stopped" : "Running"} level={packetQueue.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${packetQueue.health || "healthy"}`} />
+        </dl>
+      </AccordionPanel>
+
+      <AccordionPanel
         eyebrow="Write Path"
         title="Persistence Engine"
         subtitle="Queue pressure, batching behavior, retries, and shutdown drain state."
@@ -99,7 +116,7 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
         defaultOpen
       >
         <dl className="ops-metric-grid">
-          <MetricRow label="Queue Size" value={String(persistence.queue_size || 0)} level={levelFor("Queue Size")} hint={`High-water ${persistence.queue_high_water_mark || 0}`} />
+          <MetricRow label="Queue Size" value={String(persistence.queue_size || 0)} level={levelFor("Write Queue")} hint={`High-water ${persistence.queue_high_water_mark || 0}`} />
           <MetricRow label="Dropped Writes" value={String(persistence.dropped_writes || 0)} level={levelFor("Dropped Writes")} hint={`Policy ${persistence.overload_policy || "drop_oldest"}`} />
           <MetricRow label="Average Batch Size" value={Number(persistence.avg_batch_size || 0).toFixed(1)} hint={`Last batch ${persistence.last_batch_size || 0}`} />
           <MetricRow label="Average Flush" value={formatMs(persistence.avg_flush_ms || 0)} level={Number(persistence.avg_flush_ms || 0) >= 250 ? "warning" : "healthy"} hint={`Last flush ${formatMs(persistence.last_flush_ms || 0)}`} />

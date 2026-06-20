@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -8,6 +9,7 @@ from typing import Any
 
 
 VALID_OVERFLOW_POLICIES = {"drop_oldest", "drop_newest"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ class BoundedPacketQueue:
         self._dropped_oldest = 0
         self._dropped_newest = 0
         self._queue_high_water_mark = 0
+        self._last_drop_reason = ""
 
     @property
     def overflow_policy(self) -> str:
@@ -77,17 +80,38 @@ class BoundedPacketQueue:
     def unfinished_tasks(self) -> int:
         return int(getattr(self._queue, "unfinished_tasks", 0))
 
-    def stats(self) -> dict[str, int | str]:
+    def stats(self, *, worker_alive: bool = True) -> dict[str, int | float | str | bool]:
         with self._lock:
+            current_depth = self._queue.qsize()
+            max_size = self._queue.maxsize
+            utilization = round((current_depth / max_size) * 100.0, 2) if max_size else 0.0
+            health = "healthy"
+            if not worker_alive or self._dropped_packets >= 100:
+                health = "critical"
+            elif self._dropped_packets > 0 or utilization >= 80.0:
+                health = "degraded"
+            elif utilization >= 60.0:
+                health = "warning"
             return {
-                "max_size": self._queue.maxsize,
-                "queue_size": self._queue.qsize(),
+                "enabled": True,
+                "max_size": max_size,
+                "current_depth": current_depth,
+                "queue_size": current_depth,
+                "utilization_percent": utilization,
                 "queue_high_water_mark": self._queue_high_water_mark,
+                "high_water_mark": self._queue_high_water_mark,
                 "accepted_packets": self._accepted_packets,
+                "accepted_total": self._accepted_packets,
                 "dropped_packets": self._dropped_packets,
+                "dropped_total": self._dropped_packets,
                 "dropped_oldest": self._dropped_oldest,
+                "dropped_oldest_total": self._dropped_oldest,
                 "dropped_newest": self._dropped_newest,
+                "dropped_newest_total": self._dropped_newest,
                 "overflow_policy": self._overflow_policy,
+                "worker_alive": bool(worker_alive),
+                "last_drop_reason": self._last_drop_reason,
+                "health": health,
             }
 
     def _record_accepted(self) -> None:
@@ -103,10 +127,15 @@ class BoundedPacketQueue:
             with self._lock:
                 self._dropped_packets += 1
                 self._dropped_newest += 1
+                self._last_drop_reason = "queue_full_drop_newest"
                 self._queue_high_water_mark = max(
                     self._queue_high_water_mark,
                     self._queue.qsize(),
                 )
+            logger.warning(
+                "packet intake queue full; dropping newest packet",
+                extra={"overflow_policy": self._overflow_policy},
+            )
             return False
 
         try:
@@ -117,6 +146,11 @@ class BoundedPacketQueue:
         with self._lock:
             self._dropped_packets += 1
             self._dropped_oldest += 1
+            self._last_drop_reason = "queue_full_drop_oldest"
+        logger.warning(
+            "packet intake queue full; dropping oldest packet",
+            extra={"overflow_policy": self._overflow_policy},
+        )
 
         try:
             self._queue.put_nowait(item)
@@ -126,6 +160,7 @@ class BoundedPacketQueue:
             with self._lock:
                 self._dropped_packets += 1
                 self._dropped_newest += 1
+                self._last_drop_reason = "queue_full_after_drop_oldest"
                 self._queue_high_water_mark = max(
                     self._queue_high_water_mark,
                     self._queue.qsize(),

@@ -262,8 +262,8 @@ class SnifferService:
     def persistence_stats(self) -> dict[str, int | float]:
         return self._persistence.stats()
 
-    def packet_queue_stats(self) -> dict[str, int | str]:
-        return self._packet_queue.stats()
+    def packet_queue_stats(self) -> dict[str, int | float | str | bool]:
+        return self._packet_queue.stats(worker_alive=self._packet_worker.is_alive())
 
     def auto_block_stats(self) -> dict[str, int | float]:
         return self._detection_pipeline.stats()

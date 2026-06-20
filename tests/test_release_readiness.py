@@ -100,6 +100,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("core/tcp_analysis.py", architecture)
         self.assertIn("core/dns_intelligence.py", architecture)
 
+    def test_performance_pipeline_docs_are_linked_and_scoped(self):
+        readme = self._read("README.md")
+        performance = self._read("docs/PERFORMANCE_PIPELINE.md")
+        performance_lower = performance.lower()
+
+        self.assertIn("docs/PERFORMANCE_PIPELINE.md", readme)
+        self.assertIn("Bounded Packet Intake Queue", readme)
+        self.assertIn("NETBOT_PACKET_QUEUE_MAX_SIZE", readme)
+        self.assertIn("NETBOT_PACKET_QUEUE_OVERFLOW_POLICY", performance)
+        self.assertIn("NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC", performance)
+        self.assertIn("not the complete performance engine", performance_lower)
+        self.assertIn("websocket batching", performance_lower)
+        self.assertIn("worker pool", performance_lower)
+        self.assertIn("intentionally not implemented yet", performance_lower)
+
     def test_agent_release_safety_is_explicit(self):
         combined = "\n".join(
             [
