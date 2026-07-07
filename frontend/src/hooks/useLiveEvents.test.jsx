@@ -71,4 +71,60 @@ describe("useLiveEvents", () => {
       ]);
     });
   });
+
+  it("routes flow, dashboard, ops, and agent batch messages to state handlers", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onState = vi.fn();
+
+    render(<Harness onState={onState} />);
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+
+    FakeWebSocket.instances[0].emit({
+      type: "flow_delta",
+      timestamp: "2026-07-07T00:00:00Z",
+      updates: [{ type: "flow:updated", payload: { flow_id: "flow-1" } }],
+    });
+    FakeWebSocket.instances[0].emit({
+      type: "dashboard_summary",
+      timestamp: "2026-07-07T00:00:01Z",
+      summary: { packet_count: 10 },
+    });
+    FakeWebSocket.instances[0].emit({
+      type: "ops_health_update",
+      timestamp: "2026-07-07T00:00:02Z",
+      health: { health: "degraded" },
+    });
+    FakeWebSocket.instances[0].emit({
+      type: "agent_status_batch",
+      timestamp: "2026-07-07T00:00:03Z",
+      agents: [{ type: "agent:status", payload: { agent_id: "agent-1" } }],
+    });
+
+    await waitFor(() => {
+      expect(onState).toHaveBeenCalledWith({
+        version: 1,
+        type: "flow_delta",
+        timestamp: "2026-07-07T00:00:00Z",
+        payload: { updates: [{ type: "flow:updated", payload: { flow_id: "flow-1" } }] },
+      });
+      expect(onState).toHaveBeenCalledWith({
+        version: 1,
+        type: "dashboard:summary",
+        timestamp: "2026-07-07T00:00:01Z",
+        payload: { packet_count: 10 },
+      });
+      expect(onState).toHaveBeenCalledWith({
+        version: 1,
+        type: "ops:health",
+        timestamp: "2026-07-07T00:00:02Z",
+        payload: { health: "degraded" },
+      });
+      expect(onState).toHaveBeenCalledWith({
+        version: 1,
+        type: "agent:status_batch",
+        timestamp: "2026-07-07T00:00:03Z",
+        payload: { agents: [{ type: "agent:status", payload: { agent_id: "agent-1" } }] },
+      });
+    });
+  });
 });

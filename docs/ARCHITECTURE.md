@@ -212,8 +212,8 @@ are coalesced before fan-out to clients.
 Each websocket client has a bounded outgoing queue. Slow clients are protected
 with the configured policy: `coalesce`, `drop_oldest`, or `drop_newest`.
 WebSocket metrics expose clients, slow clients, batches sent, events received,
-events sent, coalesced events, dropped events, queue depth, send latency, and
-safe last-drop reasons.
+events sent, coalesced events, dropped events, queue depth, average/p95 send
+latency, and safe last-drop reasons.
 
 This layer preserves websocket authentication and trusted-client checks. It
 does not alter Agent/Fleet telemetry boundaries and does not add command/control,

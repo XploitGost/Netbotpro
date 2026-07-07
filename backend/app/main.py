@@ -140,6 +140,7 @@ def _actor_from_request(request: Request | None) -> str:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     yield
+    event_bus.close()
     sniffer_service.close()
 
 

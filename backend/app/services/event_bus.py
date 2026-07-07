@@ -4,7 +4,7 @@ import asyncio
 import threading
 import time
 from datetime import datetime, timezone
-from statistics import median
+from statistics import mean, median
 from typing import Any
 
 from backend.app.services.event_aggregator import EventAggregator
@@ -47,6 +47,9 @@ class EventBus:
     def flush(self) -> None:
         self._aggregator.flush_all()
 
+    def close(self) -> None:
+        self._aggregator.close()
+
     def _publish_direct(self, message: dict[str, Any]) -> None:
         message = {
             **message,
@@ -81,6 +84,11 @@ class EventBus:
     def websocket_stats(self) -> dict[str, Any]:
         with self._lock:
             depths = [queue.qsize() for queue in self._subscribers]
+            avg = (
+                round(float(mean(self._send_latencies)), 2)
+                if self._send_latencies
+                else 0.0
+            )
             p50 = _percentile(self._send_latencies, 50)
             p95 = _percentile(self._send_latencies, 95)
             pressure_reasons: list[str] = []
@@ -107,6 +115,8 @@ class EventBus:
                 "client_queue_max": self._aggregator.client_queue_max,
                 "client_queue_depth_max": max(depths, default=0),
                 "websocket_client_queue_depth": max(depths, default=0),
+                "send_latency_ms_avg": avg,
+                "websocket_send_latency_ms_avg": avg,
                 "send_latency_ms_p50": p50,
                 "send_latency_ms_p95": p95,
                 "websocket_send_latency_ms": p95,

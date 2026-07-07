@@ -266,7 +266,8 @@ Policies:
 - `drop_newest`: reject the newest websocket message.
 
 Slow-client counters track dropped events, coalesced events, queue depth, send
-latency, and safe last-drop reasons.
+latency, and safe last-drop reasons. Shutdown flushes pending aggregated events
+and cancels pending batch timers.
 
 ### Event Aggregator Metrics
 
@@ -301,6 +302,7 @@ It also exposes `websocket`:
 - `slow_clients`
 - `client_queue_max`
 - `client_queue_depth_max`
+- `send_latency_ms_avg`
 - `send_latency_ms_p50`
 - `send_latency_ms_p95`
 - `send_errors_total`

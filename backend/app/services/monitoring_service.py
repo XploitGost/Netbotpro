@@ -129,6 +129,10 @@ def build_monitoring_metrics(
         websocket.get("send_latency_ms_p95")
         or websocket.get("websocket_send_latency_ms")
     )
+    websocket_latency_avg = _number(
+        websocket.get("send_latency_ms_avg")
+        or websocket.get("websocket_send_latency_ms_avg")
+    )
     websocket_send_errors = _int(websocket.get("send_errors_total"))
     history_errors = _sum_history_metric(history, "errors")
     history_slow_calls = _sum_history_metric(history, "slow_calls")
@@ -237,6 +241,8 @@ def build_monitoring_metrics(
             "client_queue_max": _int(websocket.get("client_queue_max") or event_aggregator.get("client_queue_max") or 1000),
             "client_queue_depth_max": _int(websocket.get("client_queue_depth_max") or websocket.get("websocket_client_queue_depth")),
             "websocket_client_queue_depth": _int(websocket.get("client_queue_depth_max") or websocket.get("websocket_client_queue_depth")),
+            "send_latency_ms_avg": websocket_latency_avg,
+            "websocket_send_latency_ms_avg": websocket_latency_avg,
             "send_latency_ms_p50": _number(websocket.get("send_latency_ms_p50")),
             "send_latency_ms_p95": websocket_latency,
             "websocket_send_latency_ms": websocket_latency,

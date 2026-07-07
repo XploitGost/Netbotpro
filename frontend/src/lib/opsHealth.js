@@ -178,10 +178,10 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     recommendedActions.push("Check live stream subscribers for dropped websocket events.");
   }
   if (wsSlowClients > 0) {
-    recommendedActions.push("One or more WebSocket clients are slow. Pause auto-refresh, reduce update frequency, or inspect frontend performance.");
+    recommendedActions.push("One or more WebSocket clients are slow. Reduce realtime update pressure or inspect frontend performance.");
   }
   if (wsEventDrops > 0) {
-    recommendedActions.push("Realtime event drops were detected. Review WebSocket queue size, batching intervals, and client pressure.");
+    recommendedActions.push("Realtime event drops were detected. Review batch size, batch interval, and client queue settings.");
   }
   if (wsEventCoalesced > 0) {
     recommendedActions.push("Realtime updates are being coalesced to protect performance. Consider increasing batch windows or reducing capture pressure.");

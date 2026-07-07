@@ -115,6 +115,16 @@ class EventAggregator:
         self._flush("dashboard")
         self._flush("ops")
 
+    def close(self) -> None:
+        """Flush pending events and cancel timers during shutdown."""
+
+        with self._lock:
+            timers = list(self._timers.values())
+            self._timers = {}
+        for timer in timers:
+            timer.cancel()
+        self.flush_all()
+
     def stats(self) -> dict[str, Any]:
         with self._lock:
             pending_packet = len(self._packet_events)

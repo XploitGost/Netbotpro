@@ -39,6 +39,7 @@ class MonitoringMetricsTests(unittest.TestCase):
                     "clients": 1,
                     "slow_clients": 0,
                     "client_queue_max": 1000,
+                    "send_latency_ms_avg": 2.0,
                     "send_latency_ms_p95": 4.0,
                     "health": "healthy",
                 },
@@ -89,6 +90,8 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["packet_queue"]["pressure_reasons"], [])
         self.assertEqual(payload["event_aggregator"]["packet_batch_ms"], 500)
         self.assertEqual(payload["websocket"]["clients"], 1)
+        self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 2.0)
+        self.assertEqual(payload["websocket"]["websocket_send_latency_ms_avg"], 2.0)
         self.assertEqual(payload["flows"]["total_flows"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 
@@ -105,6 +108,7 @@ class MonitoringMetricsTests(unittest.TestCase):
                 },
                 "websocket": {
                     "slow_clients": 1,
+                    "send_latency_ms_avg": 180,
                     "send_latency_ms_p95": 300,
                     "send_errors_total": 1,
                     "dropped_for_slow_client_total": 2,
@@ -151,6 +155,8 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertIn("websocket_events_dropped", payload["pressure_reasons"])
         self.assertIn("websocket_events_coalesced", payload["pressure_reasons"])
         self.assertIn("websocket_send_latency", payload["pressure_reasons"])
+        self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 180)
+        self.assertEqual(payload["websocket"]["websocket_send_latency_ms_avg"], 180)
         self.assertEqual(payload["packet_queue"]["health"], "critical")
         self.assertIn("packet_queue_backlog", payload["packet_queue"]["pressure_reasons"])
         self.assertIn("packet_queue_high_water", payload["packet_queue"]["pressure_reasons"])
@@ -209,6 +215,31 @@ class MonitoringMetricsTests(unittest.TestCase):
         rendered = str(payload["packet_queue"])
         self.assertNotIn("raw-token", rendered)
         self.assertNotIn("Authorization", rendered)
+
+    def test_build_monitoring_metrics_redacts_websocket_drop_reasons(self):
+        payload = build_monitoring_metrics(
+            sniffer_state={"running": True},
+            observability={
+                "event_bus": {},
+                "event_aggregator": {
+                    "last_drop_reason": "Cookie: session=raw-token",
+                },
+                "websocket": {
+                    "last_drop_reason": "Authorization: Bearer raw-token",
+                    "websocket_last_drop_reason": "token=raw-token",
+                },
+                "packet_queue": {"worker_alive": True},
+                "persistence": {},
+                "history": {},
+                "auto_block": {},
+            },
+            flow_summary={},
+        )
+
+        rendered = str(payload["event_aggregator"]) + str(payload["websocket"])
+        self.assertNotIn("raw-token", rendered)
+        self.assertNotIn("Authorization", rendered)
+        self.assertNotIn("Cookie", rendered)
 
 
 class MonitoringMetricsApiTests(unittest.TestCase):

@@ -361,8 +361,8 @@ describe("OpsPanel", () => {
     );
 
     expect(screen.getByText("WebSocket Event Aggregator")).toBeTruthy();
-    expect(screen.getByText("One or more WebSocket clients are slow. Pause auto-refresh, reduce update frequency, or inspect frontend performance.")).toBeTruthy();
-    expect(screen.getByText("Realtime event drops were detected. Review WebSocket queue size, batching intervals, and client pressure.")).toBeTruthy();
+    expect(screen.getByText("One or more WebSocket clients are slow. Reduce realtime update pressure or inspect frontend performance.")).toBeTruthy();
+    expect(screen.getByText("Realtime event drops were detected. Review batch size, batch interval, and client queue settings.")).toBeTruthy();
     expect(screen.getByText("Realtime updates are being coalesced to protect performance. Consider increasing batch windows or reducing capture pressure.")).toBeTruthy();
     expect(screen.getByText("WebSocket send latency is high. Check browser load, network latency, and backend event pressure.")).toBeTruthy();
     expect(screen.getByText("client_queue_full_coalesce")).toBeTruthy();
