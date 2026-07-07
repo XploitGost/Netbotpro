@@ -21,6 +21,27 @@ class MonitoringMetricsTests(unittest.TestCase):
             },
             observability={
                 "event_bus": {"subscribers": 1, "published_messages": 20},
+                "event_aggregator": {
+                    "enabled": True,
+                    "packet_batch_ms": 500,
+                    "packet_batch_max": 250,
+                    "alert_batch_ms": 500,
+                    "alert_batch_max": 100,
+                    "flow_batch_ms": 1000,
+                    "flow_batch_max": 200,
+                    "summary_batch_ms": 1000,
+                    "batches_sent_total": 1,
+                    "events_received_total": 12,
+                    "events_sent_total": 12,
+                    "health": "healthy",
+                },
+                "websocket": {
+                    "clients": 1,
+                    "slow_clients": 0,
+                    "client_queue_max": 1000,
+                    "send_latency_ms_p95": 4.0,
+                    "health": "healthy",
+                },
                 "packet_queue": {
                     "enabled": True,
                     "max_size": 2000,
@@ -64,6 +85,10 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["capture"]["total_packets"], 12)
         self.assertEqual(payload["packet_queue"]["accepted_total"], 12)
         self.assertEqual(payload["packet_queue"]["current_depth"], 0)
+        self.assertEqual(payload["packet_queue"]["health"], "healthy")
+        self.assertEqual(payload["packet_queue"]["pressure_reasons"], [])
+        self.assertEqual(payload["event_aggregator"]["packet_batch_ms"], 500)
+        self.assertEqual(payload["websocket"]["clients"], 1)
         self.assertEqual(payload["flows"]["total_flows"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 
@@ -72,6 +97,20 @@ class MonitoringMetricsTests(unittest.TestCase):
             sniffer_state={"running": True, "packet_count": 5, "alert_count": 0},
             observability={
                 "event_bus": {"dropped_messages": 2},
+                "event_aggregator": {
+                    "events_dropped_total": 2,
+                    "events_coalesced_total": 3,
+                    "client_queue_max": 1000,
+                    "health": "degraded",
+                },
+                "websocket": {
+                    "slow_clients": 1,
+                    "send_latency_ms_p95": 300,
+                    "send_errors_total": 1,
+                    "dropped_for_slow_client_total": 2,
+                    "coalesced_for_slow_client_total": 1,
+                    "health": "degraded",
+                },
                 "packet_queue": {
                     "enabled": True,
                     "max_size": 100,
@@ -108,6 +147,14 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertIn("packet_queue_backlog", payload["pressure_reasons"])
         self.assertIn("packet_queue_high_water", payload["pressure_reasons"])
         self.assertIn("packet_queue_dropped_packets", payload["pressure_reasons"])
+        self.assertIn("websocket_slow_clients", payload["pressure_reasons"])
+        self.assertIn("websocket_events_dropped", payload["pressure_reasons"])
+        self.assertIn("websocket_events_coalesced", payload["pressure_reasons"])
+        self.assertIn("websocket_send_latency", payload["pressure_reasons"])
+        self.assertEqual(payload["packet_queue"]["health"], "critical")
+        self.assertIn("packet_queue_backlog", payload["packet_queue"]["pressure_reasons"])
+        self.assertIn("packet_queue_high_water", payload["packet_queue"]["pressure_reasons"])
+        self.assertIn("packet_queue_dropped_packets", payload["packet_queue"]["pressure_reasons"])
         self.assertIn("persistence_queue_backlog", payload["pressure_reasons"])
         self.assertIn("websocket_dropped_messages", payload["pressure_reasons"])
         self.assertIn("history_query_latency", payload["pressure_reasons"])
@@ -134,7 +181,34 @@ class MonitoringMetricsTests(unittest.TestCase):
 
         self.assertEqual(payload["health"], "critical")
         self.assertFalse(payload["packet_queue"]["worker_alive"])
+        self.assertEqual(payload["packet_queue"]["health"], "critical")
+        self.assertIn("packet_queue_worker_stopped", payload["packet_queue"]["pressure_reasons"])
         self.assertIn("packet_queue_worker_stopped", payload["pressure_reasons"])
+
+    def test_build_monitoring_metrics_redacts_queue_metrics_to_counters_only(self):
+        payload = build_monitoring_metrics(
+            sniffer_state={"running": True},
+            observability={
+                "packet_queue": {
+                    "enabled": True,
+                    "max_size": 10,
+                    "current_depth": 1,
+                    "accepted_total": 1,
+                    "dropped_total": 0,
+                    "last_drop_reason": "Authorization: Bearer raw-token",
+                    "worker_alive": True,
+                },
+                "event_bus": {},
+                "persistence": {},
+                "history": {},
+                "auto_block": {},
+            },
+            flow_summary={},
+        )
+
+        rendered = str(payload["packet_queue"])
+        self.assertNotIn("raw-token", rendered)
+        self.assertNotIn("Authorization", rendered)
 
 
 class MonitoringMetricsApiTests(unittest.TestCase):
@@ -161,6 +235,8 @@ class MonitoringMetricsApiTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("generated_at", payload)
         self.assertIn("capture", payload)
+        self.assertIn("event_aggregator", payload)
+        self.assertIn("websocket", payload)
         self.assertIn("persistence", payload)
         self.assertEqual(payload["health"], "healthy")
 

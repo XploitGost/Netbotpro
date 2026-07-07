@@ -102,18 +102,31 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_performance_pipeline_docs_are_linked_and_scoped(self):
         readme = self._read("README.md")
+        architecture = self._read("docs/ARCHITECTURE.md")
         performance = self._read("docs/PERFORMANCE_PIPELINE.md")
         performance_lower = performance.lower()
 
         self.assertIn("docs/PERFORMANCE_PIPELINE.md", readme)
         self.assertIn("Bounded Packet Intake Queue", readme)
+        self.assertIn("Queue pressure metrics", readme)
+        self.assertIn("Ops Snapshot packet queue visibility", readme)
         self.assertIn("NETBOT_PACKET_QUEUE_MAX_SIZE", readme)
+        self.assertIn("Performance Pipeline Foundation", architecture)
+        self.assertIn("BoundedPacketQueue", architecture)
+        self.assertIn("packet queue worker", architecture.lower())
+        self.assertIn("WebSocket Event Aggregator", readme)
+        self.assertIn("Event Aggregator", architecture)
+        self.assertIn("WebSocket Batching / Event Aggregator", performance)
+        self.assertIn("NETBOT_WS_PACKET_BATCH_MS", performance)
+        self.assertIn("NETBOT_WS_SLOW_CLIENT_POLICY", performance)
         self.assertIn("NETBOT_PACKET_QUEUE_OVERFLOW_POLICY", performance)
         self.assertIn("NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC", performance)
         self.assertIn("not the complete performance engine", performance_lower)
+        self.assertIn("not the complete performance pipeline", performance_lower)
         self.assertIn("websocket batching", performance_lower)
+        self.assertIn("batch persistence", performance_lower)
         self.assertIn("worker pool", performance_lower)
-        self.assertIn("intentionally not implemented yet", performance_lower)
+        self.assertIn("not implemented yet", performance_lower)
 
     def test_agent_release_safety_is_explicit(self):
         combined = "\n".join(

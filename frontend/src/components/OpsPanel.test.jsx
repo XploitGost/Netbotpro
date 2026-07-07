@@ -48,6 +48,23 @@ describe("OpsPanel", () => {
             worker_alive: true,
             health: "healthy",
           },
+          event_aggregator: {
+            packet_batch_ms: 500,
+            packet_batch_max: 250,
+            alert_batch_ms: 500,
+            alert_batch_max: 100,
+            batches_sent_total: 3,
+            events_received_total: 42,
+            events_sent_total: 40,
+            health: "healthy",
+          },
+          websocket: {
+            clients: 1,
+            slow_clients: 0,
+            client_queue_max: 1000,
+            send_latency_ms_p95: 4,
+            health: "healthy",
+          },
         }}
         onRefresh={onRefresh}
       />
@@ -57,6 +74,8 @@ describe("OpsPanel", () => {
     expect(screen.getByText("60s")).toBeTruthy();
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
     expect(screen.getByText("Packet Intake Queue")).toBeTruthy();
+    expect(screen.getByText("WebSocket Event Aggregator")).toBeTruthy();
+    expect(screen.getByText("Batches Sent")).toBeTruthy();
     expect(screen.getAllByText("20/100").length).toBeGreaterThan(0);
     expect(screen.getByText("queue backlog high")).toBeTruthy();
     expect(screen.getByText("Review runtime pressure signals reported by the backend.")).toBeTruthy();
@@ -297,8 +316,86 @@ describe("OpsPanel", () => {
     );
 
     expect(screen.getByText("Dropped Packets")).toBeTruthy();
-    expect(screen.getByText("Packet drops were detected. Review overflow policy and capture pressure.")).toBeTruthy();
+    expect(screen.getByText("Packet drops were detected. Review overflow policy, queue size, and capture pressure.")).toBeTruthy();
     expect(screen.getByText("Packet queue worker is not running. Restart capture or inspect backend logs.")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/token|authorization|cookie|secret/i);
+  });
+
+  it("renders websocket pressure warnings without sensitive values", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          event_aggregator: {
+            packet_batch_ms: 500,
+            packet_batch_max: 250,
+            alert_batch_ms: 500,
+            alert_batch_max: 100,
+            batches_sent_total: 8,
+            events_received_total: 500,
+            events_sent_total: 450,
+            events_coalesced_total: 20,
+            events_dropped_total: 5,
+            websocket_batch_size_avg: 56.2,
+            last_drop_reason: "Authorization: Bearer raw-token",
+            health: "degraded",
+          },
+          websocket: {
+            clients: 2,
+            slow_clients: 1,
+            client_queue_max: 1000,
+            client_queue_depth_max: 900,
+            send_latency_ms_p50: 30,
+            send_latency_ms_p95: 300,
+            dropped_for_slow_client_total: 5,
+            coalesced_for_slow_client_total: 2,
+            last_drop_reason: "client_queue_full_coalesce",
+            health: "degraded",
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("WebSocket Event Aggregator")).toBeTruthy();
+    expect(screen.getByText("One or more WebSocket clients are slow. Pause auto-refresh, reduce update frequency, or inspect frontend performance.")).toBeTruthy();
+    expect(screen.getByText("Realtime event drops were detected. Review WebSocket queue size, batching intervals, and client pressure.")).toBeTruthy();
+    expect(screen.getByText("Realtime updates are being coalesced to protect performance. Consider increasing batch windows or reducing capture pressure.")).toBeTruthy();
+    expect(screen.getByText("WebSocket send latency is high. Check browser load, network latency, and backend event pressure.")).toBeTruthy();
+    expect(screen.getByText("client_queue_full_coalesce")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/raw-token|authorization/i);
+  });
+
+  it("renders high-water queue warning and hides unsafe drop reason text", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          packet_queue: {
+            max_size: 100,
+            current_depth: 10,
+            utilization_percent: 10,
+            dropped_total: 0,
+            high_water_mark: 95,
+            accepted_total: 200,
+            overflow_policy: "drop_oldest",
+            worker_alive: true,
+            last_drop_reason: "Authorization: Bearer raw-token",
+            health: "degraded",
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Queue pressure is approaching capacity. Consider increasing NETBOT_PACKET_QUEUE_MAX_SIZE.")).toBeTruthy();
+    expect(screen.getAllByText("No drops recorded").length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(/raw-token|authorization/i);
   });
 });

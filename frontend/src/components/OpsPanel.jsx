@@ -34,8 +34,12 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
   const snapshot = buildOpsSnapshot(observability, operationalMetrics);
   const levelFor = (label, fallback = "healthy") => snapshot.summaryCards.find((card) => card.label === label)?.level || fallback;
   const packetQueue = snapshot.packetQueue;
+  const packetQueueLastDropReason = snapshot.safeLastDropReason || "No drops recorded";
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
+  const eventAggregator = snapshot.eventAggregator;
+  const websocket = snapshot.websocket;
+  const websocketLastDropReason = snapshot.safeWebSocketDropReason || "No drops recorded";
   const autoBlock = snapshot.autoBlock;
   const capture = snapshot.capture;
   const flows = snapshot.flows;
@@ -101,9 +105,14 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
       >
         <dl className="ops-metric-grid">
           <MetricRow label="Queue Depth" value={`${packetQueue.current_depth ?? packetQueue.queue_size ?? 0}/${packetQueue.max_size ?? 0}`} level={snapshot.packetQueueLevel} hint={`${Number(packetQueue.utilization_percent || 0).toFixed(1)}% used`} />
+          <MetricRow label="Max Size" value={String(packetQueue.max_size ?? 0)} hint="NETBOT_PACKET_QUEUE_MAX_SIZE" />
+          <MetricRow label="Utilization" value={`${Number(packetQueue.utilization_percent || 0).toFixed(1)}%`} level={Number(packetQueue.utilization_percent || 0) >= 80 ? "degraded" : "healthy"} hint={`Depth ${packetQueue.current_depth ?? packetQueue.queue_size ?? 0}`} />
+          <MetricRow label="Accepted Packets" value={String(packetQueue.accepted_total ?? packetQueue.accepted_packets ?? 0)} hint="Accepted by bounded intake queue" />
           <MetricRow label="Dropped Packets" value={String(packetQueue.dropped_total ?? packetQueue.dropped_packets ?? 0)} level={Number(packetQueue.dropped_total ?? packetQueue.dropped_packets ?? 0) > 0 ? "degraded" : "healthy"} hint={`Oldest ${packetQueue.dropped_oldest_total ?? packetQueue.dropped_oldest ?? 0} | Newest ${packetQueue.dropped_newest_total ?? packetQueue.dropped_newest ?? 0}`} />
-          <MetricRow label="High-water Mark" value={String(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark ?? 0)} hint={`Accepted ${packetQueue.accepted_total ?? packetQueue.accepted_packets ?? 0}`} />
-          <MetricRow label="Overflow Policy" value={packetQueue.overflow_policy || "drop_oldest"} hint={packetQueue.last_drop_reason || "No drops recorded"} />
+          <MetricRow label="Dropped Oldest" value={String(packetQueue.dropped_oldest_total ?? packetQueue.dropped_oldest ?? 0)} />
+          <MetricRow label="Dropped Newest" value={String(packetQueue.dropped_newest_total ?? packetQueue.dropped_newest ?? 0)} />
+          <MetricRow label="High-water Mark" value={String(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark ?? 0)} hint="Peak observed queue depth" />
+          <MetricRow label="Overflow Policy" value={packetQueue.overflow_policy || "drop_oldest"} hint={packetQueueLastDropReason} />
           <MetricRow label="Worker" value={packetQueue.worker_alive === false ? "Stopped" : "Running"} level={packetQueue.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${packetQueue.health || "healthy"}`} />
         </dl>
       </AccordionPanel>
@@ -142,13 +151,34 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
 
       <AccordionPanel
         eyebrow="Stream"
+        title="WebSocket Event Aggregator"
+        subtitle="Batched realtime updates and bounded slow-client protection."
+        badge={levelLabel(levelFor("WS Drops"))}
+        defaultOpen
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Aggregator Health" value={eventAggregator.health || "healthy"} level={snapshot.websocketLevel} hint={`Packet window ${eventAggregator.packet_batch_ms || 500} ms`} />
+          <MetricRow label="WebSocket Clients" value={String(websocket.clients ?? websocket.websocket_clients ?? eventBus.subscribers ?? 0)} hint={`Slow ${websocket.slow_clients ?? websocket.websocket_slow_clients ?? 0}`} level={Number(websocket.slow_clients ?? websocket.websocket_slow_clients ?? 0) > 0 ? "degraded" : "healthy"} />
+          <MetricRow label="Batches Sent" value={String(eventAggregator.batches_sent_total || 0)} hint={`Avg size ${Number(eventAggregator.websocket_batch_size_avg || 0).toFixed(1)}`} />
+          <MetricRow label="Events Received" value={String(eventAggregator.events_received_total || 0)} hint={`Sent ${eventAggregator.events_sent_total || 0}`} />
+          <MetricRow label="Events Coalesced" value={String(eventAggregator.events_coalesced_total || 0)} level={Number(eventAggregator.events_coalesced_total || 0) > 0 ? "warning" : "healthy"} hint="Summary and slow-client protection" />
+          <MetricRow label="Events Dropped" value={String((eventAggregator.events_dropped_total || 0) + (websocket.dropped_for_slow_client_total || 0))} level={Number((eventAggregator.events_dropped_total || 0) + (websocket.dropped_for_slow_client_total || 0)) > 0 ? "degraded" : "healthy"} hint={websocketLastDropReason} />
+          <MetricRow label="Packet Batch Window" value={`${eventAggregator.packet_batch_ms || 500} ms`} hint={`Max ${eventAggregator.packet_batch_max || 250}`} />
+          <MetricRow label="Alert Batch Window" value={`${eventAggregator.alert_batch_ms || 500} ms`} hint={`Max ${eventAggregator.alert_batch_max || 100}`} />
+          <MetricRow label="Send Latency p95" value={formatMs(websocket.send_latency_ms_p95 || websocket.websocket_send_latency_ms || 0)} level={Number(websocket.send_latency_ms_p95 || websocket.websocket_send_latency_ms || 0) >= 250 ? "warning" : "healthy"} hint={`p50 ${formatMs(websocket.send_latency_ms_p50 || 0)}`} />
+          <MetricRow label="Client Queue" value={String(websocket.client_queue_depth_max ?? websocket.websocket_client_queue_depth ?? 0)} hint={`Max ${websocket.client_queue_max || eventAggregator.client_queue_max || 1000}`} />
+          <MetricRow label="WS Subscribers" value={String(eventBus.subscribers || 0)} hint={`Published ${eventBus.published_messages || 0}`} />
+          <MetricRow label="Dropped Events" value={String(eventBus.dropped_messages || 0)} level={Number(eventBus.dropped_messages || 0) > 0 ? "degraded" : "healthy"} hint={`Dropped subscribers ${eventBus.dropped_subscribers || 0}`} />
+        </dl>
+      </AccordionPanel>
+
+      <AccordionPanel
+        eyebrow="Actions"
         title="Event Bus and Auto Block"
-        subtitle="Delivery health for websocket subscribers and automatic firewall actions."
+        subtitle="Automatic firewall action counters remain separate from websocket batching."
         badge={levelLabel(levelFor("WS Drops"))}
       >
         <dl className="ops-metric-grid">
-          <MetricRow label="WS Subscribers" value={String(eventBus.subscribers || 0)} hint={`Published ${eventBus.published_messages || 0}`} />
-          <MetricRow label="Dropped Events" value={String(eventBus.dropped_messages || 0)} level={Number(eventBus.dropped_messages || 0) > 0 ? "degraded" : "healthy"} hint={`Dropped subscribers ${eventBus.dropped_subscribers || 0}`} />
           <MetricRow label="Auto Blocks" value={String(autoBlock.blocked_total || 0)} hint={`Cooldown skips ${autoBlock.cooldown_skips || 0}`} />
           <MetricRow label="Auto Block Failures" value={String(autoBlock.failed_total || 0)} level={Number(autoBlock.failed_total || 0) > 0 ? "warning" : "healthy"} hint={`Private skips ${autoBlock.private_ip_skips || 0} | Whitelist skips ${autoBlock.whitelist_skips || 0}`} />
         </dl>

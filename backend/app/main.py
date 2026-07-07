@@ -112,6 +112,8 @@ ALLOWED_PCAP_SUFFIXES = {".pcap", ".pcapng"}
 def _observability_snapshot() -> dict[str, Any]:
     return {
         "event_bus": event_bus.stats(),
+        "event_aggregator": event_bus.event_aggregator_stats(),
+        "websocket": event_bus.websocket_stats(),
         "history": history_service.metrics(),
         "packet_queue": sniffer_service.packet_queue_stats(),
         "persistence": sniffer_service.persistence_stats(),
@@ -1456,7 +1458,13 @@ async def ws_events(websocket: WebSocket) -> None:
         )
         while True:
             message = await queue.get()
-            await websocket.send_json(message)
+            started = time.perf_counter()
+            try:
+                await websocket.send_json(message)
+                event_bus.record_send_latency(started, ok=True)
+            except Exception:
+                event_bus.record_send_latency(started, ok=False)
+                raise
     except WebSocketDisconnect:
         pass
     finally:

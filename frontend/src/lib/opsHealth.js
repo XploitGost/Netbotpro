@@ -36,8 +36,29 @@ function normalizeLevel(level) {
   return "healthy";
 }
 
+function safeQueueDropReason(value) {
+  const allowed = new Set([
+    "queue_full_drop_newest",
+    "queue_full_drop_oldest",
+    "queue_full_after_drop_oldest",
+  ]);
+  return allowed.has(value) ? value : "";
+}
+
+function safeWebSocketDropReason(value) {
+  const allowed = new Set([
+    "client_queue_full_coalesce",
+    "client_queue_full_drop_oldest",
+    "client_queue_full_drop_newest",
+    "client_queue_full_after_policy",
+  ]);
+  return allowed.has(value) ? value : "";
+}
+
 export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventBus = observability?.event_bus || {};
+  const eventAggregator = operationalMetrics?.event_aggregator || observability?.event_aggregator || {};
+  const websocket = operationalMetrics?.websocket || observability?.websocket || {};
   const packetQueue = operationalMetrics?.packet_queue || observability?.packet_queue || {};
   const persistence = observability?.persistence || {};
   const history = observability?.history || {};
@@ -58,10 +79,19 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const packetQueueMaxSize = toNumber(packetQueue.max_size);
   const packetQueueUtilization = toNumber(packetQueue.utilization_percent);
   const packetQueueDropped = toNumber(packetQueue.dropped_total ?? packetQueue.dropped_packets);
+  const packetQueueHighWater = toNumber(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark);
   const packetQueueWorkerAlive = packetQueue.worker_alive !== false;
   const droppedWrites = toNumber(persistence.dropped_writes);
   const avgFlushMs = toNumber(persistence.avg_flush_ms || persistence.last_flush_ms);
   const wsDropped = toNumber(eventBus.dropped_messages);
+  const wsClients = toNumber(websocket.clients ?? websocket.websocket_clients);
+  const wsSlowClients = toNumber(websocket.slow_clients ?? websocket.websocket_slow_clients);
+  const wsEventDrops = toNumber(websocket.dropped_for_slow_client_total) + toNumber(eventAggregator.events_dropped_total);
+  const wsEventCoalesced = toNumber(websocket.coalesced_for_slow_client_total) + toNumber(eventAggregator.events_coalesced_total);
+  const wsSendLatency = toNumber(websocket.send_latency_ms_p95 ?? websocket.websocket_send_latency_ms);
+  const wsBatchesSent = toNumber(eventAggregator.batches_sent_total);
+  const wsEventsReceived = toNumber(eventAggregator.events_received_total);
+  const wsEventsSent = toNumber(eventAggregator.events_sent_total);
   const wsSubscribers = toNumber(eventBus.subscribers);
   const wsPublished = toNumber(eventBus.published_messages);
   const queryLatencyMs = Math.max(toNumber(packetsList.last_ms), toNumber(alertsList.last_ms));
@@ -82,6 +112,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
 
   const streamLevel = wsDropped > 0
     ? "degraded"
+    : wsSlowClients > 0 || wsEventDrops > 0 || wsEventCoalesced > 0 || wsSendLatency >= 250
+      ? "warning"
     : wsSubscribers === 0 && wsPublished > 0
       ? "warning"
       : "healthy";
@@ -120,10 +152,13 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     recommendedActions.push("Packet queue worker is not running. Restart capture or inspect backend logs.");
   }
   if (packetQueueDropped > 0) {
-    recommendedActions.push("Packet drops were detected. Review overflow policy and capture pressure.");
+    recommendedActions.push("Packet drops were detected. Review overflow policy, queue size, and capture pressure.");
   }
   if (packetQueueUtilization >= 80 || (packetQueueMaxSize > 0 && packetQueueDepth >= packetQueueMaxSize * 0.8)) {
     recommendedActions.push("Increase queue size, reduce capture rate, or enable batching before heavier workloads.");
+  }
+  if (packetQueueMaxSize > 0 && packetQueueHighWater >= packetQueueMaxSize * 0.9) {
+    recommendedActions.push("Queue pressure is approaching capacity. Consider increasing NETBOT_PACKET_QUEUE_MAX_SIZE.");
   }
   if (criticalFlows > 0) {
     recommendedActions.push("Review critical flows and related alerts first.");
@@ -141,6 +176,18 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   }
   if (wsDropped > 0) {
     recommendedActions.push("Check live stream subscribers for dropped websocket events.");
+  }
+  if (wsSlowClients > 0) {
+    recommendedActions.push("One or more WebSocket clients are slow. Pause auto-refresh, reduce update frequency, or inspect frontend performance.");
+  }
+  if (wsEventDrops > 0) {
+    recommendedActions.push("Realtime event drops were detected. Review WebSocket queue size, batching intervals, and client pressure.");
+  }
+  if (wsEventCoalesced > 0) {
+    recommendedActions.push("Realtime updates are being coalesced to protect performance. Consider increasing batch windows or reducing capture pressure.");
+  }
+  if (wsSendLatency >= 250) {
+    recommendedActions.push("WebSocket send latency is high. Check browser load, network latency, and backend event pressure.");
   } else if (wsSubscribers === 0 && wsPublished > 0) {
     recommendedActions.push("Open the live dashboard or verify websocket subscribers are connected.");
   }
@@ -212,8 +259,14 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     },
     {
       label: "WS Drops",
-      value: String(wsDropped),
-      hint: `Published ${wsPublished}`,
+      value: String(wsDropped + wsEventDrops),
+      hint: `Batches ${wsBatchesSent} | Clients ${wsClients}`,
+      level: streamLevel,
+    },
+    {
+      label: "Event Batches",
+      value: String(wsBatchesSent),
+      hint: `${wsEventsSent} sent from ${wsEventsReceived} received`,
       level: streamLevel,
     },
     {
@@ -233,7 +286,12 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     flows,
     pressureReasons,
     eventBus,
+    eventAggregator,
+    websocket,
+    websocketLevel: streamLevel,
+    safeWebSocketDropReason: safeWebSocketDropReason(websocket.last_drop_reason || eventAggregator.last_drop_reason),
     packetQueue,
+    safeLastDropReason: safeQueueDropReason(packetQueue.last_drop_reason),
     packetQueueLevel,
     persistence,
     history,

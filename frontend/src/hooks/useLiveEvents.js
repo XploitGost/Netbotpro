@@ -5,6 +5,17 @@ const FLUSH_MS = 180;
 const IMMEDIATE_FLUSH_THRESHOLD = 120;
 const MAX_BUFFERED_EVENTS = 1000;
 const MAX_BATCH_SIZE = 200;
+const MAX_LIVE_PACKETS = 2000;
+const MAX_LIVE_ALERTS = 1000;
+const MAX_LIVE_FLOWS = 2000;
+
+function normalizeBatchEvents(message, field = "events") {
+  const items = Array.isArray(message?.[field]) ? message[field] : [];
+  return items
+    .filter(Boolean)
+    .slice(-MAX_BATCH_SIZE)
+    .map((item) => (item?.type && item?.payload ? item : { version: 1, type: message.type, payload: item }));
+}
 
 export function useLiveEvents({
   localToken,
@@ -101,6 +112,16 @@ export function useLiveEvents({
           scheduleFlush();
           return;
         }
+        if (message.type === "packet_batch") {
+          packetBuffer.push(...normalizeBatchEvents(message, "events"));
+          if (packetBuffer.length > MAX_LIVE_PACKETS) {
+            droppedPackets += packetBuffer.length - MAX_LIVE_PACKETS;
+            packetBuffer.splice(0, packetBuffer.length - MAX_LIVE_PACKETS);
+          }
+          if (flushTimer) window.clearTimeout(flushTimer);
+          flushBuffers();
+          return;
+        }
         if (message.type === "alert:new") {
           alertBuffer.push(message);
           if (alertBuffer.length > MAX_BUFFERED_EVENTS) {
@@ -115,7 +136,53 @@ export function useLiveEvents({
           scheduleFlush();
           return;
         }
+        if (message.type === "alert_batch") {
+          alertBuffer.push(...normalizeBatchEvents(message, "events"));
+          if (alertBuffer.length > MAX_LIVE_ALERTS) {
+            droppedAlerts += alertBuffer.length - MAX_LIVE_ALERTS;
+            alertBuffer.splice(0, alertBuffer.length - MAX_LIVE_ALERTS);
+          }
+          if (flushTimer) window.clearTimeout(flushTimer);
+          flushBuffers();
+          return;
+        }
         startTransition(() => {
+          if (message.type === "flow_delta") {
+            handlersRef.current.onState?.({
+              version: 1,
+              type: "flow_delta",
+              timestamp: message.timestamp,
+              payload: { updates: normalizeBatchEvents(message, "updates").slice(-MAX_LIVE_FLOWS) },
+            });
+            return;
+          }
+          if (message.type === "dashboard_summary") {
+            handlersRef.current.onState?.({
+              version: 1,
+              type: "dashboard:summary",
+              timestamp: message.timestamp,
+              payload: message.summary || {},
+            });
+            return;
+          }
+          if (message.type === "ops_health_update") {
+            handlersRef.current.onState?.({
+              version: 1,
+              type: "ops:health",
+              timestamp: message.timestamp,
+              payload: message.health || {},
+            });
+            return;
+          }
+          if (message.type === "agent_status_batch") {
+            handlersRef.current.onState?.({
+              version: 1,
+              type: "agent:status_batch",
+              timestamp: message.timestamp,
+              payload: { agents: normalizeBatchEvents(message, "agents") },
+            });
+            return;
+          }
           if (message.type === "sniffer:started" || message.type === "sniffer:stopped" || message.type === "sniffer:reset" || message.type === "hello") {
             handlersRef.current.onState(message);
           }
@@ -144,3 +211,5 @@ export function useLiveEvents({
     };
   }, [localToken]);
 }
+
+export { MAX_LIVE_ALERTS, MAX_LIVE_FLOWS, MAX_LIVE_PACKETS };

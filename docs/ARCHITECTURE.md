@@ -50,6 +50,9 @@ flowchart TB
 
     subgraph Pipeline["Core Capture And Analysis Pipeline"]
         Provider["Capture Provider<br/>Scapy / Npcap / libpcap"]
+        IntakeQueue["Bounded Packet Intake Queue"]
+        QueueWorker["Packet Queue Worker"]
+        EventAggregator["Event Aggregator"]
         Parser["Packet Parser"]
         Layer7["Layer 7 / TLS Metadata"]
         ProtocolIntel["Protocol Intelligence"]
@@ -105,7 +108,8 @@ flowchart TB
     Routes --> AgentAPI
     Events --> LiveClient
     CapturePolicy --> Provider
-    Provider --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
+    Provider --> IntakeQueue --> QueueWorker --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
+    QueueWorker --> EventAggregator --> Events
     ProtocolIntel --> TCPIntel
     ProtocolIntel --> DNSIntel
     ProtocolIntel --> HTTPIntel
@@ -169,8 +173,9 @@ remote dashboard access is explicit and auditable.
 ## Data Plane
 
 The data plane stays local to the machine running the backend. Packets flow from
-the capture provider into parsing, layer-7 metadata extraction, redaction,
-detection, process attribution, history persistence, and report/export services.
+the capture provider into the bounded packet intake queue, then through parsing,
+layer-7 metadata extraction, redaction, detection, process attribution, history
+persistence, and report/export services.
 Metadata mode avoids storing payload previews. Full and Forensic modes are
 guarded by the capture policy service and are only intended for authorized
 servers with owner or administrator approval.
@@ -178,6 +183,43 @@ servers with owner or administrator approval.
 Raw PCAP artifacts are not treated like normal reports. They are exposed only
 through the guarded raw export path, require Full or Forensic mode, require Safe
 Use acceptance, require token authorization, and create audit records.
+
+## Performance Pipeline Foundation
+
+The current performance foundation is intentionally narrow. `BoundedPacketQueue`
+sits between capture callbacks and the existing packet processing path. The
+queue has a fixed maximum size, explicit `drop_oldest` and `drop_newest`
+overflow policies, accepted/drop counters, high-water tracking, safe last-drop
+reasons, and packet queue worker liveness.
+
+`/api/monitoring/metrics` exposes queue pressure metrics so Ops Snapshot can
+show current depth, utilization, dropped packets, overflow policy, worker
+status, and pressure reasons. This makes backpressure visible without exposing
+packet payloads, credentials, cookies, authorization headers, sessions, or
+tokens.
+
+This foundation now includes bounded packet intake and WebSocket event
+aggregation. It does not include the future batch persistence, live ring buffer,
+or flow-aware worker pool steps.
+
+## WebSocket Event Aggregator
+
+The Event Aggregator is the Step 3 performance component between packet
+processing and websocket delivery. Packet and alert events are collected into
+short windows, flow updates are sent as deltas, and dashboard or ops summaries
+are coalesced before fan-out to clients.
+
+Each websocket client has a bounded outgoing queue. Slow clients are protected
+with the configured policy: `coalesce`, `drop_oldest`, or `drop_newest`.
+WebSocket metrics expose clients, slow clients, batches sent, events received,
+events sent, coalesced events, dropped events, queue depth, send latency, and
+safe last-drop reasons.
+
+This layer preserves websocket authentication and trusted-client checks. It
+does not alter Agent/Fleet telemetry boundaries and does not add command/control,
+remote shell, file collection, raw packet forwarding, raw payload forwarding,
+PCAP forwarding, TLS decryption, MITM, credential collection, IPS behavior, or
+AI autonomous actions.
 
 ## Flow And Protocol Intelligence
 

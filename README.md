@@ -69,7 +69,8 @@ or PCAP artifacts.
 | Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
-| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, drop counters, overflow policy behavior, and Ops Snapshot rendering are tested. | First performance-pipeline component only; Worker Pool and WebSocket batching are not implemented yet. |
+| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level performance hardening step only; Worker Pool, WebSocket batching, and batch persistence are not implemented yet. |
+| WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Step 3 of the performance pipeline only; Batch Persistence and Worker Pool are not implemented yet. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -163,11 +164,21 @@ The architecture deliberately separates two remote paths:
 
 NetBotPro exposes a compact operational snapshot at `/api/monitoring/metrics`
 for local health checks and dashboard use. The snapshot reports capture state,
-packet intake queue pressure, websocket event delivery, SQLite persistence,
+bounded packet intake queue pressure, websocket event delivery, SQLite persistence,
 history query latency, flow totals, and detection counters. Recommended actions
 in the UI are intentionally short and operational: stale snapshots, capture
 stops, queue pressure, dropped writes, websocket delivery gaps, and backend
 runtime pressure are surfaced without exposing packet payloads or secrets.
+
+The bounded queue is the first performance-pipeline foundation step, not the
+complete performance pipeline. It adds queue pressure metrics, drop counters,
+overflow policies, worker liveness, and Ops Snapshot visibility before future
+WebSocket batching, batch persistence, and worker-pool work.
+
+The WebSocket Event Aggregator is the next foundation step. It batches realtime
+packet and alert updates, coalesces summary updates, protects against slow
+clients with a bounded outgoing queue, and exposes WebSocket pressure metrics in
+Ops Snapshot. It is still not the complete performance pipeline.
 
 Packet intake queue tuning is controlled by:
 
