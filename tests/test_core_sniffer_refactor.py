@@ -1,4 +1,7 @@
+import sys
+import types
 import unittest
+from unittest.mock import patch
 
 from backend.app.bootstrap import ensure_project_root_on_path
 
@@ -87,6 +90,23 @@ class CoreSnifferRefactorTests(unittest.TestCase):
         sniffer = NetSniffer(callback, sniff_func=lambda **kwargs: None)
         self.assertTrue(hasattr(sniffer, "start"))
         self.assertTrue(hasattr(sniffer, "stop"))
+
+    def test_default_sniff_import_uses_scapy_all(self):
+        from core.netbotpro_sniffer_core import runtime
+
+        def fake_sniff(**_kwargs):
+            return None
+
+        fake_scapy_all = types.ModuleType("scapy.all")
+        fake_scapy_all.sniff = fake_sniff
+
+        with (
+            patch.object(runtime, "ensure_capture_backend", return_value=None),
+            patch.dict(sys.modules, {"scapy.all": fake_scapy_all}),
+        ):
+            sniffer = runtime.NetSniffer(lambda _meta: None)
+
+        self.assertIs(sniffer._sniff_func, fake_sniff)
 
     def test_packet_builder_keeps_compatibility_aliases(self):
         layers = PacketLayers(Ether=_Ether, IP=_IP, TCP=_TCP, UDP=_UDP, ICMP=_ICMP, DNS=_DNS, DNSQR=_DNSQR)

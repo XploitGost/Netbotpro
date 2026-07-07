@@ -31,7 +31,7 @@ class NetSniffer:
         self.enable_mac_vendor = enable_mac_vendor
         if sniff_func is None:
             ensure_capture_backend()
-            from scapy.sendrecv import sniff  # type: ignore
+            from scapy.all import sniff  # type: ignore
 
             sniff_func = sniff
         self._sniff_func = sniff_func
