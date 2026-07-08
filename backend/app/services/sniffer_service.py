@@ -18,6 +18,7 @@ from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipe
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
 from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
+from core.flow_engine import flow_id_for
 
 ensure_project_root_on_path()
 
@@ -85,6 +86,9 @@ class SnifferService:
         if not preflight.get("ready"):
             raise CaptureStartUnavailableError(self._first_blocking_preflight_detail(preflight), preflight=preflight)
         iface = self._resolve_local_interface_or_raise(iface)
+        if iface is None:
+            recommended = str(preflight.get("recommended_interface") or "").strip()
+            iface = recommended or None
 
         result: dict[str, Any] = {}
         error: dict[str, BaseException] = {}
@@ -262,7 +266,7 @@ class SnifferService:
     def persistence_stats(self) -> dict[str, int | float]:
         return self._persistence.stats()
 
-    def packet_queue_stats(self) -> dict[str, int | float | str | bool]:
+    def packet_queue_stats(self) -> dict[str, Any]:
         return self._packet_queue.stats(worker_alive=self._packet_worker.is_alive())
 
     def auto_block_stats(self) -> dict[str, int | float]:
@@ -295,11 +299,13 @@ class SnifferService:
 
     def _assign_alert_ids(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
+        flow_id = flow_id_for(packet)
         for alert in alerts:
             row = dict(alert)
             with self._lock:
                 self._alert_seq += 1
                 row.setdefault("id", f"mem-alert-{self._alert_seq}")
             row.setdefault("packet_id", packet.get("id"))
+            row.setdefault("flow_id", flow_id)
             normalized.append(row)
         return normalized

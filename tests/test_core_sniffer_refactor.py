@@ -120,7 +120,9 @@ class CoreSnifferRefactorTests(unittest.TestCase):
             ),
         ):
             sniffer = runtime.NetSniffer(lambda _meta: None)
+            sniff_func = sniffer._sniff_callable()
 
+        self.assertIs(sniff_func, fake_sniff)
         self.assertIs(sniffer._sniff_func, fake_sniff)
         self.assertEqual(register_calls, [(1, fake_ether)])
 

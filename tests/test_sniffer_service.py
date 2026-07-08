@@ -46,6 +46,7 @@ class _FakeCaptureProvider:
                 return {
                     "provider": "fake",
                     "ready": True,
+                    "recommended_interface": "eth0",
                     "checks": [{"code": "interfaces_available", "ok": True, "severity": "error", "detail": "ok"}],
                 }
 
@@ -96,6 +97,16 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertTrue(state["running"])
         self.assertEqual(provider.session.started_with, "eth0")
         self.assertEqual(state["iface"], "Ethernet")
+        service.close()
+
+    def test_start_without_iface_uses_preflight_recommended_interface(self):
+        provider = _FakeCaptureProvider()
+        service = SnifferService(EventBus(), capture_provider=provider)
+
+        state = service.start()
+
+        self.assertTrue(state["running"])
+        self.assertEqual(provider.session.started_with, "eth0")
         service.close()
 
     def test_capture_interfaces_include_preflight(self):
@@ -150,6 +161,27 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertEqual(packet["payload_len"], 42)
         self.assertEqual(packet["payload_hex"], "")
         self.assertEqual(packet["payload_ascii"], "")
+
+    def test_alerts_are_linked_to_packet_flow_id(self):
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+        )
+        packet = {
+            "id": "pkt-1",
+            "src": "192.168.1.10",
+            "dst": "8.8.8.8",
+            "sport": 50000,
+            "dport": 443,
+            "proto": "TCP",
+        }
+
+        alerts = service._assign_alert_ids(packet, [{"attack_type": "qa"}])
+
+        self.assertEqual(alerts[0]["packet_id"], "pkt-1")
+        self.assertTrue(str(alerts[0]["flow_id"]).startswith("flow-"))
+        service.close()
 
     def test_start_times_out_when_capture_session_creation_hangs(self):
         service = SnifferService(EventBus(), capture_provider=_SlowCaptureProvider())

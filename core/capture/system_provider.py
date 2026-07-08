@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 SUPPORTED_CAPTURE_SYSTEMS = {"windows", "linux", "darwin"}
 CAPTURE_CALL_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_CALL_TIMEOUT_SEC", "8.0"))
 INTERFACE_DISCOVERY_TIMEOUT_SEC = float(os.environ.get("NETBOT_INTERFACE_DISCOVERY_TIMEOUT_SEC", "8.0"))
+CAPTURE_BACKEND_PROBE_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_BACKEND_PROBE_TIMEOUT_SEC", "5.0"))
+CAPTURE_BACKEND_PROBE_ARG = "--capture-backend-probe"
 INTERFACE_DISCOVERY_ARG = "--capture-discovery-json"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USE_SUBPROCESS_DISCOVERY = os.environ.get("NETBOT_USE_SUBPROCESS_INTERFACE_DISCOVERY", "").strip().lower() in {"1", "true", "yes"}
@@ -215,6 +217,11 @@ class SystemCaptureProvider(CaptureProvider):
             return [sys.executable, INTERFACE_DISCOVERY_ARG]
         return [sys.executable, "-m", "backend.app.desktop_entry", INTERFACE_DISCOVERY_ARG]
 
+    def _capture_backend_probe_command(self) -> list[str]:
+        if getattr(sys, "frozen", False):
+            return [sys.executable, CAPTURE_BACKEND_PROBE_ARG]
+        return [sys.executable, "-m", "backend.app.desktop_entry", CAPTURE_BACKEND_PROBE_ARG]
+
     def _run_interface_discovery_subprocess(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "capture_output": True,
@@ -322,8 +329,6 @@ class SystemCaptureProvider(CaptureProvider):
         interfaces = self.list_interfaces()
         if self._use_subprocess_interface_discovery:
             scapy_ok, scapy_detail = self._scapy_status_from_interfaces_payload(interfaces)
-        elif os_name == "windows" and not interfaces.get("degraded") and interfaces.get("items"):
-            scapy_ok, scapy_detail = True, "Windows capture interfaces are available; Scapy is loaded when capture starts."
         else:
             scapy_ok, scapy_detail = self._call_with_timeout(
                 self._scapy_checker,
@@ -389,8 +394,29 @@ class SystemCaptureProvider(CaptureProvider):
             recommendations=recommendations,
         )
 
-    @staticmethod
-    def _default_scapy_checker() -> tuple[bool, str]:
+    def _default_scapy_checker(self) -> tuple[bool, str]:
+        if self._os_name_getter() == "windows":
+            try:
+                completed = subprocess.run(
+                    self._capture_backend_probe_command(),
+                    capture_output=True,
+                    text=True,
+                    timeout=CAPTURE_BACKEND_PROBE_TIMEOUT_SEC,
+                    check=False,
+                    cwd=None if getattr(sys, "frozen", False) else str(PROJECT_ROOT),
+                )
+            except subprocess.TimeoutExpired:
+                return (
+                    False,
+                    "Scapy/Npcap capture backend probe timed out. Restart Npcap and run Netbotpro as Administrator.",
+                )
+            except Exception as exc:
+                return False, f"Scapy/Npcap capture backend probe failed: {exc.__class__.__name__}"
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+                return False, f"Scapy/Npcap capture backend probe failed: {detail[:160]}"
+            return True, "Scapy/Npcap capture backend probe passed."
+
         try:
             importlib.import_module("scapy.interfaces")
             importlib.import_module("scapy.sendrecv")

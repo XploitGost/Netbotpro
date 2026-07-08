@@ -29,15 +29,6 @@ class NetSniffer:
         self.packet_callback = packet_callback
         self.enable_geoip = enable_geoip
         self.enable_mac_vendor = enable_mac_vendor
-        if sniff_func is None:
-            ensure_capture_backend()
-            from scapy.config import conf  # type: ignore
-            from scapy.layers.l2 import Ether  # type: ignore
-            from scapy.sendrecv import sniff  # type: ignore
-
-            conf.l2types.register(1, Ether)
-
-            sniff_func = sniff
         self._sniff_func = sniff_func
         self._iface_resolver = iface_resolver or self._default_iface_resolver
         self._candidate_resolver = candidate_resolver or resolve_capture_interface
@@ -55,7 +46,6 @@ class NetSniffer:
 
     def start(self, iface: str | None = None, *args: Any, **kwargs: Any) -> None:
         with self._lock:
-            ensure_capture_backend()
             iface = self._resolve_iface(iface, args, kwargs)
             if self._running:
                 return
@@ -93,8 +83,9 @@ class NetSniffer:
 
     def _sniff_loop(self, iface: str | None) -> None:
         try:
+            sniff_func = self._sniff_callable()
             while self._should_run():
-                self._sniff_func(
+                sniff_func(
                     iface=iface,
                     prn=self._handle_packet,
                     store=False,
@@ -107,6 +98,19 @@ class NetSniffer:
             with self._lock:
                 self._running = False
                 self._stop_event.set()
+
+    def _sniff_callable(self) -> Callable[..., Any]:
+        if self._sniff_func is not None:
+            return self._sniff_func
+
+        ensure_capture_backend()
+        from scapy.config import conf  # type: ignore
+        from scapy.layers.l2 import Ether  # type: ignore
+        from scapy.sendrecv import sniff  # type: ignore
+
+        conf.l2types.register(1, Ether)
+        self._sniff_func = sniff
+        return sniff
 
     def _handle_packet(self, pkt: Any) -> None:
         if not self._should_run():
