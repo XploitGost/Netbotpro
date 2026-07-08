@@ -17,6 +17,20 @@ class _PrivilegeChecker:
 
 
 class CaptureProviderTests(unittest.TestCase):
+    def test_capture_backend_warmup_is_opt_in(self):
+        with patch("core.capture.system_provider.ensure_capture_backend") as ensure_capture_backend:
+            SystemCaptureProvider(os_name_getter=lambda: "windows")
+
+        ensure_capture_backend.assert_not_called()
+
+    def test_frozen_runtime_skips_capture_backend_warmup(self):
+        with patch.dict("core.capture.system_provider.os.environ", {"NETBOT_CAPTURE_WARM_BACKEND": "1"}), patch(
+            "core.capture.system_provider.sys.frozen", True, create=True
+        ), patch("core.capture.system_provider.ensure_capture_backend") as ensure_capture_backend:
+            SystemCaptureProvider(os_name_getter=lambda: "windows")
+
+        ensure_capture_backend.assert_not_called()
+
     def test_preflight_reports_ready_on_supported_platform_with_interfaces(self):
         provider = SystemCaptureProvider(
             interfaces_func=lambda: {

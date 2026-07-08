@@ -91,22 +91,38 @@ class CoreSnifferRefactorTests(unittest.TestCase):
         self.assertTrue(hasattr(sniffer, "start"))
         self.assertTrue(hasattr(sniffer, "stop"))
 
-    def test_default_sniff_import_uses_scapy_all(self):
+    def test_default_sniff_import_registers_ethernet_linktype(self):
         from core.netbotpro_sniffer_core import runtime
 
         def fake_sniff(**_kwargs):
             return None
 
-        fake_scapy_all = types.ModuleType("scapy.all")
-        fake_scapy_all.sniff = fake_sniff
+        register_calls = []
+        fake_ether = object()
+        fake_config = types.ModuleType("scapy.config")
+        fake_config.conf = types.SimpleNamespace(
+            l2types=types.SimpleNamespace(register=lambda *args: register_calls.append(args))
+        )
+        fake_layers_l2 = types.ModuleType("scapy.layers.l2")
+        fake_layers_l2.Ether = fake_ether
+        fake_sendrecv = types.ModuleType("scapy.sendrecv")
+        fake_sendrecv.sniff = fake_sniff
 
         with (
             patch.object(runtime, "ensure_capture_backend", return_value=None),
-            patch.dict(sys.modules, {"scapy.all": fake_scapy_all}),
+            patch.dict(
+                sys.modules,
+                {
+                    "scapy.config": fake_config,
+                    "scapy.layers.l2": fake_layers_l2,
+                    "scapy.sendrecv": fake_sendrecv,
+                },
+            ),
         ):
             sniffer = runtime.NetSniffer(lambda _meta: None)
 
         self.assertIs(sniffer._sniff_func, fake_sniff)
+        self.assertEqual(register_calls, [(1, fake_ether)])
 
     def test_packet_builder_keeps_compatibility_aliases(self):
         layers = PacketLayers(Ether=_Ether, IP=_IP, TCP=_TCP, UDP=_UDP, ICMP=_ICMP, DNS=_DNS, DNSQR=_DNSQR)

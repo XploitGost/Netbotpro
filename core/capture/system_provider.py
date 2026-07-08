@@ -19,6 +19,7 @@ from core.netbotpro_sniffer_core import (
     list_capture_interfaces,
     resolve_capture_interface,
 )
+from core.netbotpro_sniffer_core.interfaces import ensure_capture_backend
 
 from .contracts import (
     CaptureInterface,
@@ -79,6 +80,7 @@ class SystemCaptureProvider(CaptureProvider):
         os_name_getter: Callable[[], str] | None = None,
         scapy_checker: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
+        self._using_default_session_factory = session_factory is None
         self._session_factory = session_factory or self._default_session_factory
         self._interfaces_func = interfaces_func or list_capture_interfaces
         self._describe_func = describe_func or describe_capture_interface
@@ -89,6 +91,21 @@ class SystemCaptureProvider(CaptureProvider):
         self._last_interfaces_payload: dict[str, Any] | None = None
         self._last_interfaces_timeout_at = 0.0
         self._use_subprocess_interface_discovery = interfaces_func is None and USE_SUBPROCESS_DISCOVERY
+        self._warm_capture_backend()
+
+    def _warm_capture_backend(self) -> None:
+        if os.environ.get("NETBOT_CAPTURE_WARM_BACKEND", "").strip().lower() not in {"1", "true", "yes"}:
+            return
+        if self._os_name_getter() != "windows":
+            return
+        if getattr(sys, "frozen", False):
+            return
+        if not self._using_default_session_factory:
+            return
+        try:
+            ensure_capture_backend()
+        except Exception:
+            logger.debug("capture backend warmup failed", exc_info=True)
 
     @staticmethod
     def _capture_recommendations(
