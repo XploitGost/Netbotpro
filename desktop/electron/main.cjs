@@ -14,6 +14,9 @@ let shuttingDown = false;
 let desktopLocalToken = "";
 let backendKillTimer = null;
 
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu");
+
 function appendDesktopLog(paths, channel, text) {
   if (!paths?.logDir || !text) return;
   const logFile = path.join(paths.logDir, "desktop-backend.log");
@@ -173,6 +176,20 @@ function openExternalIfSafe(target) {
 }
 
 function hardenWindow(window) {
+  window.webContents.on("render-process-gone", (_event, details) => {
+    appendDesktopLog(desktopPaths(), "renderer", `render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    appendDesktopLog(desktopPaths(), "renderer", `did-fail-load code=${errorCode} description=${errorDescription} url=${validatedURL}`);
+  });
+  window.webContents.on("unresponsive", () => {
+    appendDesktopLog(desktopPaths(), "renderer", "window became unresponsive");
+  });
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) {
+      appendDesktopLog(desktopPaths(), "renderer", `console level=${level} ${sourceId}:${line} ${message}`);
+    }
+  });
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedDesktopUrl(url)) {
       return { action: "allow" };
@@ -355,6 +372,7 @@ async function createWindow() {
   });
 
   mainWindow.on("closed", () => {
+    appendDesktopLog(paths, "window", "main window closed");
     mainWindow = null;
   });
 }
