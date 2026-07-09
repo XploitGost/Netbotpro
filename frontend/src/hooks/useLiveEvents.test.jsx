@@ -41,6 +41,21 @@ afterEach(() => {
 });
 
 describe("useLiveEvents", () => {
+  it("waits without opening a websocket while disabled", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const onStatusChange = vi.fn();
+
+    render(<Harness enabled={false} onStatusChange={onStatusChange} />);
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBe(0);
+      expect(onStatusChange).toHaveBeenCalledWith(
+        "waiting",
+        "Enter the local token to start live stream"
+      );
+    });
+  });
+
   it("processes packet and alert batch messages", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const onPacketsBatch = vi.fn();

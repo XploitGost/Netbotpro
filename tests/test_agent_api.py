@@ -156,6 +156,34 @@ class AgentApiTests(unittest.TestCase):
         self.assertNotIn("report-secret", csv_report.text)
         self.assertEqual(report.json()["total_agents"], 1)
 
+    def test_demo_seed_endpoint_populates_fleet_without_exposing_token(self):
+        with patch.dict(
+            os.environ,
+            {
+                "NETBOT_REMOTE_ACCESS": "1",
+                "NETBOT_LOCAL_TOKEN": "local-token",
+            },
+            clear=False,
+        ), patch("backend.app.main.audit_event") as audit:
+            seeded = self.client.post(
+                "/api/agents/demo/seed",
+                headers={"X-NetBot-Token": "local-token"},
+                json={"count": 4, "reset": True},
+            )
+            agents = self.client.get(
+                "/api/agents",
+                headers={"X-NetBot-Token": "local-token"},
+            )
+
+        self.assertEqual(seeded.status_code, 200)
+        self.assertEqual(seeded.json()["created_agents"], 4)
+        self.assertEqual(seeded.json()["overview"]["total_agents"], 4)
+        self.assertEqual(agents.status_code, 200)
+        self.assertEqual(len(agents.json()), 4)
+        self.assertIn("agent_demo_seeded", str(audit.call_args_list))
+        self.assertNotIn("netbotpro-demo-token", seeded.text)
+        self.assertNotIn("X-NetBot-Agent-Token", seeded.text)
+
     def test_history_endpoints_support_all_ranges(self):
         with patch.dict(os.environ, {"NETBOT_AGENT_TOKEN": "agent-token"}, clear=False):
             self.client.post(

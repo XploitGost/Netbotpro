@@ -18,6 +18,7 @@ function normalizeBatchEvents(message, field = "events") {
 }
 
 export function useLiveEvents({
+  enabled = true,
   localToken,
   onPacket,
   onAlert,
@@ -75,6 +76,13 @@ export function useLiveEvents({
     function scheduleFlush() {
       if (flushTimer || !active) return;
       flushTimer = window.setTimeout(flushBuffers, FLUSH_MS);
+    }
+
+    if (!enabled) {
+      handlersRef.current.onStatusChange?.("waiting", "Enter the local token to start live stream");
+      return () => {
+        active = false;
+      };
     }
 
     function connectSocket() {
@@ -209,7 +217,7 @@ export function useLiveEvents({
       if (flushTimer) window.clearTimeout(flushTimer);
       if (socket) socket.close();
     };
-  }, [localToken]);
+  }, [enabled, localToken]);
 }
 
 export { MAX_LIVE_ALERTS, MAX_LIVE_FLOWS, MAX_LIVE_PACKETS };

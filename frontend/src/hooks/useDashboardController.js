@@ -223,7 +223,8 @@ export function useDashboardController() {
     settings: false,
     snifferAction: false,
   });
-  const [localTokenRequired, setLocalTokenRequired] = useState(false);
+  const [localTokenRequired, setLocalTokenRequired] = useState(true);
+  const [localTokenAccepted, setLocalTokenAccepted] = useState(false);
   const [liveFollow, setLiveFollow] = useState(true);
   const [focusedTarget, setFocusedTarget] = useState(null);
   const [timeline, setTimeline] = useState(() => createTimeline());
@@ -297,6 +298,10 @@ export function useDashboardController() {
   }, [alertMeta.offset]);
 
   useEffect(() => {
+    setLocalTokenAccepted(false);
+  }, [localToken]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadInitial() {
@@ -309,6 +314,7 @@ export function useDashboardController() {
         mergeObservability(statusData.observability || {});
 
         if (statusData.local_token_required && !localToken) {
+          setLocalTokenAccepted(false);
           setDashboard((current) => ({ ...(current || {}), state: statusData.sniffer || {} }));
           setPackets([]);
           setAlerts([]);
@@ -341,6 +347,7 @@ export function useDashboardController() {
           api.getMonitoringMetrics().catch(() => null),
         ]);
         if (!active) return;
+        setLocalTokenAccepted(true);
         clearHistoryCaches();
         setDashboard(dashboardData);
         mergeObservability(dashboardData.observability || dashboardData.state?.observability || {});
@@ -371,6 +378,7 @@ export function useDashboardController() {
         setStatusMessage("Dashboard synced");
       } catch (err) {
         if (!active) return;
+        setLocalTokenAccepted(false);
         setError(normalizeErrorMessage(err, "Unable to load initial data"));
         setStatusMessage("Unable to load initial data");
       } finally {
@@ -577,6 +585,22 @@ export function useDashboardController() {
       return report;
     } catch (err) {
       setAgentError(normalizeErrorMessage(err, "Unable to export fleet summary"));
+    } finally {
+      setLoading("agents", false);
+    }
+  }
+
+  async function seedAgentDemoFleet() {
+    setLoading("agents", true);
+    setAgentError("");
+    try {
+      const result = await api.seedAgentDemo({ count: 4, reset: true });
+      const firstAgentId = result?.agents?.[0]?.agent_id || "";
+      setStatusMessage(`Seeded ${result?.created_agents ?? 0} demo agents`);
+      await loadAgents(firstAgentId);
+      return result;
+    } catch (err) {
+      setAgentError(normalizeErrorMessage(err, "Unable to seed demo agent fleet"));
     } finally {
       setLoading("agents", false);
     }
@@ -1116,6 +1140,7 @@ export function useDashboardController() {
   }
 
   useLiveEvents({
+    enabled: !localTokenRequired || localTokenAccepted,
     localToken,
     onPacketsBatch: (messages) => {
       clearHistoryCaches();
@@ -1285,6 +1310,7 @@ export function useDashboardController() {
     refreshOperationalMetrics,
     selectAgent,
     exportAgentFleetSummary,
+    seedAgentDemoFleet,
     openPacketDetailById,
     openAlertDetailById,
     applyPacketFilters,

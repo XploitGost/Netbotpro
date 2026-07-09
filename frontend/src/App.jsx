@@ -85,6 +85,75 @@ function InspectSummaryCard({ label, value, hint, tone = "neutral" }) {
   );
 }
 
+function evidenceId(item, index, offset = 0) {
+  return String(item?.id ?? item?.packet_id ?? offset + index);
+}
+
+function EvidenceItem({ title, subtitle, meta, tone = "neutral", onOpen }) {
+  return (
+    <button type="button" className={`inspection-evidence-item evidence-${tone}`} onClick={onOpen}>
+      <span>
+        <strong>{title}</strong>
+        <small>{subtitle}</small>
+      </span>
+      <em>{meta}</em>
+    </button>
+  );
+}
+
+function InspectionQueue({
+  packets = [],
+  alerts = [],
+  packetOffset = 0,
+  alertOffset = 0,
+  onSelectPacket,
+  onSelectAlert,
+}) {
+  const recentPackets = packets.slice(0, 6);
+  const recentAlerts = alerts.slice(0, 6);
+  return (
+    <div className="inspection-queue-grid">
+      <div className="inspection-evidence-list">
+        <div className="inspection-evidence-head">
+          <p className="eyebrow">Recent Packets</p>
+          <span>{recentPackets.length} ready</span>
+        </div>
+        {recentPackets.map((packet, index) => (
+          <EvidenceItem
+            key={`packet-${evidenceId(packet, index, packetOffset)}`}
+            title={`${packet?.proto || packet?.protocol || "packet"} ${packet?.src || "-"} -> ${packet?.dst || "-"}`}
+            subtitle={`${packet?.sport || "-"} -> ${packet?.dport || "-"} | ${packet?.length || packet?.size || 0} bytes`}
+            meta={`#${evidenceId(packet, index, packetOffset)}`}
+            onOpen={() => onSelectPacket(packet, index)}
+          />
+        ))}
+        {!recentPackets.length ? (
+          <div className="inspection-evidence-empty">Start capture or load packets from Monitor.</div>
+        ) : null}
+      </div>
+      <div className="inspection-evidence-list">
+        <div className="inspection-evidence-head">
+          <p className="eyebrow">Recent Alerts</p>
+          <span>{recentAlerts.length} ready</span>
+        </div>
+        {recentAlerts.map((alert, index) => (
+          <EvidenceItem
+            key={`alert-${evidenceId(alert, index, alertOffset)}`}
+            title={alert?.attack_type || alert?.severity || "alert"}
+            subtitle={`${alert?.src || "-"} -> ${alert?.dst || "-"} | ${alert?.proto || alert?.protocol || "unknown"}`}
+            meta={alert?.severity || "info"}
+            tone={alert?.severity || "warning"}
+            onOpen={() => onSelectAlert(alert, index)}
+          />
+        ))}
+        {!recentAlerts.length ? (
+          <div className="inspection-evidence-empty">Alerts will appear here after detections are generated.</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function cleanInspectCopy(value) {
   return String(value ?? "").replaceAll("â€¢", "|").trim();
 }
@@ -191,6 +260,7 @@ function App() {
     refreshOperationalMetrics,
     selectAgent,
     exportAgentFleetSummary,
+    seedAgentDemoFleet,
     openPacketDetailById,
     openAlertDetailById,
     applyPacketFilters,
@@ -399,6 +469,20 @@ function App() {
   const inspectPage = (
     <section className="page-grid page-grid-inspect">
       <PageSection
+        title="Inspection Queue"
+        subtitle="Pick recent packets or alerts directly from this workspace"
+        fullWidth
+      >
+        <InspectionQueue
+          packets={packets}
+          alerts={alerts}
+          packetOffset={packetMeta.offset}
+          alertOffset={alertMeta.offset}
+          onSelectPacket={loadPacketDetail}
+          onSelectAlert={loadAlertDetail}
+        />
+      </PageSection>
+      <PageSection
         title="Analyst Summary"
         subtitle="Fast answers for the packet or alert you are inspecting"
         fullWidth
@@ -518,6 +602,7 @@ function App() {
           onRefresh={() => loadAgents(selectedAgentId)}
           onSelectAgent={selectAgent}
           onExportFleetSummary={exportAgentFleetSummary}
+          onSeedDemoFleet={seedAgentDemoFleet}
         />
       </PageSection>
     </section>

@@ -149,6 +149,7 @@ export function AgentsPanel({
   onRefresh,
   onSelectAgent,
   onExportFleetSummary,
+  onSeedDemoFleet = () => {},
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [focusFilter, setFocusFilter] = useState("all");
@@ -292,9 +293,12 @@ export function AgentsPanel({
           <p className="eyebrow">No Agents Registered</p>
           <h3>Agent Mode is ready for read-only server monitoring.</h3>
           <p className="muted">
-            Start a real agent with scripts/dev/start-agent.ps1, or seed a demo fleet with scripts/dev/seed-agent-demo.ps1 -Reset -Count 4.
+            Start a real agent with scripts/dev/start-agent.ps1, or load a local demo fleet for UI validation.
           </p>
           <div className="agent-empty-actions">
+            <button type="button" className="primary" disabled={isLoading} onClick={onSeedDemoFleet}>
+              Seed demo fleet
+            </button>
             <button type="button" className="primary" onClick={onRefresh}>
               Refresh
             </button>

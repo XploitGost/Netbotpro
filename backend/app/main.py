@@ -49,6 +49,7 @@ from backend.app.security import (
     validate_ip,
     validate_report_download_path,
 )
+from backend.app.services.agent_demo import seed_demo_data
 from backend.app.services.agent_registry import AgentRegistry
 from backend.app.services.audit_service import audit_event
 from backend.app.services.capture_policy import (
@@ -405,6 +406,41 @@ def api_agents_fleet_summary_report_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=agent-fleet-summary.csv"},
     )
+
+
+@app.post("/api/agents/demo/seed")
+def api_agents_seed_demo(
+    request: Request,
+    payload: dict[str, Any] | None = None,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    global agent_registry
+
+    data = payload or {}
+    try:
+        count = int(data.get("count", 4))
+    except (TypeError, ValueError):
+        count = 4
+    count = max(1, min(20, count))
+    reset = bool(data.get("reset", True))
+    storage_path = agent_registry.storage_path
+    result = seed_demo_data(storage_path, count=count, reset=reset)
+    agent_registry = AgentRegistry(storage_path)
+    overview = agent_registry.overview()
+    audit_event(
+        "agent_demo_seeded",
+        actor=_actor_from_request(request),
+        detail={
+            "created_agents": result.get("created_agents", 0),
+            "reset": reset,
+        },
+    )
+    return {
+        **result,
+        "overview": overview,
+        "agents": agent_registry.list_agents(),
+    }
 
 
 @app.get("/api/agents/{agent_id}")

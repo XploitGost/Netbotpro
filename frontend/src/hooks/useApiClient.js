@@ -1,6 +1,17 @@
 import { buildAuthHeaders } from "./useLocalAuth";
 import { getApiBase } from "../lib/runtimeConfig";
 
+function buildQueryString(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+    query.set(key, String(value));
+  });
+  return query.toString();
+}
+
 async function readResponsePayload(res) {
   const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -58,7 +69,10 @@ export function useApiClient(localToken) {
     getSettings: () => request("/settings"),
     getInterfaces: () => request("/interfaces"),
     getAgents: () => request("/agents"),
-    getFlows: (params = {}) => request(`/flows?${new URLSearchParams(params).toString()}`),
+    getFlows: (params = {}) => {
+      const query = buildQueryString(params);
+      return request(`/flows${query ? `?${query}` : ""}`);
+    },
     getFlowsSummary: () => request("/flows/summary"),
     getFlow: (id) => request(`/flows/${encodeURIComponent(id)}`),
     getFlowTimeline: (id) => request(`/flows/${encodeURIComponent(id)}/timeline`),
@@ -70,6 +84,7 @@ export function useApiClient(localToken) {
     getAgentAlertsSummary: () => request("/agents/alerts/summary"),
     getAgentRiskSummary: () => request("/agents/risk/summary"),
     getAgentFleetSummary: () => request("/agents/reports/fleet-summary"),
+    seedAgentDemo: (payload = {}) => request("/agents/demo/seed", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
     getAgent: (id) => request(`/agents/${encodeURIComponent(id)}`),
     getAgentTelemetry: (id, range = "24h") => request(`/agents/${encodeURIComponent(id)}/telemetry?range=${encodeURIComponent(range)}`),
     getAgentHealthHistory: (id, range = "24h") => request(`/agents/${encodeURIComponent(id)}/health/history?range=${encodeURIComponent(range)}`),

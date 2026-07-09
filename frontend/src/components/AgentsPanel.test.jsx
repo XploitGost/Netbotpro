@@ -11,17 +11,21 @@ afterEach(() => {
 
 describe("AgentsPanel", () => {
   it("renders a useful empty state without token or raw payload fields", () => {
+    const seedDemoFleet = vi.fn();
     render(
       <AgentsPanel
         agents={[]}
         overview={{ total_agents: 0 }}
         onRefresh={vi.fn()}
         onSelectAgent={vi.fn()}
+        onSeedDemoFleet={seedDemoFleet}
       />
     );
 
     expect(screen.getByText("No Agents Registered")).toBeTruthy();
-    expect(screen.getByText(/seed-agent-demo.ps1/)).toBeTruthy();
+    const seedButton = screen.getByRole("button", { name: "Seed demo fleet" });
+    seedButton.click();
+    expect(seedDemoFleet).toHaveBeenCalledOnce();
     expect(document.body.textContent).not.toMatch(/token:/i);
     expect(document.body.textContent).not.toMatch(/raw payload/i);
   });
