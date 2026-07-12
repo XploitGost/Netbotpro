@@ -125,6 +125,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("not the complete performance pipeline", performance_lower)
         self.assertIn("websocket batching", performance_lower)
         self.assertIn("batch persistence", performance_lower)
+        self.assertIn("NETBOT_PERSIST_BATCH_SIZE", performance)
+        self.assertIn("NETBOT_FLOW_PERSIST_BATCH_SIZE", performance)
+        self.assertIn("Service Attribution / Destination Intelligence", performance)
+        self.assertIn("tls decryption", performance_lower)
         self.assertIn("worker pool", performance_lower)
         self.assertIn("not implemented yet", performance_lower)
 

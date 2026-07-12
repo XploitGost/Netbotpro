@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,9 +108,16 @@ class FlowEngineTests(unittest.TestCase):
         self.assertEqual(second["bytes_total"], 420)
         self.assertEqual(second["duration_ms"], 2000)
         self.assertIn("alert-1", second["related_alert_ids"])
-        self.assertIn("flow_started", [item["event_type"] for item in second["timeline"]])
-        self.assertIn("tls_handshake_metadata", [item["event_type"] for item in second["timeline"]])
-        self.assertIn("alert_triggered", [item["event_type"] for item in second["timeline"]])
+        self.assertIn(
+            "flow_started", [item["event_type"] for item in second["timeline"]]
+        )
+        self.assertIn(
+            "tls_handshake_metadata",
+            [item["event_type"] for item in second["timeline"]],
+        )
+        self.assertIn(
+            "alert_triggered", [item["event_type"] for item in second["timeline"]]
+        )
 
     def test_flow_samples_and_metadata_never_keep_raw_secret(self):
         flow = FlowEngine().ingest(
@@ -164,6 +173,29 @@ class FlowEngineTests(unittest.TestCase):
             self.assertEqual(service.get_flow(flow["flow_id"])["packets_count"], 1)
             self.assertTrue((Path(td) / "flows.db").is_file())
             self.assertGreaterEqual(service.cleanup_history(7), 0)
+
+    def test_flow_snapshots_are_coalesced_and_written_in_batches(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "flows.db"
+            service = FlowService(db_path=db_path, batch_persistence=True)
+            try:
+                service.ingest(packet())
+                service.ingest(packet(id="pkt-2", ts="2026-06-05T12:00:01+00:00"))
+            finally:
+                service.close()
+
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT snapshot_json FROM flows").fetchall()
+            finally:
+                conn.close()
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(json.loads(rows[0][0])["packets_count"], 2)
+            stats = service.persistence_stats()
+            self.assertEqual(stats["accepted_total"], 2)
+            self.assertEqual(stats["persisted_total"], 1)
+            self.assertEqual(stats["flush_batches"], 1)
 
 
 if __name__ == "__main__":

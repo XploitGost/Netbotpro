@@ -60,7 +60,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventAggregator = operationalMetrics?.event_aggregator || observability?.event_aggregator || {};
   const websocket = operationalMetrics?.websocket || observability?.websocket || {};
   const packetQueue = operationalMetrics?.packet_queue || observability?.packet_queue || {};
-  const persistence = observability?.persistence || {};
+  const persistence = operationalMetrics?.persistence || observability?.persistence || {};
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
   const capture = operationalMetrics?.capture || {};
@@ -82,6 +82,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const packetQueueHighWater = toNumber(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark);
   const packetQueueWorkerAlive = packetQueue.worker_alive !== false;
   const droppedWrites = toNumber(persistence.dropped_writes);
+  const failedWrites = toNumber(persistence.failed_writes);
   const avgFlushMs = toNumber(persistence.avg_flush_ms || persistence.last_flush_ms);
   const wsDropped = toNumber(eventBus.dropped_messages);
   const wsClients = toNumber(websocket.clients ?? websocket.websocket_clients);
@@ -104,7 +105,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
         ? "Errors"
         : "Healthy";
 
-  const persistenceLevel = droppedWrites > 0 || toNumber(persistence.flush_errors) > 0 || toNumber(persistence.shutdown_flush_timeout) > 0
+  const persistenceLevel = normalizeLevel(persistence.health) !== "healthy"
+    ? normalizeLevel(persistence.health)
+    : droppedWrites > 0 || failedWrites > 0 || toNumber(persistence.flush_errors) > 0 || toNumber(persistence.shutdown_flush_timeout) > 0
     ? "degraded"
     : queueSize >= 250 || avgFlushMs >= 250 || toNumber(persistence.flush_retries) > 0
       ? "warning"
@@ -168,8 +171,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (!capture.running) {
     recommendedActions.push("Start capture or confirm monitoring is intentionally paused.");
   }
-  if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0 || queueSize >= 250) {
-    recommendedActions.push("Check persistence backlog and export/report write health.");
+  if (droppedWrites > 0 || failedWrites > 0 || toNumber(persistence.flush_errors) > 0 || Number(persistence.utilization_percent || 0) >= 80 || queueSize >= 250) {
+    recommendedActions.push("Review persistence queue pressure, retry health, and backend logs.");
   }
   if (queryLevel !== "healthy") {
     recommendedActions.push("Check history query latency and packet/alert storage load.");
@@ -272,7 +275,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     {
       label: "Persistence",
       value: persistenceState,
-      hint: `Drain ${toNumber(persistence.drain_completed) ? "complete" : "active"}`,
+      hint: `P95 ${formatMs(persistence.p95_flush_ms)} | Failed ${failedWrites}`,
       level: persistenceLevel,
     },
   ];

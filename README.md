@@ -69,8 +69,9 @@ or PCAP artifacts.
 | Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
-| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level performance hardening step only; Worker Pool, WebSocket batching, and batch persistence are not implemented yet. |
-| WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Step 3 of the performance pipeline only; Batch Persistence and Worker Pool are not implemented yet. |
+| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level performance hardening step; the Worker Pool is not implemented yet. |
+| WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Realtime delivery batching only; the Worker Pool is not implemented yet. |
+| Batch Persistence | Foundation step | Packet/alert writes and flow snapshot upserts are buffered into bounded batches with retry, latency, backlog, failure, and worker metrics. | Reports remain explicit user-triggered artifacts; this is not a distributed storage engine. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -188,6 +189,24 @@ Packet intake queue tuning is controlled by:
   are `drop_oldest` and `drop_newest`.
 - `NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC`: default `5.0`; increase to `10.0`
   when heavier capture should get more shutdown drain time.
+- `NETBOT_PERSIST_BATCH_SIZE`: packet/alert rows per write batch; default `100`.
+- `NETBOT_PERSIST_FLUSH_INTERVAL_SEC`: maximum packet/alert batch window;
+  default `0.5` seconds.
+- `NETBOT_PERSIST_QUEUE_MAX_SIZE`: bounded write backlog; default `5000`.
+- `NETBOT_PERSIST_OVERFLOW_POLICY`: `drop_oldest` or `drop_newest`; default
+  `drop_oldest`.
+- `NETBOT_PERSIST_MAX_RETRIES`: whole-batch retry limit; default `3`.
+- `NETBOT_PERSIST_RETRY_BACKOFF_SEC`: exponential retry base delay; default
+  `0.1` seconds.
+- `NETBOT_FLOW_PERSIST_BATCH_SIZE`: flow snapshots per SQLite upsert; default
+  `100`.
+- `NETBOT_FLOW_PERSIST_FLUSH_INTERVAL_SEC`: flow snapshot batch window;
+  default `0.5` seconds.
+- `NETBOT_FLOW_PERSIST_QUEUE_MAX_SIZE`: bounded flow snapshot backlog; default
+  `2000`.
+- `NETBOT_FLOW_PERSIST_MAX_RETRIES`: flow batch retry limit; default `3`.
+- `NETBOT_FLOW_PERSIST_RETRY_BACKOFF_SEC`: flow retry base delay; default
+  `0.1` seconds.
 
 `drop_oldest` favors fresher dashboard state during bursts. `drop_newest`
 preserves already queued packet order. In both modes, drops are counted, logged,
@@ -436,6 +455,13 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 
 ## Roadmap
 
+- Complete the performance foundation with a flow-aware worker pool, live ring
+  buffer, and benchmark/soak validation.
+- Add conservative Service Attribution / Destination Intelligence using DNS,
+  TLS SNI, HTTP Host, QUIC-visible metadata, ASN, and local fingerprints. Low
+  confidence remains `Unknown`; no TLS decryption or credential collection.
+- Build a read-only Incident / Correlation Engine after attribution quality is
+  validated, then consider a strictly read-only AI Analyst.
 - Versioned SQLite schema migrations and longer-lived deployment operations.
 - Per-Agent enrollment, rotation, and revocation workflows.
 - Signed desktop artifacts when release signing infrastructure is available.

@@ -26,6 +26,7 @@ Capture
 -> Bounded Packet Intake Queue
 -> Packet Queue Worker
 -> Existing Packet Processing
+-> Bounded Batch Persistence (packets, alerts, flow snapshots)
 -> Event Aggregator
 -> Batched WebSocket Updates
 -> Flow / Detection / Persistence / UI
@@ -342,7 +343,6 @@ This is not the complete performance engine yet.
 Not implemented yet:
 
 - Flow-aware Worker Pool;
-- Batch Persistence;
 - Live Ring Buffer;
 - Benchmark / Soak Tests;
 - Optional ClickHouse or external metrics backend.
@@ -354,8 +354,55 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Batch Persistence
-2. Flow-aware Worker Pool
-3. Live Ring Buffer
-4. Benchmark and Soak Tests
-5. Performance Validation Report
+1. Flow-aware Worker Pool
+2. Live Ring Buffer
+3. Benchmark and Soak Tests
+4. Performance Validation Report
+5. Service Attribution / Destination Intelligence
+6. Incident / Correlation Engine
+7. Read-only AI Analyst
+
+## Batch Persistence
+
+Packet and alert database writes are buffered off the packet-processing hot
+path and committed with `executemany` in one SQLite transaction. Flow snapshots
+use a separate bounded queue; repeated updates for the same `flow_id` inside a
+batch window are coalesced so only the newest redacted snapshot is upserted.
+
+Reports and exports are deliberately not placed in this high-frequency queue.
+They are explicit user operations whose success or failure must be returned to
+the caller. Their source packet, alert, and flow records still benefit from
+batched persistence.
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `NETBOT_PERSIST_BATCH_SIZE` | `100` | Target packet rows per transaction. |
+| `NETBOT_PERSIST_FLUSH_INTERVAL_SEC` | `0.5` | Maximum packet/alert batch window. |
+| `NETBOT_PERSIST_QUEUE_MAX_SIZE` | `5000` | Bounded packet/alert write backlog. |
+| `NETBOT_PERSIST_OVERFLOW_POLICY` | `drop_oldest` | Full-queue behavior: `drop_oldest` or `drop_newest`. |
+| `NETBOT_PERSIST_MAX_RETRIES` | `3` | Whole-batch retry limit. |
+| `NETBOT_PERSIST_RETRY_BACKOFF_SEC` | `0.1` | Exponential retry base delay in seconds. |
+| `NETBOT_FLOW_PERSIST_BATCH_SIZE` | `100` | Flow snapshots per upsert batch. |
+| `NETBOT_FLOW_PERSIST_FLUSH_INTERVAL_SEC` | `0.5` | Maximum flow snapshot batch window. |
+| `NETBOT_FLOW_PERSIST_QUEUE_MAX_SIZE` | `2000` | Bounded flow snapshot backlog. |
+| `NETBOT_FLOW_PERSIST_MAX_RETRIES` | `3` | Flow batch retry limit. |
+| `NETBOT_FLOW_PERSIST_RETRY_BACKOFF_SEC` | `0.1` | Flow retry base delay in seconds. |
+
+The protected monitoring endpoint exposes persistence queue size and
+utilization, accepted/dropped/failed writes, packet and alert totals, batch
+size, average and p95 flush latency, retry/error counts, worker liveness, flow
+batch metrics, health, and fixed pressure reasons. Error text is reduced to an
+exception type and cannot carry a token, cookie, Authorization value, session,
+or payload into metrics.
+
+### Recorded Product Direction
+
+After the remaining performance work, NetBotPro will add conservative Service
+Attribution / Destination Intelligence. It will correlate process metadata
+with DNS, TLS SNI, HTTP Host, QUIC-visible metadata, ASN, and local service
+fingerprints. Missing or weak evidence must remain `Unknown / Encrypted`.
+
+Incident correlation follows attribution, and a read-only AI Analyst follows
+incident quality validation. None of these roadmap items authorize TLS
+decryption, MITM, credential collection, command/control, autonomous actions,
+or Agent raw packet, payload, or PCAP forwarding.

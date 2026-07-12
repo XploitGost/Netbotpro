@@ -198,9 +198,13 @@ status, and pressure reasons. This makes backpressure visible without exposing
 packet payloads, credentials, cookies, authorization headers, sessions, or
 tokens.
 
-This foundation now includes bounded packet intake and WebSocket event
-aggregation. It does not include the future batch persistence, live ring buffer,
-or flow-aware worker pool steps.
+This foundation now includes bounded packet intake, WebSocket event
+aggregation, and bounded batch persistence. Packet and alert rows share
+transactional SQLite batches; flow snapshots are coalesced by `flow_id` and
+written with batched upserts. Queue depth, utilization, dropped/failed writes,
+write latency, retry state, and worker liveness are visible in Ops metrics.
+User-triggered report files remain synchronous and outside the packet-rate
+queue. Live ring buffer and flow-aware worker pool work remain future steps.
 
 ## WebSocket Event Aggregator
 

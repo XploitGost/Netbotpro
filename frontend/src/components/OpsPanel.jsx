@@ -125,13 +125,18 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
         defaultOpen
       >
         <dl className="ops-metric-grid">
-          <MetricRow label="Queue Size" value={String(persistence.queue_size || 0)} level={levelFor("Write Queue")} hint={`High-water ${persistence.queue_high_water_mark || 0}`} />
+          <MetricRow label="Queue Size" value={`${persistence.current_depth ?? persistence.queue_size ?? 0}/${persistence.max_size ?? 0}`} level={levelFor("Write Queue")} hint={`${Number(persistence.utilization_percent || 0).toFixed(1)}% | High-water ${persistence.queue_high_water_mark || 0}`} />
+          <MetricRow label="Worker" value={persistence.worker_alive === false ? "Stopped" : "Running"} level={persistence.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${persistence.health || "healthy"}`} />
+          <MetricRow label="Accepted Writes" value={String(persistence.accepted_writes || 0)} hint={`Packets ${persistence.persisted_packets || 0} | Alerts ${persistence.persisted_alerts || 0}`} />
           <MetricRow label="Dropped Writes" value={String(persistence.dropped_writes || 0)} level={levelFor("Dropped Writes")} hint={`Policy ${persistence.overload_policy || "drop_oldest"}`} />
+          <MetricRow label="Failed Writes" value={String(persistence.failed_writes || 0)} level={Number(persistence.failed_writes || 0) > 0 ? "degraded" : "healthy"} hint={`Failed batches ${persistence.failed_batches || 0}`} />
           <MetricRow label="Average Batch Size" value={Number(persistence.avg_batch_size || 0).toFixed(1)} hint={`Last batch ${persistence.last_batch_size || 0}`} />
           <MetricRow label="Average Flush" value={formatMs(persistence.avg_flush_ms || 0)} level={Number(persistence.avg_flush_ms || 0) >= 250 ? "warning" : "healthy"} hint={`Last flush ${formatMs(persistence.last_flush_ms || 0)}`} />
+          <MetricRow label="P95 Flush" value={formatMs(persistence.p95_flush_ms || 0)} level={Number(persistence.p95_flush_ms || 0) >= 250 ? "warning" : "healthy"} hint="Recent flush latency window" />
           <MetricRow label="Flush Retries" value={String(persistence.flush_retries || 0)} level={Number(persistence.flush_retries || 0) > 0 ? "warning" : "healthy"} hint={`Errors ${persistence.flush_errors || 0}`} />
           <MetricRow label="Queue Drift" value={formatMs(persistence.last_queue_drift_ms || 0)} hint={`Batches ${persistence.flush_batches || 0}`} />
           <MetricRow label="Drain Completed" value={Number(persistence.drain_completed || 0) ? "Yes" : "No"} level={Number(persistence.shutdown_flush_timeout || 0) ? "degraded" : "healthy"} hint={`Shutdown timeout ${persistence.shutdown_flush_timeout || 0}`} />
+          <MetricRow label="Flow Batches" value={String(persistence.flows?.flush_batches || 0)} level={Number(persistence.flows?.failed_total || 0) > 0 ? "degraded" : "healthy"} hint={`Persisted ${persistence.flows?.persisted_total || 0} | Failed ${persistence.flows?.failed_total || 0}`} />
         </dl>
       </AccordionPanel>
 

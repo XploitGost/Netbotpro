@@ -56,11 +56,24 @@ class MonitoringMetricsTests(unittest.TestCase):
                     "health": "healthy",
                 },
                 "persistence": {
+                    "enabled": True,
+                    "max_size": 5000,
                     "queue_size": 0,
+                    "utilization_percent": 0.0,
                     "queue_high_water_mark": 4,
+                    "accepted_writes": 12,
                     "persisted_packets": 12,
                     "persisted_alerts": 1,
                     "avg_flush_ms": 3.5,
+                    "p95_flush_ms": 5.0,
+                    "worker_alive": True,
+                    "health": "healthy",
+                    "flows": {
+                        "enabled": True,
+                        "persisted_total": 3,
+                        "flush_batches": 1,
+                        "worker_alive": True,
+                    },
                     "overload_policy": "drop_oldest",
                 },
                 "history": {
@@ -93,6 +106,9 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 2.0)
         self.assertEqual(payload["websocket"]["websocket_send_latency_ms_avg"], 2.0)
         self.assertEqual(payload["flows"]["total_flows"], 3)
+        self.assertEqual(payload["persistence"]["max_size"], 5000)
+        self.assertEqual(payload["persistence"]["p95_flush_ms"], 5.0)
+        self.assertEqual(payload["persistence"]["flows"]["persisted_total"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 
     def test_build_monitoring_metrics_reports_pressure(self):
@@ -158,9 +174,15 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 180)
         self.assertEqual(payload["websocket"]["websocket_send_latency_ms_avg"], 180)
         self.assertEqual(payload["packet_queue"]["health"], "critical")
-        self.assertIn("packet_queue_backlog", payload["packet_queue"]["pressure_reasons"])
-        self.assertIn("packet_queue_high_water", payload["packet_queue"]["pressure_reasons"])
-        self.assertIn("packet_queue_dropped_packets", payload["packet_queue"]["pressure_reasons"])
+        self.assertIn(
+            "packet_queue_backlog", payload["packet_queue"]["pressure_reasons"]
+        )
+        self.assertIn(
+            "packet_queue_high_water", payload["packet_queue"]["pressure_reasons"]
+        )
+        self.assertIn(
+            "packet_queue_dropped_packets", payload["packet_queue"]["pressure_reasons"]
+        )
         self.assertIn("persistence_queue_backlog", payload["pressure_reasons"])
         self.assertIn("websocket_dropped_messages", payload["pressure_reasons"])
         self.assertIn("history_query_latency", payload["pressure_reasons"])
@@ -188,7 +210,9 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["health"], "critical")
         self.assertFalse(payload["packet_queue"]["worker_alive"])
         self.assertEqual(payload["packet_queue"]["health"], "critical")
-        self.assertIn("packet_queue_worker_stopped", payload["packet_queue"]["pressure_reasons"])
+        self.assertIn(
+            "packet_queue_worker_stopped", payload["packet_queue"]["pressure_reasons"]
+        )
         self.assertIn("packet_queue_worker_stopped", payload["pressure_reasons"])
 
     def test_build_monitoring_metrics_redacts_queue_metrics_to_counters_only(self):

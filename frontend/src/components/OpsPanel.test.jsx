@@ -257,7 +257,41 @@ describe("OpsPanel", () => {
       />
     );
 
-    expect(screen.getByText("Check persistence backlog and export/report write health.")).toBeTruthy();
+    expect(screen.getByText("Review persistence queue pressure, retry health, and backend logs.")).toBeTruthy();
+  });
+
+  it("renders batch persistence latency, failures, and flow write metrics", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          persistence: {
+            enabled: true,
+            max_size: 5000,
+            current_depth: 50,
+            utilization_percent: 1,
+            accepted_writes: 700,
+            failed_writes: 2,
+            failed_batches: 1,
+            p95_flush_ms: 18.5,
+            worker_alive: true,
+            health: "degraded",
+            flows: { flush_batches: 4, persisted_total: 20, failed_total: 0 },
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("50/5000")).toBeTruthy();
+    expect(screen.getByText("Accepted Writes")).toBeTruthy();
+    expect(screen.getByText("Failed Writes")).toBeTruthy();
+    expect(screen.getByText("18.5 ms")).toBeTruthy();
+    expect(screen.getByText("Flow Batches")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/authorization|cookie|raw-secret/i);
   });
 
   it("renders packet queue pressure and action", () => {
