@@ -236,6 +236,7 @@ class SnifferService:
             self._engine = None
         if engine is not None:
             engine.stop()
+        self.drain_packet_queue()
         state = self.get_state()
         self._publisher.publish_state("sniffer:stopped", state)
         return state
