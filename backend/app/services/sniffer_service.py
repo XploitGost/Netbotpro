@@ -12,10 +12,10 @@ from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.event_bus import EventBus
 from backend.app.services.flow_service import FlowService
 from backend.app.services.packet_queue import BoundedPacketQueue
+from backend.app.services.service_attribution import enrich_service_attribution
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
-from backend.app.services.sniffer_detection_pipeline import \
-    SnifferDetectionPipeline
+from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
 from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
@@ -176,6 +176,7 @@ class SnifferService:
         except Exception:
             logger.exception("Packet analysis pipeline crashed")
             alerts = []
+        enrich_service_attribution(packet)
         alerts = self._assign_alert_ids(packet, alerts)
         for alert in alerts:
             self._apply_payload_policy(alert, policy.to_public_dict())
