@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import platform
+import socket
+import struct
 from collections import Counter, defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
 
 ensure_project_root_on_path()
 
-from backend.app.services.sniffer_detection_pipeline import (  # noqa: E402
+from backend.app.services.sniffer_detection_pipeline import (
     SnifferDetectionPipeline,
-)
+)  # noqa: E402
 from config.settings_manager import load_settings  # noqa: E402
 from core.dns_intelligence import analyze_dns_packets  # noqa: E402
 from core.flow_engine import FlowEngine  # noqa: E402
@@ -36,6 +40,111 @@ def _read_pcap(path: str):
     return rdpcap(path)
 
 
+def _decode_dns_name(payload: bytes, offset: int = 12) -> str:
+    labels: list[str] = []
+    while offset < len(payload):
+        size = payload[offset]
+        offset += 1
+        if size == 0:
+            break
+        if size & 0xC0 or offset + size > len(payload):
+            return ""
+        labels.append(payload[offset : offset + size].decode("ascii", errors="ignore"))
+        offset += size
+    return ".".join(part for part in labels if part)
+
+
+def _pure_pcap_metadata(path: str) -> list[dict[str, Any]]:
+    data = Path(path).read_bytes()
+    if len(data) < 24:
+        raise ValueError("PCAP file is truncated")
+    magic = data[:4]
+    if magic == b"\xd4\xc3\xb2\xa1":
+        endian = "<"
+    elif magic == b"\xa1\xb2\xc3\xd4":
+        endian = ">"
+    else:
+        raise ValueError("Pure offline reader currently supports classic PCAP files")
+    linktype = struct.unpack_from(f"{endian}I", data, 20)[0]
+    if linktype != 1:
+        raise ValueError("Pure offline reader requires Ethernet link type")
+
+    rows: list[dict[str, Any]] = []
+    offset = 24
+    while offset + 16 <= len(data):
+        ts_sec, ts_frac, captured_len, _ = struct.unpack_from(
+            f"{endian}IIII", data, offset
+        )
+        offset += 16
+        frame = data[offset : offset + captured_len]
+        offset += captured_len
+        if len(frame) < 34 or frame[12:14] != b"\x08\x00":
+            continue
+        ip = frame[14:]
+        ihl = (ip[0] & 0x0F) * 4
+        if len(ip) < ihl or ihl < 20:
+            continue
+        proto_number = ip[9]
+        src = socket.inet_ntoa(ip[12:16])
+        dst = socket.inet_ntoa(ip[16:20])
+        transport = ip[ihl:]
+        proto = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(proto_number, "OTHER")
+        sport = dport = None
+        payload = b""
+        if proto == "TCP" and len(transport) >= 20:
+            sport, dport = struct.unpack_from("!HH", transport, 0)
+            tcp_header_len = max(20, (transport[12] >> 4) * 4)
+            payload = transport[tcp_header_len:]
+        elif proto == "UDP" and len(transport) >= 8:
+            sport, dport = struct.unpack_from("!HH", transport, 0)
+            payload = transport[8:]
+        row: dict[str, Any] = {
+            "src": src,
+            "dst": dst,
+            "sport": sport,
+            "dport": dport,
+            "proto": proto,
+            "transport": proto,
+            "length": len(frame),
+            "payload_len": len(payload),
+            "summary": f"{proto} {src}:{sport or 0} -> {dst}:{dport or 0}",
+            "ts": datetime.fromtimestamp(ts_sec + ts_frac / 1_000_000).strftime(
+                "%H:%M:%S"
+            ),
+        }
+        if proto == "UDP" and (sport == 53 or dport == 53) and len(payload) >= 12:
+            row.update({"app_protocol": "DNS", "dns_qname": _decode_dns_name(payload)})
+        if proto == "TCP" and payload:
+            text = payload.decode("latin-1", errors="ignore")
+            first_line = text.split("\r\n", 1)[0]
+            parts = first_line.split(" ")
+            if len(parts) >= 2 and parts[0] in {
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "HEAD",
+                "OPTIONS",
+                "PATCH",
+            }:
+                headers = {}
+                for line in text.split("\r\n")[1:]:
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        headers[key.strip().lower()] = value.strip()
+                row.update(
+                    {
+                        "app_protocol": "HTTP",
+                        "http_method": parts[0],
+                        "http_path": parts[1],
+                        "http_host": headers.get("host", ""),
+                        "http_user_agent": headers.get("user-agent", ""),
+                    }
+                )
+        rows.append(row)
+    return rows
+
+
 def _packet_timestamp(pkt: Any) -> str:
     try:
         return datetime.fromtimestamp(float(getattr(pkt, "time", 0.0))).strftime(
@@ -46,6 +155,12 @@ def _packet_timestamp(pkt: Any) -> str:
 
 
 def _packet_layers() -> PacketLayers:
+    from scapy.config import conf  # type: ignore
+
+    # Offline decoding does not need the native Npcap/libpcap socket backend.
+    # Keeping it disabled prevents a broken Windows Npcap installation from
+    # blocking PCAP file analysis while Scapy imports protocol layers.
+    conf.use_pcap = False
     from scapy.layers.dns import DNS, DNSQR  # type: ignore
     from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
     from scapy.layers.l2 import Ether  # type: ignore
@@ -88,15 +203,22 @@ def _top_pairs(
 
 
 def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str, Any]:
-    packets = _read_pcap(path)
+    pure_metadata = (
+        _pure_pcap_metadata(path)
+        if platform.system() == "Windows" and Path(path).is_file()
+        else None
+    )
+    layers = None if pure_metadata is not None else _packet_layers()
+    packets = pure_metadata if pure_metadata is not None else _read_pcap(path)
     settings = _load_offline_settings()
     if ml_threshold is not None:
         settings["ids_ml_threshold"] = ml_threshold
     settings["auto_block"] = False
 
-    builder = PacketMetadataBuilder(
-        layers=_packet_layers(),
-        process_mapper=_OfflineProcessMapper(),
+    builder = (
+        PacketMetadataBuilder(layers=layers, process_mapper=_OfflineProcessMapper())
+        if layers is not None
+        else None
     )
     pipeline = _build_offline_pipeline(settings)
 
@@ -115,7 +237,12 @@ def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str,
     safe_packet_metadata: list[dict[str, Any]] = []
 
     for index, pkt in enumerate(packets):
-        meta = _build_meta(pkt, builder, index)
+        if isinstance(pkt, dict):
+            meta = dict(pkt)
+            meta["id"] = f"pcap-pkt-{index + 1}"
+            meta["timestamp"] = meta.get("ts", "")
+        else:
+            meta = _build_meta(pkt, builder, index)
 
         src = meta.get("src")
         dst = meta.get("dst")

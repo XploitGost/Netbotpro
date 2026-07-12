@@ -1448,7 +1448,10 @@ async def api_analyze_pcap(
                         status_code=413, detail="PCAP file is too large"
                     )
                 tmp.write(chunk)
-        return _load_pcap_analyzer()(temp_path)
+        try:
+            return _load_pcap_analyzer()(temp_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         await file.close()
         temp_path_value = locals().get("temp_path")
