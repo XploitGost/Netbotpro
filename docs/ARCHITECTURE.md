@@ -186,6 +186,17 @@ Use acceptance, require token authorization, and create audit records.
 
 ## Performance Pipeline Foundation
 
+### Batch Persistence Foundation
+
+`BatchPersistenceWriter` is the storage-pressure boundary for packet, alert,
+and flow history. It accepts centrally redacted typed envelopes, keeps pending
+work bounded, flushes by size/time/priority/manual request/shutdown, and uses
+the existing SQLite bulk writes. Retry is finite and exponentially backed off;
+overflow and terminal failures are visible in operational metrics.
+
+Audit logging stays outside this asynchronous path so security and control
+records retain immediate ordering and reliability.
+
 The current performance foundation is intentionally narrow. `BoundedPacketQueue`
 sits between capture callbacks and the existing packet processing path. The
 queue has a fixed maximum size, explicit `drop_oldest` and `drop_newest`

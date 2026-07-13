@@ -15,7 +15,8 @@ from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.service_attribution import enrich_service_attribution
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
-from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
+from backend.app.services.sniffer_detection_pipeline import \
+    SnifferDetectionPipeline
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
 from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
@@ -62,9 +63,13 @@ class SnifferService:
         self._detection_pipeline = SnifferDetectionPipeline(
             settings_provider=get_settings_snapshot
         )
-        self._persistence = SnifferPersistence()
-        self._publisher = SnifferEventPublisher(event_bus)
         self._flow_service = flow_service or FlowService()
+        flow_writer = getattr(self._flow_service, "write_snapshots", None)
+        self._central_flow_persistence = callable(flow_writer)
+        self._persistence = SnifferPersistence(
+            flow_writer=flow_writer if callable(flow_writer) else None
+        )
+        self._publisher = SnifferEventPublisher(event_bus)
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
@@ -181,10 +186,15 @@ class SnifferService:
         for alert in alerts:
             self._apply_payload_policy(alert, policy.to_public_dict())
 
-        self._flow_service.ingest(packet, alerts)
+        if self._central_flow_persistence:
+            flow = self._flow_service.ingest(packet, alerts, persist=False)
+        else:
+            flow = self._flow_service.ingest(packet, alerts)
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
         self._persistence.persist(packet, alerts)
+        if self._central_flow_persistence and isinstance(flow, dict):
+            self._persistence.persist_flow(flow)
         self._publisher.publish_packet(packet)
         self._publisher.publish_alerts(alerts)
 
@@ -287,8 +297,10 @@ class SnifferService:
 
     def persistence_stats(self) -> dict[str, Any]:
         stats = self._persistence.stats()
-        flow_stats = getattr(self._flow_service, "persistence_stats", lambda: {})()
-        stats["flows"] = flow_stats
+        stats["flows"] = {
+            "enabled": bool(stats.get("persistence_enabled")),
+            "worker_alive": bool(stats.get("worker_alive")),
+        }
         return stats
 
     def packet_queue_stats(self) -> dict[str, Any]:

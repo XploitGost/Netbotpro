@@ -74,15 +74,15 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const packetDetail = history.packet_detail || {};
   const alertDetail = history.alert_detail || {};
 
-  const queueSize = toNumber(persistence.queue_size);
+  const queueSize = toNumber(persistence.queue_depth ?? persistence.queue_size);
   const packetQueueDepth = toNumber(packetQueue.current_depth ?? packetQueue.queue_size);
   const packetQueueMaxSize = toNumber(packetQueue.max_size);
   const packetQueueUtilization = toNumber(packetQueue.utilization_percent);
   const packetQueueDropped = toNumber(packetQueue.dropped_total ?? packetQueue.dropped_packets);
   const packetQueueHighWater = toNumber(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark);
   const packetQueueWorkerAlive = packetQueue.worker_alive !== false;
-  const droppedWrites = toNumber(persistence.dropped_writes);
-  const failedWrites = toNumber(persistence.failed_writes);
+  const droppedWrites = toNumber(persistence.events_dropped_total ?? persistence.dropped_writes);
+  const failedWrites = toNumber(persistence.events_failed_total ?? persistence.failed_writes);
   const avgFlushMs = toNumber(persistence.avg_flush_ms || persistence.last_flush_ms);
   const wsDropped = toNumber(eventBus.dropped_messages);
   const wsClients = toNumber(websocket.clients ?? websocket.websocket_clients);
@@ -171,8 +171,14 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (!capture.running) {
     recommendedActions.push("Start capture or confirm monitoring is intentionally paused.");
   }
-  if (droppedWrites > 0 || failedWrites > 0 || toNumber(persistence.flush_errors) > 0 || Number(persistence.utilization_percent || 0) >= 80 || queueSize >= 250) {
-    recommendedActions.push("Review persistence queue pressure, retry health, and backend logs.");
+  if (droppedWrites > 0) {
+    recommendedActions.push("Persistence drops were detected. Review overflow policy, queue capacity, and storage pressure.");
+  }
+  if (failedWrites > 0 || toNumber(persistence.flush_errors) > 0) {
+    recommendedActions.push("Persistence writes failed. Inspect storage availability, retry health, and backend logs.");
+  }
+  if (Number(persistence.queue_utilization_percent ?? persistence.utilization_percent ?? 0) >= 80 || queueSize >= 250) {
+    recommendedActions.push("Persistence backlog is high. Reduce write pressure or increase NETBOT_PERSISTENCE_QUEUE_MAX.");
   }
   if (queryLevel !== "healthy") {
     recommendedActions.push("Check history query latency and packet/alert storage load.");

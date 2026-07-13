@@ -108,6 +108,11 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["flows"]["total_flows"], 3)
         self.assertEqual(payload["persistence"]["max_size"], 5000)
         self.assertEqual(payload["persistence"]["p95_flush_ms"], 5.0)
+        self.assertEqual(payload["persistence"]["queue_max"], 5000)
+        self.assertEqual(payload["persistence"]["queue_depth"], 0)
+        self.assertIn("events_received_total", payload["persistence"])
+        self.assertIn("write_latency_p95_ms", payload["persistence"])
+        self.assertNotIn("Authorization", str(payload["persistence"]))
         self.assertEqual(payload["persistence"]["flows"]["persisted_total"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 

@@ -257,7 +257,7 @@ describe("OpsPanel", () => {
       />
     );
 
-    expect(screen.getByText("Review persistence queue pressure, retry health, and backend logs.")).toBeTruthy();
+    expect(screen.getByText("Persistence backlog is high. Reduce write pressure or increase NETBOT_PERSISTENCE_QUEUE_MAX.")).toBeTruthy();
   });
 
   it("renders batch persistence latency, failures, and flow write metrics", () => {
@@ -270,14 +270,19 @@ describe("OpsPanel", () => {
           capture: { running: true },
           flows: { risk_distribution: {} },
           persistence: {
-            enabled: true,
-            max_size: 5000,
-            current_depth: 50,
-            utilization_percent: 1,
-            accepted_writes: 700,
-            failed_writes: 2,
-            failed_batches: 1,
-            p95_flush_ms: 18.5,
+            persistence_enabled: true,
+            queue_max: 5000,
+            queue_depth: 50,
+            queue_utilization_percent: 1,
+            events_received_total: 700,
+            events_written_total: 698,
+            events_failed_total: 2,
+            batches_written_total: 4,
+            write_latency_p95_ms: 18.5,
+            write_latency_avg_ms: 7.2,
+            retry_total: 1,
+            backlog_age_ms: 20,
+            overflow_policy: "drop_oldest",
             worker_alive: true,
             health: "degraded",
             flows: { flush_batches: 4, persisted_total: 20, failed_total: 0 },
@@ -287,8 +292,9 @@ describe("OpsPanel", () => {
     );
 
     expect(screen.getByText("50/5000")).toBeTruthy();
-    expect(screen.getByText("Accepted Writes")).toBeTruthy();
-    expect(screen.getByText("Failed Writes")).toBeTruthy();
+    expect(screen.getAllByText("Events Received").length).toBeGreaterThan(0);
+    expect(screen.getByText("Failed Events")).toBeTruthy();
+    expect(screen.getByText("P95 Write")).toBeTruthy();
     expect(screen.getByText("18.5 ms")).toBeTruthy();
     expect(screen.getByText("Flow Batches")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/authorization|cookie|raw-secret/i);

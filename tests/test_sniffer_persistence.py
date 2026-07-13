@@ -6,6 +6,29 @@ from backend.app.services.sniffer_persistence import SnifferPersistence
 
 
 class SnifferPersistenceTests(unittest.TestCase):
+    @patch("backend.app.services.sniffer_persistence.insert_batch")
+    def test_flow_snapshots_use_the_central_batch_writer(self, mock_insert_batch):
+        flow_batches = []
+        persistence = SnifferPersistence(
+            batch_size=10,
+            flush_interval=0.02,
+            flow_writer=flow_batches.append,
+        )
+        try:
+            persistence.persist_flow(
+                {
+                    "flow_id": "flow-1",
+                    "summary": "Cookie: private-value",
+                }
+            )
+            time.sleep(0.1)
+        finally:
+            persistence.close()
+
+        self.assertEqual(flow_batches[0][0]["flow_id"], "flow-1")
+        self.assertNotIn("private-value", str(flow_batches))
+        mock_insert_batch.assert_not_called()
+
     @patch(
         "backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True
     )

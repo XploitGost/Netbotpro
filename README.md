@@ -70,6 +70,7 @@ or PCAP artifacts.
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
 | Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level performance hardening step; the Worker Pool is not implemented yet. |
+| Batch Persistence / Storage Backpressure | Foundation step | Redacted packet, alert, and flow records use a bounded write-behind queue, finite retry, shutdown flush, and Ops metrics. | Audit and report exports remain synchronous; the full performance pipeline is not complete. |
 | WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Realtime delivery batching only; the Worker Pool is not implemented yet. |
 | Batch Persistence | Foundation step | Packet/alert writes and flow snapshot upserts are buffered into bounded batches with retry, latency, backlog, failure, and worker metrics. | Reports remain explicit user-triggered artifacts; this is not a distributed storage engine. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
@@ -189,24 +190,17 @@ Packet intake queue tuning is controlled by:
   are `drop_oldest` and `drop_newest`.
 - `NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC`: default `5.0`; increase to `10.0`
   when heavier capture should get more shutdown drain time.
-- `NETBOT_PERSIST_BATCH_SIZE`: packet/alert rows per write batch; default `100`.
-- `NETBOT_PERSIST_FLUSH_INTERVAL_SEC`: maximum packet/alert batch window;
-  default `0.5` seconds.
-- `NETBOT_PERSIST_QUEUE_MAX_SIZE`: bounded write backlog; default `5000`.
-- `NETBOT_PERSIST_OVERFLOW_POLICY`: `drop_oldest` or `drop_newest`; default
-  `drop_oldest`.
-- `NETBOT_PERSIST_MAX_RETRIES`: whole-batch retry limit; default `3`.
-- `NETBOT_PERSIST_RETRY_BACKOFF_SEC`: exponential retry base delay; default
-  `0.1` seconds.
-- `NETBOT_FLOW_PERSIST_BATCH_SIZE`: flow snapshots per SQLite upsert; default
-  `100`.
-- `NETBOT_FLOW_PERSIST_FLUSH_INTERVAL_SEC`: flow snapshot batch window;
-  default `0.5` seconds.
-- `NETBOT_FLOW_PERSIST_QUEUE_MAX_SIZE`: bounded flow snapshot backlog; default
-  `2000`.
-- `NETBOT_FLOW_PERSIST_MAX_RETRIES`: flow batch retry limit; default `3`.
-- `NETBOT_FLOW_PERSIST_RETRY_BACKOFF_SEC`: flow retry base delay; default
-  `0.1` seconds.
+- `NETBOT_PERSISTENCE_BATCH_ENABLED`: batching toggle; default `true`. `false`
+  uses compatible synchronous writes.
+- `NETBOT_PERSISTENCE_PACKET_BATCH_SIZE` / `PACKET_FLUSH_MS`: `500` / `1000`.
+- `NETBOT_PERSISTENCE_FLOW_BATCH_SIZE` / `FLOW_FLUSH_MS`: `250` / `1500`.
+- `NETBOT_PERSISTENCE_ALERT_BATCH_SIZE` / `ALERT_FLUSH_MS`: `100` / `1000`.
+- `NETBOT_PERSISTENCE_AGENT_BATCH_SIZE` / `AGENT_FLUSH_MS`: `100` / `3000`;
+  reserved for safe summary-history integration.
+- `NETBOT_PERSISTENCE_QUEUE_MAX`: bounded write backlog; default `5000`.
+- `NETBOT_PERSISTENCE_RETRY_MAX` / `RETRY_BACKOFF_MS`: `3` / `250`.
+- `NETBOT_PERSISTENCE_OVERFLOW_POLICY`: `drop_oldest`, `drop_newest`, or
+  `reject_new`; default `drop_oldest`.
 
 `drop_oldest` favors fresher dashboard state during bursts. `drop_newest`
 preserves already queued packet order. In both modes, drops are counted, logged,

@@ -71,15 +71,30 @@ class FlowService:
             )
 
     def ingest(
-        self, packet: dict[str, Any], alerts: list[dict[str, Any]] | None = None
+        self,
+        packet: dict[str, Any],
+        alerts: list[dict[str, Any]] | None = None,
+        *,
+        persist: bool = True,
     ) -> dict[str, Any]:
         flow = self.engine.ingest(packet, alerts)
         flow = redact_sensitive_data(flow)
+        if not persist:
+            return flow
         if self._batch_writer is not None:
             self._batch_writer.enqueue(flow)
         else:
             self._write_snapshots([flow])
         return flow
+
+    def write_snapshots(self, flows: list[dict[str, Any]]) -> None:
+        """Persist already-redacted flow snapshots in one SQLite transaction."""
+        latest = {
+            str(flow["flow_id"]): redact_sensitive_data(flow)
+            for flow in flows
+            if flow.get("flow_id")
+        }
+        self._write_snapshots(list(latest.values()))
 
     def _write_snapshots(self, flows: list[dict[str, Any]]) -> None:
         if not flows:

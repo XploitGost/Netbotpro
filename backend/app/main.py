@@ -85,7 +85,7 @@ from log_manager import LOG_DIR  # noqa: E402
 
 event_bus = EventBus()
 capture_provider = SystemCaptureProvider()
-flow_service = FlowService(batch_persistence=True)
+flow_service = FlowService()
 sniffer_service = SnifferService(
     event_bus,
     capture_provider=capture_provider,
