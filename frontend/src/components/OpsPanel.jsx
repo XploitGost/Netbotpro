@@ -37,6 +37,7 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
   const packetQueueLastDropReason = snapshot.safeLastDropReason || "No drops recorded";
   const flowWorkerPool = snapshot.flowWorkerPool;
   const flowWorkerLastDropReason = snapshot.safeFlowWorkerDropReason || "No drops recorded";
+  const liveRingBuffer = snapshot.liveRingBuffer;
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
   const eventAggregator = snapshot.eventAggregator;
@@ -117,6 +118,41 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
           <MetricRow label="Overflow Policy" value={packetQueue.overflow_policy || "drop_oldest"} hint={packetQueueLastDropReason} />
           <MetricRow label="Worker" value={packetQueue.worker_alive === false ? "Stopped" : "Running"} level={packetQueue.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${packetQueue.health || "healthy"}`} />
         </dl>
+      </AccordionPanel>
+
+      <AccordionPanel
+        eyebrow="Live Memory"
+        title="Live Ring Buffer"
+        subtitle="Bounded, redacted recent packet, flow, alert, and expert history."
+        badge={liveRingBuffer.enabled ? levelLabel(snapshot.liveRingLevel) : "Disabled"}
+        defaultOpen
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Buffer State" value={liveRingBuffer.enabled ? "Enabled" : "Disabled"} level={snapshot.liveRingLevel} hint={`Health ${liveRingBuffer.health || "healthy"}`} />
+          <MetricRow label="Records" value={`${liveRingBuffer.total_records || 0}/${liveRingBuffer.total_capacity || 0}`} level={snapshot.liveRingLevel} hint={`${Number(liveRingBuffer.utilization_percent || 0).toFixed(1)}% used`} />
+          <MetricRow label="Records Added" value={String(liveRingBuffer.records_added_total || 0)} hint="Redacted live summaries accepted" />
+          <MetricRow label="Records Evicted" value={String(liveRingBuffer.records_evicted_total || 0)} level={(liveRingBuffer.pressure_reasons || []).includes("live_ring_frequent_evictions") ? "warning" : "healthy"} hint="Oldest records removed at capacity" />
+          <MetricRow label="Records Dropped" value={String(liveRingBuffer.records_dropped_total || 0)} level={Number(liveRingBuffer.records_dropped_total || 0) > 0 ? "degraded" : "healthy"} />
+          <MetricRow label="Queries" value={String(liveRingBuffer.query_count_total || 0)} hint={`Capped ${liveRingBuffer.query_limit_rejected_total || 0}`} level={Number(liveRingBuffer.query_limit_rejected_total || 0) > 0 ? "warning" : "healthy"} />
+          <MetricRow label="Last Added" value={liveRingBuffer.last_added_at || "Not yet"} />
+          <MetricRow label="Last Evicted" value={liveRingBuffer.last_evicted_at || "Not yet"} />
+          <MetricRow label="Last Error" value={liveRingBuffer.last_error || "None"} level={liveRingBuffer.last_error ? "degraded" : "healthy"} />
+          <MetricRow label="Pressure Reasons" value={(liveRingBuffer.pressure_reasons || []).join(", ") || "None"} level={(liveRingBuffer.pressure_reasons || []).length ? "warning" : "healthy"} />
+        </dl>
+        {Object.keys(liveRingBuffer.categories || {}).length ? (
+          <div className="ops-worker-grid" aria-label="Live ring buffer category status">
+            {Object.entries(liveRingBuffer.categories).map(([category, values]) => (
+              <article className="ops-worker-item" key={category}>
+                <div>
+                  <strong>{category.replaceAll("_", " ")}</strong>
+                  <small>{Number(values.utilization_percent || 0).toFixed(1)}% used</small>
+                </div>
+                <span>{values.records || 0}/{values.capacity || 0} records</span>
+                <small>{values.evicted_total || 0} evicted</small>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </AccordionPanel>
 
       <AccordionPanel
