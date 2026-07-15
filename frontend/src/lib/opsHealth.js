@@ -84,6 +84,21 @@ function safeFlowWorkerReasons(value) {
   return Array.isArray(value) ? value.filter((reason) => allowed.has(reason)) : [];
 }
 
+function safeLiveRingError(value) {
+  const errorType = String(value || "");
+  return errorType.length <= 80 && /^[A-Za-z0-9_]+$/.test(errorType) ? errorType : "";
+}
+
+function safeLiveRingReasons(value) {
+  const allowed = new Set([
+    "live_ring_high_utilization",
+    "live_ring_frequent_evictions",
+    "live_ring_query_limit_rejections",
+    "live_ring_errors",
+  ]);
+  return Array.isArray(value) ? value.filter((reason) => allowed.has(reason)) : [];
+}
+
 export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventBus = observability?.event_bus || {};
   const eventAggregator = operationalMetrics?.event_aggregator || observability?.event_aggregator || {};
@@ -95,6 +110,34 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     last_error: safeFlowWorkerError(flowWorkerPool.last_error),
     last_drop_reason: safeFlowWorkerDropReason(flowWorkerPool.last_drop_reason),
     pressure_reasons: safeFlowWorkerReasons(flowWorkerPool.pressure_reasons),
+  };
+  const liveRingBuffer = operationalMetrics?.live_ring_buffer || observability?.live_ring_buffer || {};
+  const safeLiveRingCategories = Object.fromEntries(
+    Object.entries(liveRingBuffer.categories || {})
+      .filter(([category]) => ["packet", "flow", "alert", "expert_info", "protocol_metadata", "agent_status", "ops_event"].includes(category))
+      .map(([category, values]) => [category, {
+        records: toNumber(values?.records),
+        capacity: toNumber(values?.capacity),
+        utilization_percent: toNumber(values?.utilization_percent),
+        evicted_total: toNumber(values?.evicted_total),
+      }]),
+  );
+  const safeLiveRingBuffer = {
+    enabled: liveRingBuffer.enabled === true,
+    health: ["healthy", "degraded", "critical"].includes(liveRingBuffer.health) ? liveRingBuffer.health : "healthy",
+    total_records: toNumber(liveRingBuffer.total_records),
+    total_capacity: toNumber(liveRingBuffer.total_capacity),
+    utilization_percent: toNumber(liveRingBuffer.utilization_percent),
+    records_added_total: toNumber(liveRingBuffer.records_added_total),
+    records_evicted_total: toNumber(liveRingBuffer.records_evicted_total),
+    records_dropped_total: toNumber(liveRingBuffer.records_dropped_total),
+    query_count_total: toNumber(liveRingBuffer.query_count_total),
+    query_limit_rejected_total: toNumber(liveRingBuffer.query_limit_rejected_total),
+    last_added_at: String(liveRingBuffer.last_added_at || ""),
+    last_evicted_at: String(liveRingBuffer.last_evicted_at || ""),
+    last_error: safeLiveRingError(liveRingBuffer.last_error),
+    pressure_reasons: safeLiveRingReasons(liveRingBuffer.pressure_reasons),
+    categories: safeLiveRingCategories,
   };
   const persistence = operationalMetrics?.persistence || observability?.persistence || {};
   const history = observability?.history || {};
@@ -128,6 +171,10 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const flowWorkerRejected = toNumber(flowWorkerPool.jobs_rejected_total);
   const flowWorkerSlowJobs = toNumber(flowWorkerPool.slow_jobs_total);
   const flowWorkerP95 = toNumber(flowWorkerPool.p95_processing_latency_ms);
+  const liveRingEnabled = safeLiveRingBuffer.enabled;
+  const liveRingUtilization = safeLiveRingBuffer.utilization_percent;
+  const liveRingEvicted = safeLiveRingBuffer.records_evicted_total;
+  const liveRingQueryRejected = safeLiveRingBuffer.query_limit_rejected_total;
   const droppedWrites = toNumber(persistence.events_dropped_total ?? persistence.dropped_writes);
   const failedWrites = toNumber(persistence.events_failed_total ?? persistence.failed_writes);
   const persistenceUtilization = toNumber(persistence.utilization_percent ?? persistence.queue_utilization_percent);
@@ -198,10 +245,19 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
           ? "warning"
           : "healthy"
     : "healthy";
+  const liveRingLevel = liveRingEnabled
+    ? normalizeLevel(safeLiveRingBuffer.health) !== "healthy"
+      ? normalizeLevel(safeLiveRingBuffer.health)
+      : safeLiveRingBuffer.last_error || safeLiveRingBuffer.records_dropped_total > 0
+        ? "degraded"
+        : liveRingUtilization >= 90 || liveRingQueryRejected > 0
+          ? "warning"
+          : "healthy"
+    : "healthy";
   const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
   const criticalFlows = toNumber(flows.risk_distribution?.critical);
   const highFlows = toNumber(flows.risk_distribution?.high);
-  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, liveRingLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
   const recommendedActions = [];
 
   if (backendLevel !== "healthy") {
@@ -236,6 +292,18 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   }
   if (flowWorkerDropped > 0 || flowWorkerRejected > 0) {
     recommendedActions.push("Flow worker jobs were dropped due to processing pressure. Review worker queue size and overflow policy.");
+  }
+  if (liveRingEnabled && safeLiveRingBuffer.pressure_reasons.includes("live_ring_high_utilization")) {
+    recommendedActions.push("Live ring buffer is near capacity. Increase category caps or reduce live capture pressure.");
+  }
+  if (liveRingEnabled && safeLiveRingBuffer.pressure_reasons.includes("live_ring_frequent_evictions")) {
+    recommendedActions.push("Live ring buffer is evicting old records frequently. This is safe but recent history may be shorter than expected.");
+  }
+  if (liveRingEnabled && liveRingQueryRejected > 0) {
+    recommendedActions.push("Live ring buffer query limit was capped. Reduce requested result size or inspect a narrower time range.");
+  }
+  if (liveRingEnabled && safeLiveRingBuffer.last_error) {
+    recommendedActions.push("Live ring buffer reported errors. Inspect backend logs and recent live capture activity.");
   }
   if (criticalFlows > 0) {
     recommendedActions.push("Review critical flows and related alerts first.");
@@ -326,6 +394,12 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       level: flowWorkerLevel,
     },
     {
+      label: "Live Ring",
+      value: liveRingEnabled ? `${safeLiveRingBuffer.total_records}/${safeLiveRingBuffer.total_capacity}` : "Disabled",
+      hint: `${liveRingUtilization.toFixed(1)}% used | Evicted ${liveRingEvicted}`,
+      level: liveRingLevel,
+    },
+    {
       label: "Write Queue",
       value: String(queueSize),
       hint: `${persistenceUtilization.toFixed(1)}% used | Max ${toNumber(persistence.queue_max ?? persistence.max_size)}`,
@@ -388,6 +462,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     flowWorkerPool: safeFlowWorkerPool,
     flowWorkerLevel,
     safeFlowWorkerDropReason: safeFlowWorkerPool.last_drop_reason,
+    liveRingBuffer: safeLiveRingBuffer,
+    liveRingLevel,
     persistence,
     history,
     autoBlock,

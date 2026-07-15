@@ -53,6 +53,7 @@ flowchart TB
         IntakeQueue["Bounded Packet Intake Queue"]
         QueueWorker["Packet Queue Dispatcher"]
         FlowWorkers["Flow-aware Worker Pool<br/>Ordered Flow Lanes"]
+        LiveRing["Live Ring Buffer<br/>Bounded Redacted History"]
         EventAggregator["Event Aggregator"]
         Parser["Packet Parser"]
         Layer7["Layer 7 / TLS Metadata"]
@@ -110,7 +111,7 @@ flowchart TB
     Events --> LiveClient
     CapturePolicy --> Provider
     Provider --> IntakeQueue --> QueueWorker --> FlowWorkers --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
-    FlowWorkers --> EventAggregator --> Events
+    Redaction --> LiveRing --> EventAggregator --> Events
     ProtocolIntel --> TCPIntel
     ProtocolIntel --> DNSIntel
     ProtocolIntel --> HTTPIntel
@@ -226,9 +227,17 @@ parallel. Incomplete metadata uses a safe fallback lane. Worker queues remain
 bounded and expose backlog, utilization, failures, drops/rejections, processing
 latency, and liveness to `/api/monitoring/metrics` and Ops Snapshot.
 
-The Event Aggregator remains the realtime delivery-pressure boundary after
-processing, while Batch Persistence remains the storage-pressure boundary.
-Live ring buffer and benchmark/soak validation remain future steps.
+The Live Ring Buffer sits after processing and central redaction. It holds
+separate bounded deques for recent packet, flow, alert, Expert, protocol,
+Agent-status, and ops summaries. Current capture integration writes packet,
+flow, alert, and Expert records. Oldest records are evicted at each category's
+hard capacity, optional TTL pruning is bounded, and read APIs cap result size.
+It supports Inspect/Dashboard recovery and future read-only context without
+retaining raw payloads or allowing unbounded memory growth.
+
+The Event Aggregator remains the realtime delivery-pressure boundary after the
+ring buffer, while Batch Persistence remains the storage-pressure boundary.
+Benchmark/soak validation remains a future step.
 
 ## WebSocket Event Aggregator
 

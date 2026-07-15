@@ -118,6 +118,7 @@ def _observability_snapshot() -> dict[str, Any]:
         "history": history_service.metrics(),
         "packet_queue": sniffer_service.packet_queue_stats(),
         "flow_worker_pool": sniffer_service.flow_worker_pool_stats(),
+        "live_ring_buffer": sniffer_service.live_ring_buffer_stats(),
         "persistence": sniffer_service.persistence_stats(),
         "auto_block": sniffer_service.auto_block_stats(),
     }
@@ -218,6 +219,34 @@ def api_monitoring_metrics(
         observability=_observability_snapshot(),
         flow_summary=flow_service.summary(),
     )
+
+
+@app.get("/api/live/recent")
+def api_live_recent(
+    type: str = "all",
+    limit: int | None = None,
+    flow_key: str = "",
+    since: str | None = None,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    try:
+        return sniffer_service.recent_live_records(
+            type,
+            limit=limit,
+            flow_key=flow_key,
+            since=since,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/live/ring/metrics")
+def api_live_ring_metrics(
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    return sniffer_service.live_ring_buffer_stats()
 
 
 def _agent_headers(

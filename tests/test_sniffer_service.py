@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.app.services.event_bus import EventBus
+from backend.app.services.live_ring_buffer import DEFAULT_CAPACITIES, LiveRingBuffer
 from backend.app.services.sniffer_service import (
     CaptureStartUnavailableError,
     SnifferService,
@@ -268,6 +269,56 @@ class SnifferServiceTests(unittest.TestCase):
             self.assertFalse(service.flow_worker_pool_stats()["enabled"])
         finally:
             service.close()
+
+    def test_processed_packet_is_available_in_redacted_live_ring(self):
+        ring = LiveRingBuffer(
+            capacities={category: 5 for category in DEFAULT_CAPACITIES}
+        )
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+            live_ring_buffer=ring,
+        )
+        try:
+            service._on_packet(
+                {
+                    "src": "10.0.0.1",
+                    "dst": "8.8.8.8",
+                    "proto": "UDP",
+                    "authorization": "Bearer ring-secret",
+                }
+            )
+            self.assertTrue(service.drain_packet_queue(timeout_sec=1.0))
+            result = service.recent_live_records("packet", limit=5)
+        finally:
+            service.close()
+
+        self.assertEqual(len(result["items"]), 1)
+        self.assertNotIn("ring-secret", str(result))
+
+    @patch(
+        "backend.app.services.sniffer_service.packet_expert_items",
+        side_effect=ValueError("Authorization: Bearer should-not-log"),
+    )
+    def test_expert_generation_failure_does_not_stop_packet_processing(
+        self, _mock_expert
+    ):
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+        )
+        try:
+            service._on_packet({"src": "10.0.0.1", "dst": "8.8.8.8", "proto": "UDP"})
+            self.assertTrue(service.drain_packet_queue(timeout_sec=1.0))
+            result = service.recent_live_records("packet", limit=5)
+            stats = service.packet_queue_stats()
+        finally:
+            service.close()
+
+        self.assertEqual(len(result["items"]), 1)
+        self.assertTrue(stats["worker_alive"])
 
 
 if __name__ == "__main__":

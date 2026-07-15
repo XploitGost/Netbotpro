@@ -61,6 +61,18 @@ describe("OpsPanel", () => {
               { worker_id: 0, worker_alive: true, queue_depth: 0, queue_max: 500, processed_total: 12 },
             ],
           },
+          live_ring_buffer: {
+            enabled: true,
+            health: "healthy",
+            total_records: 12,
+            total_capacity: 100,
+            utilization_percent: 12,
+            records_added_total: 20,
+            categories: {
+              packet: { records: 10, capacity: 80, utilization_percent: 12.5, evicted_total: 0 },
+              alert: { records: 2, capacity: 20, utilization_percent: 10, evicted_total: 0 },
+            },
+          },
           event_aggregator: {
             packet_batch_ms: 500,
             packet_batch_max: 250,
@@ -88,6 +100,8 @@ describe("OpsPanel", () => {
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
     expect(screen.getByText("Packet Intake Queue")).toBeTruthy();
     expect(screen.getByText("Flow Worker Pool")).toBeTruthy();
+    expect(screen.getByText("Live Ring Buffer")).toBeTruthy();
+    expect(screen.getByText("packet")).toBeTruthy();
     expect(screen.getByText("Worker 0")).toBeTruthy();
     expect(screen.getByText("WebSocket Event Aggregator")).toBeTruthy();
     expect(screen.getByText("Batches Sent")).toBeTruthy();
@@ -598,5 +612,88 @@ describe("OpsPanel", () => {
     expect(screen.getByText("Flow worker jobs were dropped due to processing pressure. Review worker queue size and overflow policy.")).toBeTruthy();
     expect(screen.getByText("A flow worker appears unhealthy. Restart capture or inspect backend runtime logs.")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/raw-token|authorization/i);
+  });
+
+  it.each(["healthy", "degraded", "critical"])(
+    "renders live ring buffer %s health",
+    (health) => {
+      render(
+        <OpsPanel
+          observability={{}}
+          operationalMetrics={{
+            generated_at: "2026-06-17T10:01:00Z",
+            health,
+            capture: { running: true },
+            flows: { risk_distribution: {} },
+            live_ring_buffer: {
+              enabled: true,
+              health,
+              total_records: 1,
+              total_capacity: 100,
+              categories: { packet: { records: 1, capacity: 100 } },
+            },
+          }}
+        />
+      );
+
+      expect(screen.getByText("Live Ring Buffer")).toBeTruthy();
+      expect(screen.getAllByText(`Health ${health}`).length).toBeGreaterThan(0);
+    }
+  );
+
+  it("renders disabled live ring buffer state", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          live_ring_buffer: { enabled: false, health: "healthy" },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Live Ring Buffer")).toBeTruthy();
+    expect(screen.getAllByText("Disabled").length).toBeGreaterThan(0);
+  });
+
+  it("renders live ring pressure actions and sanitizes diagnostics", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "critical",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          live_ring_buffer: {
+            enabled: true,
+            health: "critical",
+            total_records: 95,
+            total_capacity: 100,
+            utilization_percent: 95,
+            records_evicted_total: 12,
+            query_limit_rejected_total: 2,
+            last_error: "Authorization: Bearer raw-secret",
+            pressure_reasons: [
+              "live_ring_high_utilization",
+              "live_ring_frequent_evictions",
+              "live_ring_query_limit_rejections",
+              "live_ring_errors",
+            ],
+            categories: {
+              packet: { records: 95, capacity: 100, utilization_percent: 95, evicted_total: 12 },
+            },
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Live ring buffer is near capacity. Increase category caps or reduce live capture pressure.")).toBeTruthy();
+    expect(screen.getByText("Live ring buffer is evicting old records frequently. This is safe but recent history may be shorter than expected.")).toBeTruthy();
+    expect(screen.getByText("Live ring buffer query limit was capped. Reduce requested result size or inspect a narrower time range.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/raw-secret|authorization/i);
   });
 });

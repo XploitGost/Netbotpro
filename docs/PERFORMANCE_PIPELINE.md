@@ -26,6 +26,7 @@ Capture
 -> Bounded Packet Intake Queue
 -> Flow-aware Worker Pool
 -> Existing Packet Processing
+-> Live Ring Buffer
 -> Bounded Batch Persistence (packets, alerts, flow snapshots)
 -> Event Aggregator
 -> Batched WebSocket Updates
@@ -35,9 +36,10 @@ Capture
 The capture callback copies packet metadata into `BoundedPacketQueue` and
 returns quickly. Its dispatcher sends accepted metadata to bounded flow-aware
 worker lanes. Each lane runs the existing processing path: payload policy,
-protocol metadata, flow ingestion, detection, dashboard state, persistence
-enqueue, and websocket publishing. The Event Aggregator then batches
-high-frequency realtime updates before websocket fan-out.
+protocol metadata, flow ingestion, detection, and dashboard state. Redacted
+summaries then enter the Live Ring Buffer before persistence enqueue and
+websocket publishing. The Event Aggregator batches high-frequency realtime
+updates before websocket fan-out.
 
 ## Environment Variables
 
@@ -452,13 +454,74 @@ Live frontend buffers remain bounded:
 
 Table virtualization remains a later step.
 
+## Live Ring Buffer
+
+`LiveRingBuffer` provides a bounded, thread-safe window of recent live analysis
+data after packet/flow/DPI processing and central redaction. It prevents the
+Inspect and operational read paths from depending on an unbounded in-memory
+list while preserving recent context across WebSocket bursts.
+
+Current capture integration stores four useful categories:
+
+- packet summaries, maximum `5000`;
+- flow updates, maximum `2000`;
+- alerts, maximum `1000`;
+- Expert Info records, maximum `1000`.
+
+Protocol metadata, Agent status, and ops event buffers are configured and
+bounded for compatible internal use, but are not force-fed by this step. Their
+defaults are `2000`, `1000`, and `1000` records. All capacities have safe
+fallbacks and can never become unlimited.
+
+When a category reaches capacity, the oldest record is evicted before the new
+record is appended. `NETBOT_LIVE_RING_TTL_SECONDS=0` means capacity-only
+eviction; a positive value also prunes expired records. Append and query
+operations use a short reentrant lock and copy/redact payloads before storage.
+Raw payload fields are removed from ring records even when capture policy
+permits a guarded forensic workflow.
+
+Read-only endpoints:
+
+- `GET /api/live/recent` supports bounded `type`, `limit`, `flow_key`, and
+  `since` queries;
+- `GET /api/live/ring/metrics` exposes counters and safe health fields;
+- `GET /api/monitoring/metrics` includes the same `live_ring_buffer` section.
+
+Both endpoints use the existing trusted-client and local-token dependencies.
+Oversized limits are capped at `NETBOT_LIVE_RING_MAX_QUERY_LIMIT` and counted.
+The Ring Buffer complements rather than replaces the Event Aggregator:
+WebSocket batching controls delivery pressure, while the ring controls recent
+in-memory history. Batch Persistence still owns durable storage pressure, and
+the Flow-aware Worker Pool still owns parallel processing pressure.
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NETBOT_LIVE_RING_ENABLED` | `true` | Enable bounded recent live storage. |
+| `NETBOT_LIVE_RING_PACKET_MAX` | `5000` | Packet summary capacity. |
+| `NETBOT_LIVE_RING_FLOW_MAX` | `2000` | Flow update capacity. |
+| `NETBOT_LIVE_RING_ALERT_MAX` | `1000` | Alert capacity. |
+| `NETBOT_LIVE_RING_EXPERT_MAX` | `1000` | Expert Info capacity. |
+| `NETBOT_LIVE_RING_PROTOCOL_MAX` | `2000` | Protocol summary capacity. |
+| `NETBOT_LIVE_RING_AGENT_MAX` | `1000` | Agent status capacity. |
+| `NETBOT_LIVE_RING_OPS_MAX` | `1000` | Operational event capacity. |
+| `NETBOT_LIVE_RING_DEFAULT_QUERY_LIMIT` | `250` | Default recent-result limit. |
+| `NETBOT_LIVE_RING_MAX_QUERY_LIMIT` | `2000` | Hard API result cap. |
+| `NETBOT_LIVE_RING_TTL_SECONDS` | `0` | Optional TTL; zero disables TTL pruning. |
+
+Metrics include enabled/health state, total records/capacity/utilization,
+added/evicted/dropped totals, query and query-limit counters, safe timestamps,
+safe error type, per-category utilization, and fixed pressure reason enums.
+High utilization, frequent evictions, or capped queries degrade health; an
+internal read/write error is critical and contributes to overall Ops health.
+
 ## Current Limitations
 
 This is not the complete performance engine yet.
 
 Not implemented yet:
 
-- Live Ring Buffer;
 - Benchmark / Soak Tests;
 - Optional ClickHouse or external metrics backend.
 
@@ -469,12 +532,11 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Live Ring Buffer
-2. Benchmark and Soak Tests
-3. Performance Validation Report
-4. Service Attribution / Destination Intelligence
-5. Incident / Correlation Engine
-6. Read-only AI Analyst
+1. Benchmark and Soak Tests
+2. Performance Validation Report
+3. Service Attribution / Destination Intelligence
+4. Incident / Correlation Engine
+5. Read-only AI Analyst
 
 ### Recorded Product Direction
 

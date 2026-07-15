@@ -71,6 +71,7 @@ or PCAP artifacts.
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
 | Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level intake hardening step; it is separate from processing workers. |
 | Flow-aware Worker Pool | Foundation step | Stable per-flow lanes preserve ordering while different flows process concurrently; bounded queue pressure, latency, failures, and worker health are visible in Ops Snapshot. | This is not a benchmark claim or the complete performance engine. |
+| Live Ring Buffer | Foundation step | Recent packet, flow, alert, and Expert summaries are held in per-category bounded memory with eviction/query metrics and Ops Snapshot visibility. | Stored and returned records are redacted summaries; raw packet payloads and credentials are excluded. |
 | Batch Persistence / Storage Backpressure | Foundation step | Redacted packet, alert, and flow records use bounded batches with queue health, write latency, retry, backlog, failure, and Ops Snapshot visibility. | Audit and report exports remain synchronous; this is not a distributed storage engine or the complete performance pipeline. |
 | WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Realtime delivery batching only. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
@@ -187,6 +188,12 @@ bidirectional flow keys select FIFO worker lanes, preserving order within a flow
 while allowing different flows to process concurrently. It exposes bounded
 backlog, drops/rejections, failures, worker liveness, and processing latency.
 
+The Live Ring Buffer keeps a queryable window of recent redacted packet, flow,
+alert, and Expert summaries. Every category has a hard capacity, oldest records
+are evicted at capacity, and query limits are capped. Ops Snapshot shows memory
+utilization, evictions, query pressure, and safe error types. This is a bounded
+live context layer, not raw packet storage or the complete performance engine.
+
 Packet intake queue tuning is controlled by:
 
 - `NETBOT_PACKET_QUEUE_MAX_SIZE`: default `2000`; use `1000` for small/local
@@ -205,6 +212,15 @@ Packet intake queue tuning is controlled by:
 - `NETBOT_FLOW_WORKER_ERROR_THRESHOLD`: default `25` failures or drops before
   critical health.
 - `NETBOT_FLOW_WORKER_SLOW_JOB_MS`: default `100` milliseconds.
+- `NETBOT_LIVE_RING_ENABLED`: default `true`; disables only recent in-memory
+  storage when set to `false`.
+- `NETBOT_LIVE_RING_PACKET_MAX`, `FLOW_MAX`, `ALERT_MAX`, `EXPERT_MAX`,
+  `PROTOCOL_MAX`, `AGENT_MAX`, and `OPS_MAX`: per-category hard capacities;
+  defaults are `5000`, `2000`, `1000`, `1000`, `2000`, `1000`, and `1000`.
+- `NETBOT_LIVE_RING_DEFAULT_QUERY_LIMIT` / `MAX_QUERY_LIMIT`: defaults `250` /
+  `2000`; oversized requests are capped and counted.
+- `NETBOT_LIVE_RING_TTL_SECONDS`: default `0` for capacity-only eviction;
+  positive values also prune expired summaries.
 - `NETBOT_PERSISTENCE_BATCH_ENABLED`: batching toggle; default `true`. `false`
   uses compatible synchronous writes.
 - `NETBOT_PERSISTENCE_PACKET_BATCH_SIZE` / `PACKET_FLUSH_MS`: `500` / `1000`.

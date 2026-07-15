@@ -12,6 +12,7 @@ from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.event_bus import EventBus
 from backend.app.services.flow_service import FlowService
 from backend.app.services.flow_worker_pool import FlowWorkerPool
+from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.service_attribution import enrich_service_attribution
 from backend.app.services.settings_service import get_settings_snapshot
@@ -20,6 +21,7 @@ from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipe
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
 from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
+from core.expert_info import packet_expert_items
 from core.flow_engine import flow_id_for
 
 ensure_project_root_on_path()
@@ -51,6 +53,7 @@ class SnifferService:
         event_bus: EventBus,
         capture_provider: CaptureProvider | None = None,
         flow_service: FlowService | None = None,
+        live_ring_buffer: LiveRingBuffer | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._event_bus = event_bus
@@ -70,6 +73,7 @@ class SnifferService:
             flow_writer=flow_writer if callable(flow_writer) else None
         )
         self._publisher = SnifferEventPublisher(event_bus)
+        self._live_ring_buffer = live_ring_buffer or LiveRingBuffer.from_env()
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
@@ -193,6 +197,46 @@ class SnifferService:
             flow = self._flow_service.ingest(packet, alerts)
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
+        flow_key = str((flow or {}).get("flow_id") or flow_id_for(packet))
+        self._live_ring_buffer.append(
+            "packet",
+            packet,
+            flow_key=flow_key,
+            timestamp=str(packet.get("ts") or packet.get("timestamp") or ""),
+            source="live_capture",
+        )
+        if isinstance(flow, dict):
+            self._live_ring_buffer.append(
+                "flow",
+                flow,
+                flow_key=flow_key,
+                timestamp=str(flow.get("last_seen") or ""),
+                source="flow_worker_pool",
+            )
+        for alert in alerts:
+            self._live_ring_buffer.append(
+                "alert",
+                alert,
+                flow_key=flow_key,
+                timestamp=str(alert.get("ts") or alert.get("timestamp") or ""),
+                source="detection_engine",
+            )
+        try:
+            expert_items = packet_expert_items(packet, flow_key)
+        except Exception as exc:  # pragma: no cover - defensive hot-path guard
+            logger.warning(
+                "live ring expert generation failed error_type=%s",
+                type(exc).__name__,
+            )
+            expert_items = []
+        for expert_item in expert_items:
+            self._live_ring_buffer.append(
+                "expert_info",
+                expert_item,
+                flow_key=flow_key,
+                timestamp=str(expert_item.get("last_seen") or ""),
+                source="expert_info",
+            )
         self._persistence.persist(packet, alerts)
         if self._central_flow_persistence and isinstance(flow, dict):
             self._persistence.persist_flow(flow)
@@ -299,6 +343,7 @@ class SnifferService:
             iface = self._iface
         self._state.reset()
         self._flow_service.reset()
+        self._live_ring_buffer.clear()
         state = self._state.state(running=running, iface=iface)
         state["observability"] = self.observability()
         self._publisher.publish_state("sniffer:reset", state)
@@ -318,6 +363,24 @@ class SnifferService:
     def flow_worker_pool_stats(self) -> dict[str, Any]:
         return self._flow_worker_pool.stats()
 
+    def live_ring_buffer_stats(self) -> dict[str, Any]:
+        return self._live_ring_buffer.metrics()
+
+    def recent_live_records(
+        self,
+        category: str = "all",
+        *,
+        limit: int | None = None,
+        flow_key: str = "",
+        since: str | None = None,
+    ) -> dict[str, Any]:
+        return self._live_ring_buffer.query(
+            category,
+            limit=limit,
+            flow_key=flow_key,
+            since=since,
+        )
+
     def auto_block_stats(self) -> dict[str, int | float]:
         return self._detection_pipeline.stats()
 
@@ -326,6 +389,7 @@ class SnifferService:
             "event_bus": self._event_bus.stats(),
             "packet_queue": self.packet_queue_stats(),
             "flow_worker_pool": self.flow_worker_pool_stats(),
+            "live_ring_buffer": self.live_ring_buffer_stats(),
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }

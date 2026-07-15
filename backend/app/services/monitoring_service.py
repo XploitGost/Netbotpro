@@ -152,6 +152,29 @@ def _safe_flow_worker_reasons(value: Any) -> list[str]:
     )
 
 
+def _safe_live_ring_reasons(value: Any) -> list[str]:
+    allowed = {
+        "live_ring_high_utilization",
+        "live_ring_frequent_evictions",
+        "live_ring_query_limit_rejections",
+        "live_ring_errors",
+    }
+    return (
+        [str(reason) for reason in value if str(reason) in allowed]
+        if isinstance(value, list)
+        else []
+    )
+
+
+def _safe_live_ring_error(value: Any) -> str:
+    error_type = str(value or "")
+    return (
+        error_type
+        if len(error_type) <= 80 and error_type.replace("_", "").isalnum()
+        else ""
+    )
+
+
 def build_monitoring_metrics(
     *,
     sniffer_state: dict[str, Any],
@@ -163,6 +186,7 @@ def build_monitoring_metrics(
     event_bus = dict(observability.get("event_bus") or {})
     packet_queue = dict(observability.get("packet_queue") or {})
     flow_worker_pool = dict(observability.get("flow_worker_pool") or {})
+    live_ring_buffer = dict(observability.get("live_ring_buffer") or {})
     event_aggregator = dict(observability.get("event_aggregator") or {})
     websocket = dict(observability.get("websocket") or {})
     persistence = dict(observability.get("persistence") or {})
@@ -258,6 +282,12 @@ def build_monitoring_metrics(
     pressure_reasons.extend(
         reason for reason in flow_worker_reasons if reason not in pressure_reasons
     )
+    live_ring_reasons = _safe_live_ring_reasons(
+        live_ring_buffer.get("pressure_reasons") or []
+    )
+    pressure_reasons.extend(
+        reason for reason in live_ring_reasons if reason not in pressure_reasons
+    )
     pressure_reasons.extend(
         reason for reason in persistence_reasons if reason not in pressure_reasons
     )
@@ -312,6 +342,7 @@ def build_monitoring_metrics(
         or websocket_send_errors >= 3
         or websocket_drops >= _int(event_aggregator.get("client_queue_max") or 1000)
         or flow_worker_pool.get("health") == "critical"
+        or live_ring_buffer.get("health") == "critical"
     ):
         health = "critical"
 
@@ -509,6 +540,53 @@ def build_monitoring_metrics(
             ),
             "last_slow_job_at": str(flow_worker_pool.get("last_slow_job_at") or ""),
             "pressure_reasons": flow_worker_reasons,
+        },
+        "live_ring_buffer": {
+            "enabled": bool(live_ring_buffer.get("enabled", False)),
+            "health": str(live_ring_buffer.get("health") or "healthy"),
+            "total_records": _int(live_ring_buffer.get("total_records")),
+            "total_capacity": _int(live_ring_buffer.get("total_capacity")),
+            "utilization_percent": _number(live_ring_buffer.get("utilization_percent")),
+            "records_added_total": _int(live_ring_buffer.get("records_added_total")),
+            "records_evicted_total": _int(
+                live_ring_buffer.get("records_evicted_total")
+            ),
+            "records_dropped_total": _int(
+                live_ring_buffer.get("records_dropped_total")
+            ),
+            "query_count_total": _int(live_ring_buffer.get("query_count_total")),
+            "query_limit_rejected_total": _int(
+                live_ring_buffer.get("query_limit_rejected_total")
+            ),
+            "last_added_at": str(live_ring_buffer.get("last_added_at") or ""),
+            "last_evicted_at": str(live_ring_buffer.get("last_evicted_at") or ""),
+            "last_error": _safe_live_ring_error(live_ring_buffer.get("last_error")),
+            "ttl_seconds": _int(live_ring_buffer.get("ttl_seconds")),
+            "default_query_limit": _int(live_ring_buffer.get("default_query_limit")),
+            "max_query_limit": _int(live_ring_buffer.get("max_query_limit")),
+            "categories": {
+                category: {
+                    "records": _int(values.get("records")),
+                    "capacity": _int(values.get("capacity")),
+                    "utilization_percent": _number(values.get("utilization_percent")),
+                    "evicted_total": _int(values.get("evicted_total")),
+                }
+                for category, values in dict(
+                    live_ring_buffer.get("categories") or {}
+                ).items()
+                if category
+                in {
+                    "packet",
+                    "flow",
+                    "alert",
+                    "expert_info",
+                    "protocol_metadata",
+                    "agent_status",
+                    "ops_event",
+                }
+                and isinstance(values, dict)
+            },
+            "pressure_reasons": live_ring_reasons,
         },
         "persistence": {
             "enabled": bool(
