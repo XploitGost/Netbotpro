@@ -60,7 +60,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventAggregator = operationalMetrics?.event_aggregator || observability?.event_aggregator || {};
   const websocket = operationalMetrics?.websocket || observability?.websocket || {};
   const packetQueue = operationalMetrics?.packet_queue || observability?.packet_queue || {};
-  const persistence = observability?.persistence || {};
+  const persistence = operationalMetrics?.persistence || observability?.persistence || {};
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
   const capture = operationalMetrics?.capture || {};
@@ -74,15 +74,19 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const packetDetail = history.packet_detail || {};
   const alertDetail = history.alert_detail || {};
 
-  const queueSize = toNumber(persistence.queue_size);
+  const queueSize = toNumber(persistence.queue_depth ?? persistence.queue_size);
   const packetQueueDepth = toNumber(packetQueue.current_depth ?? packetQueue.queue_size);
   const packetQueueMaxSize = toNumber(packetQueue.max_size);
   const packetQueueUtilization = toNumber(packetQueue.utilization_percent);
   const packetQueueDropped = toNumber(packetQueue.dropped_total ?? packetQueue.dropped_packets);
   const packetQueueHighWater = toNumber(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark);
   const packetQueueWorkerAlive = packetQueue.worker_alive !== false;
-  const droppedWrites = toNumber(persistence.dropped_writes);
-  const avgFlushMs = toNumber(persistence.avg_flush_ms || persistence.last_flush_ms);
+  const droppedWrites = toNumber(persistence.events_dropped_total ?? persistence.dropped_writes);
+  const failedWrites = toNumber(persistence.events_failed_total ?? persistence.failed_writes);
+  const persistenceUtilization = toNumber(persistence.utilization_percent ?? persistence.queue_utilization_percent);
+  const persistenceLatencyAvg = toNumber(persistence.write_latency_ms_avg ?? persistence.write_latency_avg_ms ?? persistence.avg_flush_ms);
+  const persistenceLatencyP95 = toNumber(persistence.write_latency_ms_p95 ?? persistence.write_latency_p95_ms ?? persistence.p95_flush_ms);
+  const persistenceRetries = toNumber(persistence.retry_total ?? persistence.flush_retries);
   const wsDropped = toNumber(eventBus.dropped_messages);
   const wsClients = toNumber(websocket.clients ?? websocket.websocket_clients);
   const wsSlowClients = toNumber(websocket.slow_clients ?? websocket.websocket_slow_clients);
@@ -104,9 +108,11 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
         ? "Errors"
         : "Healthy";
 
-  const persistenceLevel = droppedWrites > 0 || toNumber(persistence.flush_errors) > 0 || toNumber(persistence.shutdown_flush_timeout) > 0
+  const persistenceLevel = normalizeLevel(persistence.health) !== "healthy"
+    ? normalizeLevel(persistence.health)
+    : droppedWrites > 0 || failedWrites > 0 || toNumber(persistence.flush_errors) > 0 || toNumber(persistence.shutdown_flush_timeout) > 0
     ? "degraded"
-    : queueSize >= 250 || avgFlushMs >= 250 || toNumber(persistence.flush_retries) > 0
+    : persistenceUtilization >= 80 || persistenceLatencyAvg >= 250 || persistenceLatencyP95 >= 500 || persistenceRetries > 0
       ? "warning"
       : "healthy";
 
@@ -168,8 +174,17 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (!capture.running) {
     recommendedActions.push("Start capture or confirm monitoring is intentionally paused.");
   }
-  if (droppedWrites > 0 || toNumber(persistence.flush_errors) > 0 || queueSize >= 250) {
-    recommendedActions.push("Check persistence backlog and export/report write health.");
+  if (droppedWrites > 0) {
+    recommendedActions.push("Persistence events were dropped due to storage pressure. Review queue size and overflow policy.");
+  }
+  if (failedWrites > 0 || toNumber(persistence.flush_errors) > 0) {
+    recommendedActions.push("Persistence writes are failing. Inspect backend logs and database availability.");
+  }
+  if (persistenceUtilization >= 80) {
+    recommendedActions.push("Persistence backlog is growing. Increase batch size, reduce capture pressure, or inspect database performance.");
+  }
+  if (persistenceLatencyAvg >= 250 || persistenceLatencyP95 >= 500) {
+    recommendedActions.push("Storage writes are slow. Check disk speed, database locks, and batch flush intervals.");
   }
   if (queryLevel !== "healthy") {
     recommendedActions.push("Check history query latency and packet/alert storage load.");
@@ -236,20 +251,20 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     {
       label: "Write Queue",
       value: String(queueSize),
-      hint: `High-water ${toNumber(persistence.queue_high_water_mark)}`,
+      hint: `${persistenceUtilization.toFixed(1)}% used | Max ${toNumber(persistence.queue_max ?? persistence.max_size)}`,
       level: persistenceLevel,
     },
     {
       label: "Dropped Writes",
       value: String(droppedWrites),
-      hint: persistence.overload_policy ? `Policy ${persistence.overload_policy}` : "No write drops",
+      hint: persistence.overflow_policy ? `Policy ${persistence.overflow_policy}` : "No write drops",
       level: droppedWrites > 0 ? "degraded" : "healthy",
     },
     {
       label: "Avg Flush",
-      value: formatMs(avgFlushMs),
-      hint: `Last ${formatMs(persistence.last_flush_ms)}`,
-      level: avgFlushMs >= 250 ? "warning" : "healthy",
+      value: formatMs(persistenceLatencyAvg),
+      hint: `P95 ${formatMs(persistenceLatencyP95)}`,
+      level: persistenceLatencyAvg >= 250 ? "warning" : "healthy",
     },
     {
       label: "Query Latency",
@@ -272,7 +287,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     {
       label: "Persistence",
       value: persistenceState,
-      hint: `Drain ${toNumber(persistence.drain_completed) ? "complete" : "active"}`,
+      hint: `P95 ${formatMs(persistenceLatencyP95)} | Failed ${failedWrites}`,
       level: persistenceLevel,
     },
   ];
@@ -303,6 +318,10 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     queryLatencyMs,
     queryErrorCount,
     persistenceState,
+    persistenceUtilization,
+    persistenceLatencyAvg,
+    persistenceLatencyP95,
+    persistenceRetries,
     summaryCards,
   };
 }

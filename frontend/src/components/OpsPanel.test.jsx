@@ -244,6 +244,7 @@ describe("OpsPanel", () => {
         observability={{
           persistence: {
             queue_size: 300,
+            utilization_percent: 85,
             dropped_writes: 0,
             flush_errors: 0,
           },
@@ -257,8 +258,109 @@ describe("OpsPanel", () => {
       />
     );
 
-    expect(screen.getByText("Check persistence backlog and export/report write health.")).toBeTruthy();
+    expect(screen.getByText("Persistence backlog is growing. Increase batch size, reduce capture pressure, or inspect database performance.")).toBeTruthy();
   });
+
+  it("renders batch persistence latency, failures, and flow write metrics", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          persistence: {
+            persistence_enabled: true,
+            queue_max: 5000,
+            queue_depth: 50,
+            queue_utilization_percent: 1,
+            events_received_total: 700,
+            events_written_total: 698,
+            events_failed_total: 2,
+            batches_written_total: 4,
+            write_latency_p95_ms: 18.5,
+            write_latency_avg_ms: 7.2,
+            retry_total: 1,
+            backlog_age_ms: 20,
+            overflow_policy: "drop_oldest",
+            worker_alive: true,
+            health: "degraded",
+            flows: { flush_batches: 4, persisted_total: 20, failed_total: 0 },
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Queue Max")).toBeTruthy();
+    expect(screen.getAllByText("5000").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Events Received").length).toBeGreaterThan(0);
+    expect(screen.getByText("Events Written")).toBeTruthy();
+    expect(screen.getByText("Failed Writes")).toBeTruthy();
+    expect(screen.getByText("Write Latency p95")).toBeTruthy();
+    expect(screen.getByText("18.5 ms")).toBeTruthy();
+    expect(screen.getByText("Pressure Reasons")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/authorization|cookie|raw-secret/i);
+  });
+
+  it.each([
+    [
+      { utilization_percent: 85 },
+      "Persistence backlog is growing. Increase batch size, reduce capture pressure, or inspect database performance.",
+    ],
+    [
+      { events_failed_total: 1 },
+      "Persistence writes are failing. Inspect backend logs and database availability.",
+    ],
+    [
+      { events_dropped_total: 1 },
+      "Persistence events were dropped due to storage pressure. Review queue size and overflow policy.",
+    ],
+    [
+      { write_latency_ms_avg: 300 },
+      "Storage writes are slow. Check disk speed, database locks, and batch flush intervals.",
+    ],
+  ])("renders persistence operational action %#", (persistence, expected) => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          persistence: {
+            enabled: true,
+            queue_depth: 1,
+            queue_max: 5000,
+            worker_alive: true,
+            health: "degraded",
+            ...persistence,
+          },
+        }}
+      />
+    );
+    expect(screen.getByText(expected)).toBeTruthy();
+  });
+
+  it.each(["healthy", "degraded", "critical"])(
+    "renders persistence %s health",
+    (health) => {
+      render(
+        <OpsPanel
+          observability={{}}
+          operationalMetrics={{
+            generated_at: "2026-06-17T10:01:00Z",
+            health,
+            capture: { running: true },
+            flows: { risk_distribution: {} },
+            persistence: { enabled: true, health, worker_alive: true },
+          }}
+        />
+      );
+      expect(screen.getAllByText(health).length).toBeGreaterThan(0);
+    }
+  );
 
   it("renders packet queue pressure and action", () => {
     render(

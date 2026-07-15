@@ -56,11 +56,24 @@ class MonitoringMetricsTests(unittest.TestCase):
                     "health": "healthy",
                 },
                 "persistence": {
+                    "enabled": True,
+                    "max_size": 5000,
                     "queue_size": 0,
+                    "utilization_percent": 0.0,
                     "queue_high_water_mark": 4,
+                    "accepted_writes": 12,
                     "persisted_packets": 12,
                     "persisted_alerts": 1,
                     "avg_flush_ms": 3.5,
+                    "p95_flush_ms": 5.0,
+                    "worker_alive": True,
+                    "health": "healthy",
+                    "flows": {
+                        "enabled": True,
+                        "persisted_total": 3,
+                        "flush_batches": 1,
+                        "worker_alive": True,
+                    },
                     "overload_policy": "drop_oldest",
                 },
                 "history": {
@@ -93,6 +106,16 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 2.0)
         self.assertEqual(payload["websocket"]["websocket_send_latency_ms_avg"], 2.0)
         self.assertEqual(payload["flows"]["total_flows"], 3)
+        self.assertEqual(payload["persistence"]["max_size"], 5000)
+        self.assertEqual(payload["persistence"]["p95_flush_ms"], 5.0)
+        self.assertEqual(payload["persistence"]["queue_max"], 5000)
+        self.assertEqual(payload["persistence"]["queue_depth"], 0)
+        self.assertIn("utilization_percent", payload["persistence"])
+        self.assertIn("events_received_total", payload["persistence"])
+        self.assertIn("write_latency_ms_avg", payload["persistence"])
+        self.assertIn("write_latency_ms_p95", payload["persistence"])
+        self.assertNotIn("Authorization", str(payload["persistence"]))
+        self.assertEqual(payload["persistence"]["flows"]["persisted_total"], 3)
         self.assertEqual(payload["pressure_reasons"], [])
 
     def test_build_monitoring_metrics_reports_pressure(self):
@@ -158,9 +181,15 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 180)
         self.assertEqual(payload["websocket"]["websocket_send_latency_ms_avg"], 180)
         self.assertEqual(payload["packet_queue"]["health"], "critical")
-        self.assertIn("packet_queue_backlog", payload["packet_queue"]["pressure_reasons"])
-        self.assertIn("packet_queue_high_water", payload["packet_queue"]["pressure_reasons"])
-        self.assertIn("packet_queue_dropped_packets", payload["packet_queue"]["pressure_reasons"])
+        self.assertIn(
+            "packet_queue_backlog", payload["packet_queue"]["pressure_reasons"]
+        )
+        self.assertIn(
+            "packet_queue_high_water", payload["packet_queue"]["pressure_reasons"]
+        )
+        self.assertIn(
+            "packet_queue_dropped_packets", payload["packet_queue"]["pressure_reasons"]
+        )
         self.assertIn("persistence_queue_backlog", payload["pressure_reasons"])
         self.assertIn("websocket_dropped_messages", payload["pressure_reasons"])
         self.assertIn("history_query_latency", payload["pressure_reasons"])
@@ -188,8 +217,37 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["health"], "critical")
         self.assertFalse(payload["packet_queue"]["worker_alive"])
         self.assertEqual(payload["packet_queue"]["health"], "critical")
-        self.assertIn("packet_queue_worker_stopped", payload["packet_queue"]["pressure_reasons"])
+        self.assertIn(
+            "packet_queue_worker_stopped", payload["packet_queue"]["pressure_reasons"]
+        )
         self.assertIn("packet_queue_worker_stopped", payload["pressure_reasons"])
+
+    def test_persistence_health_and_pressure_contribute_to_overall_ops(self):
+        payload = build_monitoring_metrics(
+            sniffer_state={"running": True},
+            observability={
+                "persistence": {
+                    "persistence_enabled": True,
+                    "persistence_queue_depth": 4900,
+                    "persistence_queue_max": 5000,
+                    "persistence_utilization_percent": 98,
+                    "persistence_events_failed_total": 3,
+                    "persistence_health": "critical",
+                    "persistence_pressure_reasons": [
+                        "persistence_write_latency",
+                        "persistence_backlog_age",
+                    ],
+                    "worker_alive": True,
+                }
+            },
+            flow_summary={},
+        )
+
+        self.assertEqual(payload["health"], "critical")
+        self.assertEqual(payload["persistence"]["health"], "critical")
+        self.assertEqual(payload["persistence"]["utilization_percent"], 98)
+        self.assertIn("persistence_write_latency", payload["pressure_reasons"])
+        self.assertIn("persistence_backlog_age", payload["pressure_reasons"])
 
     def test_build_monitoring_metrics_redacts_queue_metrics_to_counters_only(self):
         payload = build_monitoring_metrics(
@@ -205,7 +263,14 @@ class MonitoringMetricsTests(unittest.TestCase):
                     "worker_alive": True,
                 },
                 "event_bus": {},
-                "persistence": {},
+                "persistence": {
+                    "last_error": "Authorization: Bearer raw-token",
+                    "last_drop_reason": "Cookie: session=raw-token",
+                    "pressure_reasons": [
+                        "persistence_queue_backlog",
+                        "token=raw-token",
+                    ],
+                },
                 "history": {},
                 "auto_block": {},
             },
@@ -215,6 +280,14 @@ class MonitoringMetricsTests(unittest.TestCase):
         rendered = str(payload["packet_queue"])
         self.assertNotIn("raw-token", rendered)
         self.assertNotIn("Authorization", rendered)
+        persistence_rendered = str(payload["persistence"])
+        self.assertNotIn("raw-token", persistence_rendered)
+        self.assertNotIn("Authorization", persistence_rendered)
+        self.assertNotIn("Cookie", persistence_rendered)
+        self.assertEqual(
+            payload["persistence"]["pressure_reasons"],
+            ["persistence_queue_backlog"],
+        )
 
     def test_build_monitoring_metrics_redacts_websocket_drop_reasons(self):
         payload = build_monitoring_metrics(

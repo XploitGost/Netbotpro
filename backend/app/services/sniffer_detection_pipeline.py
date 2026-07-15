@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 import logging
 import threading
 import time
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from backend.app.bootstrap import ensure_project_root_on_path
@@ -12,12 +12,12 @@ from backend.app.services.app_protocols import infer_app_protocol
 
 ensure_project_root_on_path()
 
-from core.netbotpro_sniffer_core.ip_utils import is_local_ip, is_remote_ip
 from core.firewall_tools import block_ip  # noqa: E402
 from core.ids_ml import MLIDS  # noqa: E402
 from core.ids_rules_engine import RuleEngine  # noqa: E402
 from core.ids_signature import SignatureIDS  # noqa: E402
 from core.incident_engine import IncidentCorrelator  # noqa: E402
+from core.netbotpro_sniffer_core.ip_utils import is_local_ip, is_remote_ip
 from core.score_engine import AlertScorer  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -50,8 +50,12 @@ class SnifferDetectionPipeline:
         self._incidents = incidents or IncidentCorrelator(window_sec=300)
         self._auto_block_lock = threading.Lock()
         self._auto_block_recent: dict[str, float] = {}
-        self._dns_tunnel_state: dict[tuple[str, str], list[datetime]] = defaultdict(list)
-        self._tls_no_sni_state: dict[tuple[str, str, int], list[datetime]] = defaultdict(list)
+        self._dns_tunnel_state: dict[tuple[str, str], list[datetime]] = defaultdict(
+            list
+        )
+        self._tls_no_sni_state: dict[tuple[str, str, int], list[datetime]] = (
+            defaultdict(list)
+        )
         self._auto_block_stats = {
             "blocked_total": 0,
             "cooldown_skips": 0,
@@ -63,7 +67,13 @@ class SnifferDetectionPipeline:
 
     def analyze(self, packet: dict[str, Any]) -> list[dict[str, Any]]:
         settings = self._settings_provider()
-        packet.update({key: value for key, value in infer_app_protocol(packet).items() if not packet.get(key)})
+        packet.update(
+            {
+                key: value
+                for key, value in infer_app_protocol(packet).items()
+                if not packet.get(key)
+            }
+        )
         raw_alerts: list[dict[str, Any]] = []
 
         if settings.get("ids_signature_enabled", True):
@@ -102,7 +112,9 @@ class SnifferDetectionPipeline:
         self._maybe_auto_block(settings, alerts)
         return alerts
 
-    def _build_alert_payload(self, packet: dict[str, Any], alert: dict[str, Any]) -> dict[str, Any]:
+    def _build_alert_payload(
+        self, packet: dict[str, Any], alert: dict[str, Any]
+    ) -> dict[str, Any]:
         try:
             self._scorer.enrich_alert(packet, alert, sig_engine=self._ids_sig)
             self._incidents.enrich_alert(packet, alert)
@@ -123,58 +135,103 @@ class SnifferDetectionPipeline:
             "score_raw": float(alert.get("score_raw", alert.get("score", 0.0)) or 0.0),
             "incident_id": alert.get("incident_id", ""),
             "incident_count": int(alert.get("incident_count", 1) or 1),
-            "incident_score": float(alert.get("incident_score", alert.get("score", 0.0)) or 0.0),
+            "incident_score": float(
+                alert.get("incident_score", alert.get("score", 0.0)) or 0.0
+            ),
             "score": float(alert.get("score", 0.0) or 0.0),
             "detail": alert.get("detail") or packet.get("summary") or "",
             "packet_id": alert.get("packet_id") or packet.get("id"),
             "remote_ip": alert.get("remote_ip") or packet.get("remote_ip"),
             "app_protocol": alert.get("app_protocol") or packet.get("app_protocol"),
             "app_category": alert.get("app_category") or packet.get("app_category"),
-            "app_confidence": alert.get("app_confidence") or packet.get("app_confidence"),
-            "protocol_basis": alert.get("protocol_basis") or packet.get("protocol_basis"),
-            "protocol_notes": alert.get("protocol_notes") or packet.get("protocol_notes"),
-            "protocol_handshake": alert.get("protocol_handshake") or packet.get("protocol_handshake"),
-            "protocol_unusual_port": alert.get("protocol_unusual_port")
-            if alert.get("protocol_unusual_port") is not None
-            else packet.get("protocol_unusual_port"),
+            "app_confidence": alert.get("app_confidence")
+            or packet.get("app_confidence"),
+            "protocol_basis": alert.get("protocol_basis")
+            or packet.get("protocol_basis"),
+            "protocol_notes": alert.get("protocol_notes")
+            or packet.get("protocol_notes"),
+            "protocol_handshake": alert.get("protocol_handshake")
+            or packet.get("protocol_handshake"),
+            "protocol_unusual_port": (
+                alert.get("protocol_unusual_port")
+                if alert.get("protocol_unusual_port") is not None
+                else packet.get("protocol_unusual_port")
+            ),
             "l7": packet.get("l7"),
             "dns_qname": alert.get("dns_qname") or packet.get("dns_qname"),
-            "dns_qtype": alert.get("dns_qtype") if alert.get("dns_qtype") is not None else packet.get("dns_qtype"),
-            "dns_rcode": alert.get("dns_rcode") if alert.get("dns_rcode") is not None else packet.get("dns_rcode"),
+            "dns_qtype": (
+                alert.get("dns_qtype")
+                if alert.get("dns_qtype") is not None
+                else packet.get("dns_qtype")
+            ),
+            "dns_rcode": (
+                alert.get("dns_rcode")
+                if alert.get("dns_rcode") is not None
+                else packet.get("dns_rcode")
+            ),
             "http_method": alert.get("http_method") or packet.get("http_method"),
             "http_host": alert.get("http_host") or packet.get("http_host"),
             "http_path": alert.get("http_path") or packet.get("http_path"),
-            "http_status": alert.get("http_status") if alert.get("http_status") is not None else packet.get("http_status"),
+            "http_status": (
+                alert.get("http_status")
+                if alert.get("http_status") is not None
+                else packet.get("http_status")
+            ),
             "http_reason": alert.get("http_reason") or packet.get("http_reason"),
-            "http_user_agent": alert.get("http_user_agent") or packet.get("http_user_agent"),
-            "http_content_type": alert.get("http_content_type") or packet.get("http_content_type"),
+            "http_user_agent": alert.get("http_user_agent")
+            or packet.get("http_user_agent"),
+            "http_content_type": alert.get("http_content_type")
+            or packet.get("http_content_type"),
             "sni": alert.get("sni") or packet.get("tls_sni") or packet.get("sni"),
             "tls_version": alert.get("tls_version") or packet.get("tls_version"),
-            "tls_alpn": alert.get("tls_alpn") or packet.get("tls_alpn") or packet.get("alpn"),
+            "tls_alpn": alert.get("tls_alpn")
+            or packet.get("tls_alpn")
+            or packet.get("alpn"),
             "ja3": alert.get("ja3") or packet.get("ja3"),
             "ja3_str": alert.get("ja3_str") or packet.get("ja3_str"),
             "ja4": alert.get("ja4") or packet.get("ja4"),
-            "payload_len": alert.get("payload_len") if alert.get("payload_len") is not None else packet.get("payload_len"),
+            "payload_len": (
+                alert.get("payload_len")
+                if alert.get("payload_len") is not None
+                else packet.get("payload_len")
+            ),
             "payload_hex": alert.get("payload_hex") or packet.get("payload_hex"),
             "payload_ascii": alert.get("payload_ascii") or packet.get("payload_ascii"),
-            "payload_binary_like": alert.get("payload_binary_like")
-            if alert.get("payload_binary_like") is not None
-            else packet.get("payload_binary_like"),
-            "payload_entropy": alert.get("payload_entropy") if alert.get("payload_entropy") is not None else packet.get("payload_entropy"),
-            "payload_printable_ratio": alert.get("payload_printable_ratio")
-            if alert.get("payload_printable_ratio") is not None
-            else packet.get("payload_printable_ratio"),
+            "payload_binary_like": (
+                alert.get("payload_binary_like")
+                if alert.get("payload_binary_like") is not None
+                else packet.get("payload_binary_like")
+            ),
+            "payload_entropy": (
+                alert.get("payload_entropy")
+                if alert.get("payload_entropy") is not None
+                else packet.get("payload_entropy")
+            ),
+            "payload_printable_ratio": (
+                alert.get("payload_printable_ratio")
+                if alert.get("payload_printable_ratio") is not None
+                else packet.get("payload_printable_ratio")
+            ),
             "pid": alert.get("pid") or packet.get("pid"),
             "process_name": alert.get("process_name") or packet.get("process_name"),
             "parent_pid": alert.get("parent_pid") or packet.get("parent_pid"),
-            "parent_process_name": alert.get("parent_process_name") or packet.get("parent_process_name"),
-            "executable_path": alert.get("executable_path") or packet.get("executable_path"),
-            "attribution_confidence": alert.get("attribution_confidence") or packet.get("attribution_confidence"),
-            "attribution_reason_unavailable": alert.get("attribution_reason_unavailable") or packet.get("attribution_reason_unavailable"),
-            "attribution_source": alert.get("attribution_source") or packet.get("attribution_source"),
+            "parent_process_name": alert.get("parent_process_name")
+            or packet.get("parent_process_name"),
+            "executable_path": alert.get("executable_path")
+            or packet.get("executable_path"),
+            "attribution_confidence": alert.get("attribution_confidence")
+            or packet.get("attribution_confidence"),
+            "attribution_reason_unavailable": alert.get(
+                "attribution_reason_unavailable"
+            )
+            or packet.get("attribution_reason_unavailable"),
+            "attribution_source": alert.get("attribution_source")
+            or packet.get("attribution_source"),
         }
 
-    def _detect_application_alerts(self, packet: dict[str, Any]) -> list[dict[str, Any]]:
+    def _detect_application_alerts(
+        self, packet: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         alerts: list[dict[str, Any]] = []
         now = datetime.now(timezone.utc)
         self._cleanup_app_state(now)
@@ -197,7 +254,9 @@ class SnifferDetectionPipeline:
 
         return alerts
 
-    def _detect_dns_tunneling(self, packet: dict[str, Any], now: datetime) -> dict[str, Any] | None:
+    def _detect_dns_tunneling(
+        self, packet: dict[str, Any], now: datetime
+    ) -> dict[str, Any] | None:
         if str(packet.get("app_protocol") or "").upper() != "DNS":
             return None
         qname = str(packet.get("dns_qname") or "").strip().strip(".")
@@ -205,10 +264,18 @@ class SnifferDetectionPipeline:
             return None
         labels = [part for part in qname.split(".") if part]
         longest_label = max((len(part) for part in labels), default=0)
-        suspicious = len(qname) >= 52 or len(labels) >= 5 or longest_label >= 24 or int(packet.get("dns_qtype") or 0) == 16
+        suspicious = (
+            len(qname) >= 52
+            or len(labels) >= 5
+            or longest_label >= 24
+            or int(packet.get("dns_qtype") or 0) == 16
+        )
         if not suspicious:
             return None
-        key = (str(packet.get("src") or "-"), str(packet.get("remote_ip") or packet.get("dst") or "-"))
+        key = (
+            str(packet.get("src") or "-"),
+            str(packet.get("remote_ip") or packet.get("dst") or "-"),
+        )
         samples = self._dns_tunnel_state[key]
         cutoff = now - timedelta(seconds=DNS_TUNNEL_WINDOW_SEC)
         samples[:] = [value for value in samples if value >= cutoff]
@@ -235,7 +302,19 @@ class SnifferDetectionPipeline:
         path = str(packet.get("http_path") or "").lower()
         if method not in {"POST", "PUT", "PATCH"}:
             return None
-        if not any(token in path for token in ("login", "signin", "auth", "token", "password", "session", "oauth", "wp-login")):
+        if not any(
+            token in path
+            for token in (
+                "login",
+                "signin",
+                "auth",
+                "token",
+                "password",
+                "session",
+                "oauth",
+                "wp-login",
+            )
+        ):
             return None
         host = str(packet.get("http_host") or packet.get("dst") or "-")
         return {
@@ -250,7 +329,9 @@ class SnifferDetectionPipeline:
             "http_path": path or "/",
         }
 
-    def _detect_tls_no_sni(self, packet: dict[str, Any], now: datetime) -> dict[str, Any] | None:
+    def _detect_tls_no_sni(
+        self, packet: dict[str, Any], now: datetime
+    ) -> dict[str, Any] | None:
         app_protocol = str(packet.get("app_protocol") or "").upper()
         if app_protocol not in {"TLS", "HTTPS", "QUIC"}:
             return None
@@ -261,6 +342,12 @@ class SnifferDetectionPipeline:
             return None
         sni = str(packet.get("tls_sni") or packet.get("sni") or "").strip()
         if sni:
+            return None
+        handshake = str(packet.get("protocol_handshake") or "").lower()
+        # Count TLS session starts, not every encrypted data packet. QUIC and
+        # port-only HTTPS hints commonly hide SNI and otherwise create a false
+        # beacon alert for ordinary browser traffic.
+        if "clienthello" not in handshake and "client hello" not in handshake:
             return None
         key = (
             str(packet.get("src") or "-"),
@@ -291,7 +378,17 @@ class SnifferDetectionPipeline:
         if str(packet.get("direction") or "").upper() != "INCOMING":
             return None
         path = str(packet.get("http_path") or "").lower()
-        if not any(token in path for token in ("/admin", "wp-admin", "phpmyadmin", "/manager", "/console", "/login")):
+        if not any(
+            token in path
+            for token in (
+                "/admin",
+                "wp-admin",
+                "phpmyadmin",
+                "/manager",
+                "/console",
+                "/login",
+            )
+        ):
             return None
         host = str(packet.get("http_host") or packet.get("dst") or "-")
         method = str(packet.get("http_method") or "GET").upper()
@@ -307,7 +404,9 @@ class SnifferDetectionPipeline:
             "http_path": path or "/",
         }
 
-    def _maybe_auto_block(self, settings: dict[str, Any], alerts: list[dict[str, Any]]) -> None:
+    def _maybe_auto_block(
+        self, settings: dict[str, Any], alerts: list[dict[str, Any]]
+    ) -> None:
         if not settings.get("auto_block"):
             return
 
@@ -370,13 +469,19 @@ class SnifferDetectionPipeline:
             self._auto_block_stats["blocked_total"] += 1
             self._auto_block_stats["last_blocked_at"] = now
             if len(self._auto_block_recent) > AUTO_BLOCK_MAX_TRACKED:
-                expired = sorted(self._auto_block_recent.items(), key=lambda item: item[1])[: len(self._auto_block_recent) - AUTO_BLOCK_MAX_TRACKED]
+                expired = sorted(
+                    self._auto_block_recent.items(), key=lambda item: item[1]
+                )[: len(self._auto_block_recent) - AUTO_BLOCK_MAX_TRACKED]
                 for old_ip, _ in expired:
                     self._auto_block_recent.pop(old_ip, None)
 
     def _cleanup_app_state(self, now: datetime) -> None:
-        self._prune_state(self._dns_tunnel_state, now - timedelta(seconds=DNS_TUNNEL_WINDOW_SEC))
-        self._prune_state(self._tls_no_sni_state, now - timedelta(seconds=TLS_NO_SNI_WINDOW_SEC))
+        self._prune_state(
+            self._dns_tunnel_state, now - timedelta(seconds=DNS_TUNNEL_WINDOW_SEC)
+        )
+        self._prune_state(
+            self._tls_no_sni_state, now - timedelta(seconds=TLS_NO_SNI_WINDOW_SEC)
+        )
 
     @staticmethod
     def _prune_state(bucket: dict[Any, list[datetime]], cutoff: datetime) -> None:

@@ -26,6 +26,7 @@ Capture
 -> Bounded Packet Intake Queue
 -> Packet Queue Worker
 -> Existing Packet Processing
+-> Bounded Batch Persistence (packets, alerts, flow snapshots)
 -> Event Aggregator
 -> Batched WebSocket Updates
 -> Flow / Detection / Persistence / UI
@@ -207,6 +208,79 @@ The Operations UI shows:
 Recommended actions are emitted when utilization is high, drops occur, the
 worker is not alive, or the high-water mark approaches capacity.
 
+## Batch Persistence / Storage Backpressure
+
+Step 4 places redacted packet, alert, and flow records behind one
+`BatchPersistenceWriter`. Producers enqueue a standard envelope with `type`,
+`timestamp`, `payload`, `source`, and `priority`. Existing SQLite bulk APIs then
+write each group transactionally. High and critical alerts flush early. Audit
+records and user-requested report exports intentionally remain synchronous.
+
+```text
+Packet Processing / Flow Engine / Detection
+-> Central Redaction
+-> Bounded Persistence Queue
+-> Size, Time, Priority, Manual, or Shutdown Flush
+-> SQLite Batch Transaction
+```
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `NETBOT_PERSISTENCE_BATCH_ENABLED` | `true` | Async batching; `false` uses synchronous compatibility writes. |
+| `NETBOT_PERSISTENCE_PACKET_BATCH_SIZE` | `500` | Packet size flush. |
+| `NETBOT_PERSISTENCE_PACKET_FLUSH_MS` | `1000` | Maximum packet wait. |
+| `NETBOT_PERSISTENCE_FLOW_BATCH_SIZE` | `250` | Flow size flush. |
+| `NETBOT_PERSISTENCE_FLOW_FLUSH_MS` | `1500` | Maximum flow wait. |
+| `NETBOT_PERSISTENCE_ALERT_BATCH_SIZE` | `100` | Alert size flush. |
+| `NETBOT_PERSISTENCE_ALERT_FLUSH_MS` | `1000` | Maximum normal-alert wait. |
+| `NETBOT_PERSISTENCE_AGENT_BATCH_SIZE` | `100` | Reserved summary-history size. |
+| `NETBOT_PERSISTENCE_AGENT_FLUSH_MS` | `3000` | Reserved summary-history window. |
+| `NETBOT_PERSISTENCE_QUEUE_MAX` | `5000` | Bounded pending write units. |
+| `NETBOT_PERSISTENCE_RETRY_MAX` | `3` | Retries after the initial attempt. |
+| `NETBOT_PERSISTENCE_RETRY_BACKOFF_MS` | `250` | Exponential retry base. |
+| `NETBOT_PERSISTENCE_OVERFLOW_POLICY` | `drop_oldest` | `drop_oldest`, `drop_newest`, or `reject_new`. |
+
+Tune batch windows before enlarging the queue for heavier authorized capture.
+A larger queue costs memory and increases record age. Every drop is counted,
+logged with a fixed safe reason, and exposed in Ops.
+
+Invalid booleans, integers, batch sizes, flush windows, retry values, and
+overflow policies fall back to the defaults above. Retry is finite and uses
+exponential backoff. `drop_oldest` keeps recent work, `drop_newest` preserves
+queued order, and `reject_new` explicitly refuses new work. All three policies
+increment visible drop metrics when pressure causes loss.
+
+`/api/monitoring/metrics` exposes the clean `persistence` fields:
+
+- `enabled`, `health`, `queue_depth`, `queue_max`, and `utilization_percent`;
+- `batches_written_total`, `events_received_total`, and
+  `events_written_total`;
+- `events_dropped_total`, `events_failed_total`, and `retry_total`;
+- `last_flush_at`, safe `last_error`, and safe `last_drop_reason`;
+- `write_latency_ms_avg`, `write_latency_ms_p95`, and `backlog_age_ms`;
+- `pressure_reasons`.
+
+Health is `healthy` for normal latency and backlog with no meaningful loss,
+`degraded` for high utilization, repeated retry, slow writes, old backlog, or
+initial loss, and `critical` for a stopped worker, near-full queue, repeated
+terminal failures, or significant drops. Persistence pressure contributes to
+overall Ops health. Metrics never expose queued payloads.
+
+The Ops panel renders every field above and gives focused actions for growing
+backlog, slow disk/database writes, failed writes, and dropped events.
+
+Packet rows, flow snapshots, and alerts are the integrated high-pressure paths.
+Protocol metadata travels inside the redacted packet/flow records. Agent
+heartbeat and telemetry categories are supported by the envelope, but the
+existing reliable summary-only Agent storage path is intentionally unchanged.
+Reports stay synchronous so callers receive a definite result. Audit stays
+outside batching, writes immediately under its ordering lock, and is tested for
+ordered redacted output.
+
+This step does not add a worker pool, database sharding, ClickHouse, benchmark
+claims, or a new retention engine. Agent history remains on its existing safe
+summary path until integration can preserve heartbeat reliability.
+
 ## WebSocket Batching / Event Aggregator
 
 Step 3 adds a backend Event Aggregator between packet processing and websocket
@@ -342,7 +416,6 @@ This is not the complete performance engine yet.
 Not implemented yet:
 
 - Flow-aware Worker Pool;
-- Batch Persistence;
 - Live Ring Buffer;
 - Benchmark / Soak Tests;
 - Optional ClickHouse or external metrics backend.
@@ -354,8 +427,22 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Batch Persistence
-2. Flow-aware Worker Pool
-3. Live Ring Buffer
-4. Benchmark and Soak Tests
-5. Performance Validation Report
+1. Flow-aware Worker Pool
+2. Live Ring Buffer
+3. Benchmark and Soak Tests
+4. Performance Validation Report
+5. Service Attribution / Destination Intelligence
+6. Incident / Correlation Engine
+7. Read-only AI Analyst
+
+### Recorded Product Direction
+
+After the remaining performance work, NetBotPro will add conservative Service
+Attribution / Destination Intelligence. It will correlate process metadata
+with DNS, TLS SNI, HTTP Host, QUIC-visible metadata, ASN, and local service
+fingerprints. Missing or weak evidence must remain `Unknown / Encrypted`.
+
+Incident correlation follows attribution, and a read-only AI Analyst follows
+incident quality validation. None of these roadmap items authorize TLS
+decryption, MITM, credential collection, command/control, autonomous actions,
+or Agent raw packet, payload, or PCAP forwarding.

@@ -62,7 +62,9 @@ def flow_id_for(packet: dict[str, Any]) -> str:
     return f"flow-{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
 
 
-def _safe_packet_sample(packet: dict[str, Any], protocol: dict[str, Any]) -> dict[str, Any]:
+def _safe_packet_sample(
+    packet: dict[str, Any], protocol: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "id": packet.get("id"),
         "timestamp": _timestamp(packet),
@@ -124,6 +126,12 @@ class FlowEngine:
                     "bytes_received": 0,
                     "direction": direction,
                     "process_name": packet.get("process_name"),
+                    "service_name": packet.get("service_name") or "Unknown",
+                    "service_category": packet.get("service_category") or "Unknown",
+                    "service_domain": packet.get("service_domain") or "",
+                    "service_confidence": packet.get("service_confidence") or "unknown",
+                    "service_reasons": list(packet.get("service_reasons") or []),
+                    "service_sources": list(packet.get("service_sources") or []),
                     "country": packet.get("country_name") or packet.get("country"),
                     "asn": packet.get("asn"),
                     "related_alert_ids": [],
@@ -159,6 +167,17 @@ class FlowEngine:
             else:
                 flow["bytes_sent"] += length
             flow["metadata"].update(protocol["metadata"])
+            if packet.get("service_name"):
+                flow.update(
+                    {
+                        "service_name": packet.get("service_name"),
+                        "service_category": packet.get("service_category"),
+                        "service_domain": packet.get("service_domain"),
+                        "service_confidence": packet.get("service_confidence"),
+                        "service_reasons": list(packet.get("service_reasons") or []),
+                        "service_sources": list(packet.get("service_sources") or []),
+                    }
+                )
             if len(flow["sample_packets"]) < _MAX_SAMPLE_PACKETS:
                 flow["sample_packets"].append(_safe_packet_sample(packet, protocol))
 
@@ -185,7 +204,10 @@ class FlowEngine:
                 "TLS": "tls_handshake_metadata",
             }.get(protocol["app_protocol"])
             if event_type and protocol["metadata"]:
-                if not flow["timeline"] or flow["timeline"][-1].get("metadata") != protocol["metadata"]:
+                if (
+                    not flow["timeline"]
+                    or flow["timeline"][-1].get("metadata") != protocol["metadata"]
+                ):
                     flow["timeline"].append(
                         timeline_event(
                             timestamp,
@@ -196,7 +218,10 @@ class FlowEngine:
                         )
                     )
 
-            if protocol["app_protocol"] == "DNS" and int(packet.get("dns_rcode") or 0) == 3:
+            if (
+                protocol["app_protocol"] == "DNS"
+                and int(packet.get("dns_rcode") or 0) == 3
+            ):
                 flow["dns_failures"] += 1
 
             for alert in alerts:
@@ -210,7 +235,11 @@ class FlowEngine:
                         timestamp,
                         "alert_triggered",
                         redact_sensitive_text(
-                            str(alert.get("attack_type") or alert.get("detail") or "Alert")
+                            str(
+                                alert.get("attack_type")
+                                or alert.get("detail")
+                                or "Alert"
+                            )
                         ),
                         severity=severity,
                         related_packet_id=str(packet.get("id") or "") or None,
@@ -250,27 +279,28 @@ class FlowEngine:
             value = str(filters.get(field) or "").strip().lower()
             if not value:
                 continue
-            target = "app_protocol" if field == "protocol" else "risk_level" if field == "risk" else field
+            target = (
+                "app_protocol"
+                if field == "protocol"
+                else "risk_level" if field == "risk" else field
+            )
             flows = [
-                flow
-                for flow in flows
-                if value in str(flow.get(target) or "").lower()
+                flow for flow in flows if value in str(flow.get(target) or "").lower()
             ]
         port = int(filters.get("port") or 0)
         if port:
             flows = [
                 flow
                 for flow in flows
-                if port in {int(flow.get("src_port") or 0), int(flow.get("dst_port") or 0)}
+                if port
+                in {int(flow.get("src_port") or 0), int(flow.get("dst_port") or 0)}
             ]
         if filters.get("has_alerts"):
             flows = [flow for flow in flows if flow.get("related_alert_ids")]
         since = str(filters.get("since") or "").strip()
         if since:
             flows = [
-                flow
-                for flow in flows
-                if str(flow.get("last_seen") or "") >= since
+                flow for flow in flows if str(flow.get("last_seen") or "") >= since
             ]
         sort = str(filters.get("sort") or "last_seen")
         sort_key = {
@@ -280,9 +310,11 @@ class FlowEngine:
             "alerts": "related_alert_ids",
         }.get(sort, "last_seen")
         flows.sort(
-            key=lambda item: len(item.get(sort_key) or [])
-            if sort_key == "related_alert_ids"
-            else item.get(sort_key) or 0,
+            key=lambda item: (
+                len(item.get(sort_key) or [])
+                if sort_key == "related_alert_ids"
+                else item.get(sort_key) or 0
+            ),
             reverse=True,
         )
         return flows[: max(1, min(int(filters.get("limit") or 100), 500))]
@@ -308,15 +340,26 @@ class FlowEngine:
                         "flows_count": len(flows),
                         "packets_count": sum(item["packets_count"] for item in flows),
                         "bytes_total": sum(item["bytes_total"] for item in flows),
-                        "risk_score": max((item["risk_score"] for item in flows), default=0),
+                        "risk_score": max(
+                            (item["risk_score"] for item in flows), default=0
+                        ),
                         "risk_level": max(
                             (item["risk_level"] for item in flows),
-                            key=lambda value: {"low": 0, "medium": 1, "high": 2, "critical": 3}[value],
+                            key=lambda value: {
+                                "low": 0,
+                                "medium": 1,
+                                "high": 2,
+                                "critical": 3,
+                            }[value],
                             default="low",
                         ),
                         "protocols": sorted({item["app_protocol"] for item in flows}),
-                        "first_seen": min((item["first_seen"] for item in flows), default=""),
-                        "last_seen": max((item["last_seen"] for item in flows), default=""),
+                        "first_seen": min(
+                            (item["first_seen"] for item in flows), default=""
+                        ),
+                        "last_seen": max(
+                            (item["last_seen"] for item in flows), default=""
+                        ),
                     }
                 )
         return sorted(items, key=lambda item: item["last_seen"], reverse=True)
@@ -324,9 +367,7 @@ class FlowEngine:
     def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
         for item in self.conversations():
             if item["conversation_id"] == conversation_id:
-                item["flows"] = [
-                    self.get_flow(flow_id) for flow_id in item["flow_ids"]
-                ]
+                item["flows"] = [self.get_flow(flow_id) for flow_id in item["flow_ids"]]
                 item["timeline"] = sorted(
                     [
                         event

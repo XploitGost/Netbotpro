@@ -33,9 +33,53 @@ class _NoopIncidents:
 
 
 class SnifferDetectionPipelineTests(unittest.TestCase):
+    def test_encrypted_data_packets_without_sni_do_not_create_false_beacon_alerts(self):
+        pipeline = SnifferDetectionPipeline(settings_provider=lambda: {})
+        packet = {
+            "src": "10.0.0.5",
+            "dst": "142.251.156.4",
+            "remote_ip": "142.251.156.4",
+            "dport": 443,
+            "proto": "UDP",
+            "app_protocol": "HTTPS",
+            "direction": "OUTGOING",
+            "org": "Google LLC",
+        }
+        alerts = []
+        for _ in range(10):
+            alerts.extend(pipeline._detect_application_alerts(dict(packet)))
+        self.assertNotIn(
+            "TLS Without SNI / Beacon Pattern",
+            {item.get("attack_type") for item in alerts},
+        )
+
+    def test_repeated_client_hello_without_sni_can_still_alert(self):
+        pipeline = SnifferDetectionPipeline(settings_provider=lambda: {})
+        packet = {
+            "src": "10.0.0.5",
+            "dst": "8.8.8.8",
+            "remote_ip": "8.8.8.8",
+            "dport": 443,
+            "proto": "TCP",
+            "app_protocol": "TLS",
+            "direction": "OUTGOING",
+            "protocol_handshake": "TLS ClientHello",
+        }
+        alerts = []
+        for _ in range(4):
+            alerts.extend(pipeline._detect_application_alerts(dict(packet)))
+        self.assertIn(
+            "TLS Without SNI / Beacon Pattern",
+            {item.get("attack_type") for item in alerts},
+        )
+
     def test_pipeline_enriches_packets_with_app_protocol_metadata(self):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": False, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": False,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_NoopEngine(),
@@ -60,7 +104,11 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
 
     def test_pipeline_marks_http_on_unusual_port(self):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": False, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": False,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_NoopEngine(),
@@ -88,7 +136,11 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
 
     def test_pipeline_detects_repeated_dns_tunneling_pattern(self):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": False, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": False,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_NoopEngine(),
@@ -118,7 +170,11 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
 
     def test_pipeline_detects_cleartext_http_auth(self):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": False, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": False,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_NoopEngine(),
@@ -146,10 +202,16 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
         self.assertFalse(alerts[0]["protocol_unusual_port"])
         self.assertEqual(alerts[0]["protocol_handshake"], "HTTP request")
 
-    @patch("backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True)
+    @patch(
+        "backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True
+    )
     def test_auto_block_uses_cooldown_and_skips_duplicate_blocks(self, mock_block_ip):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": True, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": True,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_RuleEngine(),
@@ -168,10 +230,16 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
         self.assertEqual(stats["blocked_total"], 1)
         self.assertEqual(stats["cooldown_skips"], 1)
 
-    @patch("backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True)
+    @patch(
+        "backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True
+    )
     def test_auto_block_skips_private_source_ips(self, mock_block_ip):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": True, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": True,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_RuleEngine(),
@@ -179,15 +247,23 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
             incidents=_NoopIncidents(),
         )
 
-        pipeline.analyze({"src": "192.168.1.20", "dst": "10.0.0.2", "proto": "TCP", "ts": "now"})
+        pipeline.analyze(
+            {"src": "192.168.1.20", "dst": "10.0.0.2", "proto": "TCP", "ts": "now"}
+        )
 
         self.assertEqual(mock_block_ip.call_count, 0)
         self.assertEqual(pipeline.stats()["private_ip_skips"], 1)
 
-    @patch("backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True)
+    @patch(
+        "backend.app.services.sniffer_detection_pipeline.block_ip", return_value=True
+    )
     def test_auto_block_skips_cgnat_source_ips(self, mock_block_ip):
         pipeline = SnifferDetectionPipeline(
-            settings_provider=lambda: {"auto_block": True, "ids_signature_enabled": False, "ids_ml_enabled": False},
+            settings_provider=lambda: {
+                "auto_block": True,
+                "ids_signature_enabled": False,
+                "ids_ml_enabled": False,
+            },
             ids_sig=_NoopEngine(),
             ids_ml=_NoopEngine(),
             rule_engine=_RuleEngine(),
@@ -195,7 +271,9 @@ class SnifferDetectionPipelineTests(unittest.TestCase):
             incidents=_NoopIncidents(),
         )
 
-        pipeline.analyze({"src": "100.64.10.20", "dst": "10.0.0.2", "proto": "TCP", "ts": "now"})
+        pipeline.analyze(
+            {"src": "100.64.10.20", "dst": "10.0.0.2", "proto": "TCP", "ts": "now"}
+        )
 
         self.assertEqual(mock_block_ip.call_count, 0)
         self.assertEqual(pipeline.stats()["private_ip_skips"], 1)

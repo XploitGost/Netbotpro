@@ -186,6 +186,17 @@ Use acceptance, require token authorization, and create audit records.
 
 ## Performance Pipeline Foundation
 
+### Batch Persistence Foundation
+
+`BatchPersistenceWriter` is the storage-pressure boundary for packet, alert,
+and flow history. It accepts centrally redacted typed envelopes, keeps pending
+work bounded, flushes by size/time/priority/manual request/shutdown, and uses
+the existing SQLite bulk writes. Retry is finite and exponentially backed off;
+overflow and terminal failures are visible in operational metrics.
+
+Audit logging stays outside this asynchronous path so security and control
+records retain immediate ordering and reliability.
+
 The current performance foundation is intentionally narrow. `BoundedPacketQueue`
 sits between capture callbacks and the existing packet processing path. The
 queue has a fixed maximum size, explicit `drop_oldest` and `drop_newest`
@@ -198,9 +209,13 @@ status, and pressure reasons. This makes backpressure visible without exposing
 packet payloads, credentials, cookies, authorization headers, sessions, or
 tokens.
 
-This foundation now includes bounded packet intake and WebSocket event
-aggregation. It does not include the future batch persistence, live ring buffer,
-or flow-aware worker pool steps.
+This foundation now includes bounded packet intake, WebSocket event
+aggregation, and bounded batch persistence. Packet and alert rows share
+transactional SQLite batches; flow snapshots are coalesced by `flow_id` and
+written with batched upserts. Queue depth, utilization, dropped/failed writes,
+write latency, retry state, and worker liveness are visible in Ops metrics.
+User-triggered report files remain synchronous and outside the packet-rate
+queue. Live ring buffer and flow-aware worker pool work remain future steps.
 
 ## WebSocket Event Aggregator
 

@@ -8,13 +8,15 @@ from datetime import datetime
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
-from backend.app.services.event_bus import EventBus
 from backend.app.services.capture_policy import current_capture_policy
+from backend.app.services.event_bus import EventBus
 from backend.app.services.flow_service import FlowService
 from backend.app.services.packet_queue import BoundedPacketQueue
+from backend.app.services.service_attribution import enrich_service_attribution
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
-from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
+from backend.app.services.sniffer_detection_pipeline import \
+    SnifferDetectionPipeline
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
 from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
@@ -23,7 +25,9 @@ from core.flow_engine import flow_id_for
 ensure_project_root_on_path()
 
 logger = logging.getLogger(__name__)
-CAPTURE_START_TIMEOUT_SEC = float(os.environ.get("NETBOT_CAPTURE_START_TIMEOUT_SEC", "15.0"))
+CAPTURE_START_TIMEOUT_SEC = float(
+    os.environ.get("NETBOT_CAPTURE_START_TIMEOUT_SEC", "15.0")
+)
 PACKET_QUEUE_MAX_SIZE = int(os.environ.get("NETBOT_PACKET_QUEUE_MAX_SIZE", "2000"))
 PACKET_QUEUE_OVERFLOW_POLICY = os.environ.get(
     "NETBOT_PACKET_QUEUE_OVERFLOW_POLICY",
@@ -56,10 +60,16 @@ class SnifferService:
         self._packet_seq = 0
         self._alert_seq = 0
         self._state = SnifferDashboardState()
-        self._detection_pipeline = SnifferDetectionPipeline(settings_provider=get_settings_snapshot)
-        self._persistence = SnifferPersistence()
-        self._publisher = SnifferEventPublisher(event_bus)
+        self._detection_pipeline = SnifferDetectionPipeline(
+            settings_provider=get_settings_snapshot
+        )
         self._flow_service = flow_service or FlowService()
+        flow_writer = getattr(self._flow_service, "write_snapshots", None)
+        self._central_flow_persistence = callable(flow_writer)
+        self._persistence = SnifferPersistence(
+            flow_writer=flow_writer if callable(flow_writer) else None
+        )
+        self._publisher = SnifferEventPublisher(event_bus)
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
@@ -84,7 +94,9 @@ class SnifferService:
     def _start_capture_session(self, iface: str | None) -> tuple[CaptureSession, str]:
         preflight = self.capture_preflight()
         if not preflight.get("ready"):
-            raise CaptureStartUnavailableError(self._first_blocking_preflight_detail(preflight), preflight=preflight)
+            raise CaptureStartUnavailableError(
+                self._first_blocking_preflight_detail(preflight), preflight=preflight
+            )
         iface = self._resolve_local_interface_or_raise(iface)
         if iface is None:
             recommended = str(preflight.get("recommended_interface") or "").strip()
@@ -99,11 +111,15 @@ class SnifferService:
                 engine.start(iface=iface)
                 actual_iface = engine.selected_iface() or iface or "default"
                 result["engine"] = engine
-                result["iface"] = self._capture_provider.describe_interface(actual_iface) or str(actual_iface)
+                result["iface"] = self._capture_provider.describe_interface(
+                    actual_iface
+                ) or str(actual_iface)
             except BaseException as exc:  # pragma: no cover - defensive path
                 error["exc"] = exc
 
-        worker = threading.Thread(target=runner, name="netbotpro-capture-start", daemon=True)
+        worker = threading.Thread(
+            target=runner, name="netbotpro-capture-start", daemon=True
+        )
         worker.start()
         worker.join(CAPTURE_START_TIMEOUT_SEC)
 
@@ -165,14 +181,20 @@ class SnifferService:
         except Exception:
             logger.exception("Packet analysis pipeline crashed")
             alerts = []
+        enrich_service_attribution(packet)
         alerts = self._assign_alert_ids(packet, alerts)
         for alert in alerts:
             self._apply_payload_policy(alert, policy.to_public_dict())
 
-        self._flow_service.ingest(packet, alerts)
+        if self._central_flow_persistence:
+            flow = self._flow_service.ingest(packet, alerts, persist=False)
+        else:
+            flow = self._flow_service.ingest(packet, alerts)
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
         self._persistence.persist(packet, alerts)
+        if self._central_flow_persistence and isinstance(flow, dict):
+            self._persistence.persist_flow(flow)
         self._publisher.publish_packet(packet)
         self._publisher.publish_alerts(alerts)
 
@@ -189,12 +211,18 @@ class SnifferService:
             finally:
                 self._packet_queue.task_done()
 
-    def drain_packet_queue(self, timeout_sec: float = PACKET_QUEUE_DRAIN_TIMEOUT_SEC) -> bool:
+    def drain_packet_queue(
+        self, timeout_sec: float = PACKET_QUEUE_DRAIN_TIMEOUT_SEC
+    ) -> bool:
         return self._packet_queue.wait_until_drained(timeout_sec)
 
     @staticmethod
     def _apply_payload_policy(row: dict[str, Any], settings: dict[str, Any]) -> None:
-        if bool(settings.get("payload_capture_enabled")) and not bool(settings.get("alert_only_mode")) and settings.get("capture_mode") in {"full", "forensic"}:
+        if (
+            bool(settings.get("payload_capture_enabled"))
+            and not bool(settings.get("alert_only_mode"))
+            and settings.get("capture_mode") in {"full", "forensic"}
+        ):
             return
         row["payload_hex"] = ""
         row["payload_ascii"] = ""
@@ -218,6 +246,7 @@ class SnifferService:
             self._engine = None
         if engine is not None:
             engine.stop()
+        self.drain_packet_queue()
         state = self.get_state()
         self._publisher.publish_state("sniffer:stopped", state)
         return state
@@ -229,6 +258,9 @@ class SnifferService:
         if self._packet_worker.is_alive():
             self._packet_worker.join(timeout=1.0)
         self._persistence.close()
+        close_flow_service = getattr(self._flow_service, "close", None)
+        if callable(close_flow_service):
+            close_flow_service()
 
     def get_state(self) -> dict[str, Any]:
         with self._lock:
@@ -263,8 +295,13 @@ class SnifferService:
         self._publisher.publish_state("sniffer:reset", state)
         return state
 
-    def persistence_stats(self) -> dict[str, int | float]:
-        return self._persistence.stats()
+    def persistence_stats(self) -> dict[str, Any]:
+        stats = self._persistence.stats()
+        stats["flows"] = {
+            "enabled": bool(stats.get("persistence_enabled")),
+            "worker_alive": bool(stats.get("worker_alive")),
+        }
+        return stats
 
     def packet_queue_stats(self) -> dict[str, Any]:
         return self._packet_queue.stats(worker_alive=self._packet_worker.is_alive())
@@ -297,7 +334,9 @@ class SnifferService:
             self._packet_seq += 1
             return f"mem-pkt-{self._packet_seq}"
 
-    def _assign_alert_ids(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _assign_alert_ids(
+        self, packet: dict[str, Any], alerts: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
         flow_id = flow_id_for(packet)
         for alert in alerts:

@@ -150,7 +150,7 @@ export function FlowsPanel({ api }) {
             <tbody>
               {flows.map((flow) => (
                 <tr key={flow.flow_id} className={selectedId === flow.flow_id ? "flow-row-selected" : ""} onClick={() => selectFlow(flow.flow_id)}>
-                  <td><strong>{flow.app_protocol}</strong><small>{flow.transport}</small></td>
+                  <td><strong>{flow.app_protocol}</strong><small>{flow.service_name || flow.transport}</small></td>
                   <td><strong>{flow.src_ip}:{flow.src_port || "-"}</strong><small>to {flow.dst_ip}:{flow.dst_port || "-"}</small></td>
                   <td>{flow.direction}</td>
                   <td>{flow.packets_count}</td>
@@ -175,6 +175,16 @@ export function FlowsPanel({ api }) {
                 <span><small>Process</small><strong>{selectedFlow.process_name || "Not mapped"}</strong></span>
                 <span><small>Sent / received</small><strong>{formatBytes(selectedFlow.bytes_sent)} / {formatBytes(selectedFlow.bytes_received)}</strong></span>
               </div>
+              <section>
+                <h4>Destination service</h4>
+                <dl className="flow-metadata">
+                  <div><dt>Service</dt><dd>{selectedFlow.service_name || "Unknown"}</dd></div>
+                  <div><dt>Category</dt><dd>{selectedFlow.service_category || "Unknown"}</dd></div>
+                  <div><dt>Domain</dt><dd>{selectedFlow.service_domain || "Not visible in encrypted metadata"}</dd></div>
+                  <div><dt>Confidence</dt><dd>{selectedFlow.service_confidence || "unknown"}</dd></div>
+                </dl>
+                <ul>{selectedFlow.service_reasons?.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+              </section>
               <section>
                 <h4>Risk reasons</h4>
                 <ul>{selectedFlow.risk_reasons?.map((reason) => <li key={reason}>{reason}</li>)}</ul>

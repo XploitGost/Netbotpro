@@ -6,14 +6,46 @@ from backend.app.services.sniffer_persistence import SnifferPersistence
 
 
 class SnifferPersistenceTests(unittest.TestCase):
-    @patch("backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True)
     @patch("backend.app.services.sniffer_persistence.insert_batch")
-    def test_persistence_batches_rows_off_hot_path(self, mock_insert_batch, _mock_enabled):
+    def test_flow_snapshots_use_the_central_batch_writer(self, mock_insert_batch):
+        flow_batches = []
+        persistence = SnifferPersistence(
+            batch_size=10,
+            flush_interval=0.02,
+            flow_writer=flow_batches.append,
+        )
+        try:
+            persistence.persist_flow(
+                {
+                    "flow_id": "flow-1",
+                    "summary": "Cookie: private-value",
+                }
+            )
+            time.sleep(0.1)
+        finally:
+            persistence.close()
+
+        self.assertEqual(flow_batches[0][0]["flow_id"], "flow-1")
+        self.assertNotIn("private-value", str(flow_batches))
+        mock_insert_batch.assert_not_called()
+
+    @patch(
+        "backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True
+    )
+    @patch("backend.app.services.sniffer_persistence.insert_batch")
+    def test_persistence_batches_rows_off_hot_path(
+        self, mock_insert_batch, _mock_enabled
+    ):
         mock_insert_batch.return_value = {"retries": 0}
-        persistence = SnifferPersistence(batch_size=2, flush_interval=0.05, max_queue_size=10)
+        persistence = SnifferPersistence(
+            batch_size=2, flush_interval=0.05, max_queue_size=10
+        )
         try:
             persistence.persist({"ts": "1", "src": "a", "dst": "b", "proto": "TCP"}, [])
-            persistence.persist({"ts": "2", "src": "c", "dst": "d", "proto": "UDP"}, [{"attack_type": "x", "score": 1}])
+            persistence.persist(
+                {"ts": "2", "src": "c", "dst": "d", "proto": "UDP"},
+                [{"attack_type": "x", "score": 1}],
+            )
             time.sleep(0.2)
         finally:
             persistence.close()
@@ -30,11 +62,17 @@ class SnifferPersistenceTests(unittest.TestCase):
         self.assertEqual(stats["flush_batches"], 1)
         self.assertEqual(stats["overload_policy"], "drop_oldest")
 
-    @patch("backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True)
+    @patch(
+        "backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True
+    )
     @patch("backend.app.services.sniffer_persistence.insert_batch")
-    def test_persistence_keeps_enriched_alert_fields(self, mock_insert_batch, _mock_enabled):
+    def test_persistence_keeps_enriched_alert_fields(
+        self, mock_insert_batch, _mock_enabled
+    ):
         mock_insert_batch.return_value = {"retries": 0}
-        persistence = SnifferPersistence(batch_size=1, flush_interval=0.05, max_queue_size=10)
+        persistence = SnifferPersistence(
+            batch_size=1, flush_interval=0.05, max_queue_size=10
+        )
         try:
             persistence.persist(
                 {
@@ -108,11 +146,20 @@ class SnifferPersistenceTests(unittest.TestCase):
         self.assertEqual(alert_rows[0]["pid"], 4242)
         self.assertEqual(alert_rows[0]["attribution_confidence"], "high")
 
-    @patch("backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True)
+    @patch(
+        "backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True
+    )
     @patch("backend.app.services.sniffer_persistence.insert_batch")
-    def test_persistence_drop_newest_policy_is_intentional(self, mock_insert_batch, _mock_enabled):
+    def test_persistence_drop_newest_policy_is_intentional(
+        self, mock_insert_batch, _mock_enabled
+    ):
         mock_insert_batch.return_value = {"retries": 0}
-        persistence = SnifferPersistence(batch_size=10, flush_interval=1.0, max_queue_size=1, overload_policy="drop_newest")
+        persistence = SnifferPersistence(
+            batch_size=10,
+            flush_interval=1.0,
+            max_queue_size=1,
+            overload_policy="drop_newest",
+        )
         try:
             persistence.persist({"ts": "1", "src": "a", "dst": "b", "proto": "TCP"}, [])
             persistence.persist({"ts": "2", "src": "c", "dst": "d", "proto": "TCP"}, [])
@@ -123,6 +170,58 @@ class SnifferPersistenceTests(unittest.TestCase):
         stats = persistence.stats()
         self.assertGreaterEqual(stats["dropped_writes"], 1)
         self.assertEqual(stats["overload_policy"], "drop_newest")
+
+    @patch(
+        "backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True
+    )
+    @patch("backend.app.services.sniffer_persistence.insert_batch")
+    def test_failed_batch_retries_then_succeeds(self, mock_insert_batch, _mock_enabled):
+        mock_insert_batch.side_effect = [RuntimeError("temporary"), {"retries": 1}]
+        persistence = SnifferPersistence(
+            batch_size=1,
+            flush_interval=0.01,
+            max_queue_size=10,
+            max_retries=2,
+            retry_backoff_sec=0.01,
+        )
+        try:
+            persistence.persist({"ts": "1", "src": "a", "dst": "b", "proto": "TCP"}, [])
+            time.sleep(0.15)
+        finally:
+            persistence.close()
+
+        stats = persistence.stats()
+        self.assertEqual(mock_insert_batch.call_count, 2)
+        self.assertEqual(stats["flush_retries"], 2)
+        self.assertEqual(stats["failed_writes"], 0)
+        self.assertEqual(stats["persisted_packets"], 1)
+
+    @patch(
+        "backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True
+    )
+    @patch("backend.app.services.sniffer_persistence.insert_batch")
+    def test_final_failure_is_counted_without_leaking_error_text(
+        self, mock_insert_batch, _mock_enabled
+    ):
+        mock_insert_batch.side_effect = RuntimeError("Authorization: Bearer raw-secret")
+        persistence = SnifferPersistence(
+            batch_size=1,
+            flush_interval=0.01,
+            max_queue_size=10,
+            max_retries=0,
+        )
+        try:
+            persistence.persist({"ts": "1", "src": "a", "dst": "b", "proto": "TCP"}, [])
+            time.sleep(0.1)
+            stats = persistence.stats()
+        finally:
+            persistence.close()
+
+        self.assertEqual(stats["failed_writes"], 1)
+        self.assertEqual(stats["failed_batches"], 1)
+        self.assertEqual(stats["last_error"], "RuntimeError")
+        self.assertNotIn("raw-secret", str(stats))
+        self.assertIn("persistence_failed_writes", stats["pressure_reasons"])
 
 
 if __name__ == "__main__":
