@@ -117,6 +117,7 @@ def _observability_snapshot() -> dict[str, Any]:
         "websocket": event_bus.websocket_stats(),
         "history": history_service.metrics(),
         "packet_queue": sniffer_service.packet_queue_stats(),
+        "flow_worker_pool": sniffer_service.flow_worker_pool_stats(),
         "persistence": sniffer_service.persistence_stats(),
         "auto_block": sniffer_service.auto_block_stats(),
     }

@@ -1,8 +1,12 @@
+import os
 import unittest
 from unittest.mock import patch
 
 from backend.app.services.event_bus import EventBus
-from backend.app.services.sniffer_service import CaptureStartUnavailableError, SnifferService
+from backend.app.services.sniffer_service import (
+    CaptureStartUnavailableError,
+    SnifferService,
+)
 
 
 class _FakeCaptureSession:
@@ -31,7 +35,11 @@ class _FakeCaptureProvider:
         return self.session
 
     def list_interfaces(self):
-        return {"recommended": "eth0", "recommended_label": "Ethernet", "items": [{"value": "eth0", "name": "Ethernet"}]}
+        return {
+            "recommended": "eth0",
+            "recommended_label": "Ethernet",
+            "items": [{"value": "eth0", "name": "Ethernet"}],
+        }
 
     def describe_interface(self, candidate):
         return "Ethernet"
@@ -47,7 +55,14 @@ class _FakeCaptureProvider:
                     "provider": "fake",
                     "ready": True,
                     "recommended_interface": "eth0",
-                    "checks": [{"code": "interfaces_available", "ok": True, "severity": "error", "detail": "ok"}],
+                    "checks": [
+                        {
+                            "code": "interfaces_available",
+                            "ok": True,
+                            "severity": "error",
+                            "detail": "ok",
+                        }
+                    ],
                 }
 
         return _Report()
@@ -55,7 +70,9 @@ class _FakeCaptureProvider:
 
 class _UnavailableCaptureProvider(_FakeCaptureProvider):
     def create_session(self, packet_callback):
-        raise AssertionError("create_session should not be called when preflight is not ready")
+        raise AssertionError(
+            "create_session should not be called when preflight is not ready"
+        )
 
     def preflight(self):
         class _Report:
@@ -64,7 +81,14 @@ class _UnavailableCaptureProvider(_FakeCaptureProvider):
                 return {
                     "provider": "fake",
                     "ready": False,
-                    "checks": [{"code": "interfaces_available", "ok": False, "severity": "error", "detail": "Detected 0 capture interface(s)."}],
+                    "checks": [
+                        {
+                            "code": "interfaces_available",
+                            "ok": False,
+                            "severity": "error",
+                            "detail": "Detected 0 capture interface(s).",
+                        }
+                    ],
                 }
 
         return _Report()
@@ -119,7 +143,9 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertEqual(payload["preflight"]["provider"], "fake")
 
     def test_start_fails_fast_when_preflight_is_not_ready(self):
-        service = SnifferService(EventBus(), capture_provider=_UnavailableCaptureProvider())
+        service = SnifferService(
+            EventBus(), capture_provider=_UnavailableCaptureProvider()
+        )
 
         with self.assertRaises(CaptureStartUnavailableError) as ctx:
             service.start("iface=default")
@@ -135,8 +161,13 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertIn("local interfaces", str(ctx.exception))
         service.close()
 
-    @patch("backend.app.services.sniffer_service.get_settings_snapshot", return_value={"payload_capture_enabled": False, "alert_only_mode": False})
-    def test_payload_preview_is_removed_by_default_before_state_and_persistence(self, _mock_settings):
+    @patch(
+        "backend.app.services.sniffer_service.get_settings_snapshot",
+        return_value={"payload_capture_enabled": False, "alert_only_mode": False},
+    )
+    def test_payload_preview_is_removed_by_default_before_state_and_persistence(
+        self, _mock_settings
+    ):
         service = SnifferService(
             EventBus(),
             capture_provider=_FakeCaptureProvider(),
@@ -186,7 +217,9 @@ class SnifferServiceTests(unittest.TestCase):
     def test_start_times_out_when_capture_session_creation_hangs(self):
         service = SnifferService(EventBus(), capture_provider=_SlowCaptureProvider())
 
-        with patch("backend.app.services.sniffer_service.CAPTURE_START_TIMEOUT_SEC", 0.01):
+        with patch(
+            "backend.app.services.sniffer_service.CAPTURE_START_TIMEOUT_SEC", 0.01
+        ):
             with self.assertRaises(CaptureStartUnavailableError) as ctx:
                 service.start("eth0")
 
@@ -220,6 +253,21 @@ class SnifferServiceTests(unittest.TestCase):
         service.close()
 
         self.assertFalse(service._packet_worker.is_alive())
+
+    def test_disabled_flow_workers_use_existing_packet_processing_path(self):
+        with patch.dict(os.environ, {"NETBOT_FLOW_WORKERS_ENABLED": "false"}):
+            service = SnifferService(
+                EventBus(),
+                capture_provider=_FakeCaptureProvider(),
+                flow_service=_FakeFlowService(),
+            )
+        try:
+            service._on_packet({"src": "10.0.0.1", "dst": "8.8.8.8", "proto": "UDP"})
+            self.assertTrue(service.drain_packet_queue(timeout_sec=1.0))
+            self.assertEqual(len(service.recent_packets()), 1)
+            self.assertFalse(service.flow_worker_pool_stats()["enabled"])
+        finally:
+            service.close()
 
 
 if __name__ == "__main__":

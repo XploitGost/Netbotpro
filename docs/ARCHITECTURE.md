@@ -51,7 +51,8 @@ flowchart TB
     subgraph Pipeline["Core Capture And Analysis Pipeline"]
         Provider["Capture Provider<br/>Scapy / Npcap / libpcap"]
         IntakeQueue["Bounded Packet Intake Queue"]
-        QueueWorker["Packet Queue Worker"]
+        QueueWorker["Packet Queue Dispatcher"]
+        FlowWorkers["Flow-aware Worker Pool<br/>Ordered Flow Lanes"]
         EventAggregator["Event Aggregator"]
         Parser["Packet Parser"]
         Layer7["Layer 7 / TLS Metadata"]
@@ -108,8 +109,8 @@ flowchart TB
     Routes --> AgentAPI
     Events --> LiveClient
     CapturePolicy --> Provider
-    Provider --> IntakeQueue --> QueueWorker --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
-    QueueWorker --> EventAggregator --> Events
+    Provider --> IntakeQueue --> QueueWorker --> FlowWorkers --> Parser --> Layer7 --> ProtocolIntel --> FlowEngine
+    FlowWorkers --> EventAggregator --> Events
     ProtocolIntel --> TCPIntel
     ProtocolIntel --> DNSIntel
     ProtocolIntel --> HTTPIntel
@@ -215,7 +216,19 @@ transactional SQLite batches; flow snapshots are coalesced by `flow_id` and
 written with batched upserts. Queue depth, utilization, dropped/failed writes,
 write latency, retry state, and worker liveness are visible in Ops metrics.
 User-triggered report files remain synchronous and outside the packet-rate
-queue. Live ring buffer and flow-aware worker pool work remain future steps.
+queue.
+
+The Flow-aware Worker Pool is the processing-pressure boundary after packet
+intake. TCP and UDP use canonical bidirectional endpoint keys; other protocols
+use normalized endpoint/protocol keys. Stable hashing selects a fixed FIFO lane,
+so packets in one flow retain order while different flows can execute in
+parallel. Incomplete metadata uses a safe fallback lane. Worker queues remain
+bounded and expose backlog, utilization, failures, drops/rejections, processing
+latency, and liveness to `/api/monitoring/metrics` and Ops Snapshot.
+
+The Event Aggregator remains the realtime delivery-pressure boundary after
+processing, while Batch Persistence remains the storage-pressure boundary.
+Live ring buffer and benchmark/soak validation remain future steps.
 
 ## WebSocket Event Aggregator
 

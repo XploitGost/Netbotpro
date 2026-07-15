@@ -55,11 +55,47 @@ function safeWebSocketDropReason(value) {
   return allowed.has(value) ? value : "";
 }
 
+function safeFlowWorkerDropReason(value) {
+  const allowed = new Set([
+    "flow_worker_queue_full_drop_oldest",
+    "flow_worker_queue_full_after_drop_oldest",
+    "flow_worker_queue_full_drop_newest",
+    "flow_worker_queue_full_reject_new",
+    "flow_worker_queue_block_timeout",
+    "worker_pool_closed",
+  ]);
+  return allowed.has(value) ? value : "";
+}
+
+function safeFlowWorkerError(value) {
+  const errorType = String(value || "");
+  return errorType.length <= 80 && /^[A-Za-z0-9_]+$/.test(errorType) ? errorType : "";
+}
+
+function safeFlowWorkerReasons(value) {
+  const allowed = new Set([
+    "flow_worker_queue_backlog",
+    "flow_worker_high_utilization",
+    "flow_worker_slow_jobs",
+    "flow_worker_job_failures",
+    "flow_worker_dropped_jobs",
+    "flow_worker_not_alive",
+  ]);
+  return Array.isArray(value) ? value.filter((reason) => allowed.has(reason)) : [];
+}
+
 export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const eventBus = observability?.event_bus || {};
   const eventAggregator = operationalMetrics?.event_aggregator || observability?.event_aggregator || {};
   const websocket = operationalMetrics?.websocket || observability?.websocket || {};
   const packetQueue = operationalMetrics?.packet_queue || observability?.packet_queue || {};
+  const flowWorkerPool = operationalMetrics?.flow_worker_pool || observability?.flow_worker_pool || {};
+  const safeFlowWorkerPool = {
+    ...flowWorkerPool,
+    last_error: safeFlowWorkerError(flowWorkerPool.last_error),
+    last_drop_reason: safeFlowWorkerDropReason(flowWorkerPool.last_drop_reason),
+    pressure_reasons: safeFlowWorkerReasons(flowWorkerPool.pressure_reasons),
+  };
   const persistence = operationalMetrics?.persistence || observability?.persistence || {};
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
@@ -81,6 +117,17 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const packetQueueDropped = toNumber(packetQueue.dropped_total ?? packetQueue.dropped_packets);
   const packetQueueHighWater = toNumber(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark);
   const packetQueueWorkerAlive = packetQueue.worker_alive !== false;
+  const flowWorkersEnabled = flowWorkerPool.enabled === true;
+  const flowWorkerCount = toNumber(flowWorkerPool.worker_count);
+  const flowWorkerActive = toNumber(flowWorkerPool.active_workers);
+  const flowWorkerDepth = toNumber(flowWorkerPool.queue_depth_total);
+  const flowWorkerMax = toNumber(flowWorkerPool.queue_max_total);
+  const flowWorkerUtilization = toNumber(flowWorkerPool.utilization_percent);
+  const flowWorkerFailed = toNumber(flowWorkerPool.jobs_failed_total);
+  const flowWorkerDropped = toNumber(flowWorkerPool.jobs_dropped_total);
+  const flowWorkerRejected = toNumber(flowWorkerPool.jobs_rejected_total);
+  const flowWorkerSlowJobs = toNumber(flowWorkerPool.slow_jobs_total);
+  const flowWorkerP95 = toNumber(flowWorkerPool.p95_processing_latency_ms);
   const droppedWrites = toNumber(persistence.events_dropped_total ?? persistence.dropped_writes);
   const failedWrites = toNumber(persistence.events_failed_total ?? persistence.failed_writes);
   const persistenceUtilization = toNumber(persistence.utilization_percent ?? persistence.queue_utilization_percent);
@@ -142,10 +189,19 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       : packetQueueDropped > 0 || packetQueueUtilization >= 80 || (packetQueueMaxSize > 0 && packetQueueDepth >= packetQueueMaxSize * 0.8)
         ? "warning"
         : "healthy";
+  const flowWorkerLevel = flowWorkersEnabled
+    ? normalizeLevel(flowWorkerPool.health) !== "healthy"
+      ? normalizeLevel(flowWorkerPool.health)
+      : flowWorkerActive < flowWorkerCount || flowWorkerFailed > 0 || flowWorkerDropped > 0
+        ? "degraded"
+        : flowWorkerUtilization >= 80 || flowWorkerRejected > 0 || flowWorkerSlowJobs > 0 || flowWorkerP95 >= 100
+          ? "warning"
+          : "healthy"
+    : "healthy";
   const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
   const criticalFlows = toNumber(flows.risk_distribution?.critical);
   const highFlows = toNumber(flows.risk_distribution?.high);
-  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
   const recommendedActions = [];
 
   if (backendLevel !== "healthy") {
@@ -165,6 +221,21 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   }
   if (packetQueueMaxSize > 0 && packetQueueHighWater >= packetQueueMaxSize * 0.9) {
     recommendedActions.push("Queue pressure is approaching capacity. Consider increasing NETBOT_PACKET_QUEUE_MAX_SIZE.");
+  }
+  if (flowWorkersEnabled && flowWorkerActive < flowWorkerCount) {
+    recommendedActions.push("A flow worker appears unhealthy. Restart capture or inspect backend runtime logs.");
+  }
+  if (flowWorkerUtilization >= 80) {
+    recommendedActions.push("Flow worker backlog is growing. Increase worker count, reduce capture pressure, or inspect slow packet processing.");
+  }
+  if (flowWorkerP95 >= 100 || flowWorkerSlowJobs > 0) {
+    recommendedActions.push("Packet processing is slow. Review DPI cost, protocol analysis, and worker count.");
+  }
+  if (flowWorkerFailed > 0) {
+    recommendedActions.push("Flow worker jobs are failing. Inspect backend logs and recent packet processing errors.");
+  }
+  if (flowWorkerDropped > 0 || flowWorkerRejected > 0) {
+    recommendedActions.push("Flow worker jobs were dropped due to processing pressure. Review worker queue size and overflow policy.");
   }
   if (criticalFlows > 0) {
     recommendedActions.push("Review critical flows and related alerts first.");
@@ -249,6 +320,12 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       level: packetQueueLevel,
     },
     {
+      label: "Flow Workers",
+      value: flowWorkersEnabled ? `${flowWorkerActive}/${flowWorkerCount}` : "Disabled",
+      hint: `${flowWorkerDepth}/${flowWorkerMax} queued | P95 ${formatMs(flowWorkerP95)}`,
+      level: flowWorkerLevel,
+    },
+    {
       label: "Write Queue",
       value: String(queueSize),
       hint: `${persistenceUtilization.toFixed(1)}% used | Max ${toNumber(persistence.queue_max ?? persistence.max_size)}`,
@@ -308,6 +385,9 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     packetQueue,
     safeLastDropReason: safeQueueDropReason(packetQueue.last_drop_reason),
     packetQueueLevel,
+    flowWorkerPool: safeFlowWorkerPool,
+    flowWorkerLevel,
+    safeFlowWorkerDropReason: safeFlowWorkerPool.last_drop_reason,
     persistence,
     history,
     autoBlock,

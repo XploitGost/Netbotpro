@@ -108,6 +108,10 @@ class ReleaseReadinessTests(unittest.TestCase):
 
         self.assertIn("docs/PERFORMANCE_PIPELINE.md", readme)
         self.assertIn("Bounded Packet Intake Queue", readme)
+        self.assertIn("Flow-aware Worker Pool", readme)
+        self.assertIn("Flow-aware Worker Pool", performance)
+        self.assertIn("NETBOT_FLOW_WORKER_COUNT", performance)
+        self.assertIn("Flow-aware Worker Pool", architecture)
         self.assertIn("Queue pressure metrics", readme)
         self.assertIn("Ops Snapshot packet queue visibility", readme)
         self.assertIn("NETBOT_PACKET_QUEUE_MAX_SIZE", readme)

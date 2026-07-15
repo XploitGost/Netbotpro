@@ -16,7 +16,7 @@ It was added to:
 - make packet drops visible instead of silent;
 - protect UI, flow analysis, detection, and storage from direct capture
   pressure;
-- create the foundation for future batching and worker-pool work;
+- create the foundation for bounded batching and flow-aware worker lanes;
 - expose queue pressure through `/api/monitoring/metrics` and Ops Snapshot.
 
 ## Current Pipeline
@@ -24,7 +24,7 @@ It was added to:
 ```text
 Capture
 -> Bounded Packet Intake Queue
--> Packet Queue Worker
+-> Flow-aware Worker Pool
 -> Existing Packet Processing
 -> Bounded Batch Persistence (packets, alerts, flow snapshots)
 -> Event Aggregator
@@ -33,12 +33,11 @@ Capture
 ```
 
 The capture callback copies packet metadata into `BoundedPacketQueue` and
-returns quickly. A single packet queue worker drains the queue and sends each
-packet through the existing processing path: payload policy, protocol metadata,
-flow ingestion, detection, dashboard state, persistence enqueue, and websocket
-publishing. The Event Aggregator then batches high-frequency realtime updates
-before websocket fan-out so the browser does not receive one message for every
-processed packet.
+returns quickly. Its dispatcher sends accepted metadata to bounded flow-aware
+worker lanes. Each lane runs the existing processing path: payload policy,
+protocol metadata, flow ingestion, detection, dashboard state, persistence
+enqueue, and websocket publishing. The Event Aggregator then batches
+high-frequency realtime updates before websocket fan-out.
 
 ## Environment Variables
 
@@ -277,9 +276,53 @@ Reports stay synchronous so callers receive a definite result. Audit stays
 outside batching, writes immediately under its ordering lock, and is tested for
 ordered redacted output.
 
-This step does not add a worker pool, database sharding, ClickHouse, benchmark
-claims, or a new retention engine. Agent history remains on its existing safe
-summary path until integration can preserve heartbeat reliability.
+This step does not add database sharding, ClickHouse, benchmark claims, or a
+new retention engine. Agent history remains on its existing safe summary path.
+
+## Flow-aware Worker Pool
+
+Step 5 places a bounded processing stage after packet intake and before packet,
+flow, and DPI analysis. The intake queue protects capture from immediate
+downstream pressure. The worker pool independently protects CPU-bound processing
+and makes worker backlog, failures, drops, and latency visible.
+
+TCP and UDP packets use a canonical bidirectional key built from the transport
+protocol and normalized endpoint/port pairs. Reverse-direction packets therefore
+select the same worker. Other protocols use normalized IP endpoints plus the
+protocol. Incomplete metadata uses a deterministic fallback lane and increments
+`unknown_flow_key_total` without logging packet contents.
+
+Each stable key is hashed to one FIFO worker lane. Packets from one flow preserve
+submission order. Different flows can map to different workers and process in
+parallel. Hash collisions are safe: they reduce parallelism but do not corrupt
+ordering. Existing FlowEngine and dashboard locks continue to protect shared
+state.
+
+| Variable | Default | Allowed values | Purpose |
+| --- | ---: | --- | --- |
+| `NETBOT_FLOW_WORKERS_ENABLED` | `true` | boolean | Enable flow-aware dispatch; `false` keeps the existing direct processing path. |
+| `NETBOT_FLOW_WORKER_COUNT` | `4` | `1` to `64` | Number of fixed worker lanes. |
+| `NETBOT_FLOW_WORKER_QUEUE_MAX` | `2000` | positive integer | Total bounded capacity distributed across worker lanes. |
+| `NETBOT_FLOW_WORKER_OVERFLOW_POLICY` | `drop_oldest` | `drop_oldest`, `drop_newest`, `reject_new`, `block_short` | Behavior when the selected lane is full. |
+| `NETBOT_FLOW_WORKER_SHUTDOWN_TIMEOUT_SEC` | `5` | positive seconds | Maximum graceful drain wait. |
+| `NETBOT_FLOW_WORKER_ERROR_THRESHOLD` | `25` | positive integer | Repeated failure/drop threshold for critical health. |
+| `NETBOT_FLOW_WORKER_SLOW_JOB_MS` | `100` | positive milliseconds | Slow processing threshold. |
+
+Invalid configuration falls back to conservative defaults. `drop_oldest` keeps
+the latest live work, `drop_newest` preserves queued work, `reject_new` refuses
+the incoming job explicitly, and `block_short` waits for only a small bounded
+interval. No policy busy-waits or retries indefinitely.
+
+The `flow_worker_pool` monitoring section exposes worker counts, total queue
+depth/capacity, utilization, received/processed/failed/dropped/rejected counts,
+unknown keys, slow jobs, average/p95/max latency, per-worker counters, safe last
+error/drop fields, and pressure reasons. Metrics contain no packet payload,
+header, credential, cookie, token, session, or secret data.
+
+Health is `healthy` under normal backlog and latency, `degraded` for growing
+backlog, initial drops/failures, or slow jobs, and `critical` for missing workers,
+near-full queues, repeated failures/drops, or extreme latency. These signals
+contribute to overall Ops health and focused recommended actions.
 
 ## WebSocket Batching / Event Aggregator
 
@@ -415,7 +458,6 @@ This is not the complete performance engine yet.
 
 Not implemented yet:
 
-- Flow-aware Worker Pool;
 - Live Ring Buffer;
 - Benchmark / Soak Tests;
 - Optional ClickHouse or external metrics backend.
@@ -427,13 +469,12 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Flow-aware Worker Pool
-2. Live Ring Buffer
-3. Benchmark and Soak Tests
-4. Performance Validation Report
-5. Service Attribution / Destination Intelligence
-6. Incident / Correlation Engine
-7. Read-only AI Analyst
+1. Live Ring Buffer
+2. Benchmark and Soak Tests
+3. Performance Validation Report
+4. Service Attribution / Destination Intelligence
+5. Incident / Correlation Engine
+6. Read-only AI Analyst
 
 ### Recorded Product Direction
 

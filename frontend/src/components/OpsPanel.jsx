@@ -35,6 +35,8 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
   const levelFor = (label, fallback = "healthy") => snapshot.summaryCards.find((card) => card.label === label)?.level || fallback;
   const packetQueue = snapshot.packetQueue;
   const packetQueueLastDropReason = snapshot.safeLastDropReason || "No drops recorded";
+  const flowWorkerPool = snapshot.flowWorkerPool;
+  const flowWorkerLastDropReason = snapshot.safeFlowWorkerDropReason || "No drops recorded";
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
   const eventAggregator = snapshot.eventAggregator;
@@ -115,6 +117,44 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
           <MetricRow label="Overflow Policy" value={packetQueue.overflow_policy || "drop_oldest"} hint={packetQueueLastDropReason} />
           <MetricRow label="Worker" value={packetQueue.worker_alive === false ? "Stopped" : "Running"} level={packetQueue.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${packetQueue.health || "healthy"}`} />
         </dl>
+      </AccordionPanel>
+
+      <AccordionPanel
+        eyebrow="Performance"
+        title="Flow Worker Pool"
+        subtitle="Ordered per-flow processing lanes between packet intake and analysis."
+        badge={flowWorkerPool.enabled ? levelLabel(snapshot.flowWorkerLevel) : "Disabled"}
+        defaultOpen
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Pool State" value={flowWorkerPool.enabled ? "Enabled" : "Disabled"} level={snapshot.flowWorkerLevel} hint={`Health ${flowWorkerPool.health || "healthy"}`} />
+          <MetricRow label="Active Workers" value={`${flowWorkerPool.active_workers || 0}/${flowWorkerPool.worker_count || 0}`} level={snapshot.flowWorkerLevel} hint="Stable flow-to-worker assignment" />
+          <MetricRow label="Queue Depth" value={`${flowWorkerPool.queue_depth_total || 0}/${flowWorkerPool.queue_max_total || 0}`} level={Number(flowWorkerPool.utilization_percent || 0) >= 80 ? "degraded" : "healthy"} hint={`${Number(flowWorkerPool.utilization_percent || 0).toFixed(1)}% used`} />
+          <MetricRow label="Overflow Policy" value={flowWorkerPool.overflow_policy || "drop_oldest"} hint={flowWorkerLastDropReason} />
+          <MetricRow label="Jobs Received" value={String(flowWorkerPool.jobs_received_total || 0)} hint={`Processed ${flowWorkerPool.jobs_processed_total || 0}`} />
+          <MetricRow label="Jobs Failed" value={String(flowWorkerPool.jobs_failed_total || 0)} level={Number(flowWorkerPool.jobs_failed_total || 0) > 0 ? "degraded" : "healthy"} hint={`Last error ${flowWorkerPool.last_error || "None"}`} />
+          <MetricRow label="Jobs Dropped" value={String(flowWorkerPool.jobs_dropped_total || 0)} level={Number(flowWorkerPool.jobs_dropped_total || 0) > 0 ? "degraded" : "healthy"} hint={`Rejected ${flowWorkerPool.jobs_rejected_total || 0}`} />
+          <MetricRow label="Unknown Flow Keys" value={String(flowWorkerPool.unknown_flow_key_total || 0)} hint="Safely routed to a fallback lane" />
+          <MetricRow label="Slow Jobs" value={String(flowWorkerPool.slow_jobs_total || 0)} level={Number(flowWorkerPool.slow_jobs_total || 0) > 0 ? "warning" : "healthy"} hint={flowWorkerPool.last_slow_job_at || "None recorded"} />
+          <MetricRow label="Average Latency" value={formatMs(flowWorkerPool.avg_processing_latency_ms || 0)} />
+          <MetricRow label="Latency p95" value={formatMs(flowWorkerPool.p95_processing_latency_ms || 0)} level={Number(flowWorkerPool.p95_processing_latency_ms || 0) >= 100 ? "warning" : "healthy"} />
+          <MetricRow label="Max Latency" value={formatMs(flowWorkerPool.max_processing_latency_ms || 0)} />
+          <MetricRow label="Pressure Reasons" value={(flowWorkerPool.pressure_reasons || []).join(", ") || "None"} level={(flowWorkerPool.pressure_reasons || []).length ? "warning" : "healthy"} />
+        </dl>
+        {(flowWorkerPool.per_worker || []).length ? (
+          <div className="ops-worker-grid" aria-label="Flow worker status">
+            {flowWorkerPool.per_worker.map((worker) => (
+              <article className="ops-worker-item" key={worker.worker_id}>
+                <div>
+                  <strong>Worker {worker.worker_id}</strong>
+                  <small>{worker.worker_alive ? "Running" : "Stopped"}</small>
+                </div>
+                <span>{worker.queue_depth || 0}/{worker.queue_max || 0} queued</span>
+                <small>{worker.processed_total || 0} processed | p95 {formatMs(worker.p95_latency_ms || 0)}</small>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </AccordionPanel>
 
       <AccordionPanel

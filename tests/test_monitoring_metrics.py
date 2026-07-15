@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from backend.app.main import app
+from backend.app.main import _observability_snapshot, app
 from backend.app.security import require_local_token, require_trusted_client
 from backend.app.services.monitoring_service import build_monitoring_metrics
 
@@ -55,6 +55,24 @@ class MonitoringMetricsTests(unittest.TestCase):
                     "worker_alive": True,
                     "health": "healthy",
                 },
+                "flow_worker_pool": {
+                    "enabled": True,
+                    "health": "healthy",
+                    "worker_count": 4,
+                    "active_workers": 4,
+                    "queue_depth_total": 0,
+                    "queue_max_total": 2000,
+                    "utilization_percent": 0,
+                    "jobs_received_total": 12,
+                    "jobs_processed_total": 12,
+                    "per_worker": [
+                        {
+                            "worker_id": 0,
+                            "worker_alive": True,
+                            "processed_total": 3,
+                        }
+                    ],
+                },
                 "persistence": {
                     "enabled": True,
                     "max_size": 5000,
@@ -101,6 +119,9 @@ class MonitoringMetricsTests(unittest.TestCase):
         self.assertEqual(payload["packet_queue"]["current_depth"], 0)
         self.assertEqual(payload["packet_queue"]["health"], "healthy")
         self.assertEqual(payload["packet_queue"]["pressure_reasons"], [])
+        self.assertTrue(payload["flow_worker_pool"]["enabled"])
+        self.assertEqual(payload["flow_worker_pool"]["worker_count"], 4)
+        self.assertEqual(payload["flow_worker_pool"]["jobs_processed_total"], 12)
         self.assertEqual(payload["event_aggregator"]["packet_batch_ms"], 500)
         self.assertEqual(payload["websocket"]["clients"], 1)
         self.assertEqual(payload["websocket"]["send_latency_ms_avg"], 2.0)
@@ -222,6 +243,67 @@ class MonitoringMetricsTests(unittest.TestCase):
         )
         self.assertIn("packet_queue_worker_stopped", payload["pressure_reasons"])
 
+    def test_flow_worker_pressure_contributes_to_overall_health(self):
+        payload = build_monitoring_metrics(
+            sniffer_state={"running": True},
+            observability={
+                "packet_queue": {"worker_alive": True},
+                "flow_worker_pool": {
+                    "enabled": True,
+                    "health": "critical",
+                    "worker_count": 4,
+                    "active_workers": 3,
+                    "queue_depth_total": 1900,
+                    "queue_max_total": 2000,
+                    "utilization_percent": 95,
+                    "jobs_failed_total": 25,
+                    "jobs_dropped_total": 1,
+                    "last_error": "RuntimeError",
+                    "last_drop_reason": "flow_worker_queue_full_drop_oldest",
+                    "pressure_reasons": [
+                        "flow_worker_not_alive",
+                        "flow_worker_high_utilization",
+                        "flow_worker_job_failures",
+                        "flow_worker_dropped_jobs",
+                    ],
+                },
+            },
+            flow_summary={},
+        )
+
+        self.assertEqual(payload["health"], "critical")
+        self.assertEqual(payload["flow_worker_pool"]["health"], "critical")
+        self.assertIn("flow_worker_not_alive", payload["pressure_reasons"])
+        self.assertIn("flow_worker_high_utilization", payload["pressure_reasons"])
+
+    def test_flow_worker_metrics_do_not_expose_sensitive_values(self):
+        payload = build_monitoring_metrics(
+            sniffer_state={"running": True},
+            observability={
+                "packet_queue": {"worker_alive": True},
+                "flow_worker_pool": {
+                    "enabled": True,
+                    "last_error": "Authorization: Bearer raw-token",
+                    "last_drop_reason": "Cookie: session=raw-token",
+                    "pressure_reasons": [
+                        "flow_worker_slow_jobs",
+                        "token=raw-token",
+                    ],
+                    "per_worker": [{"worker_id": 0, "token": "raw-token"}],
+                },
+            },
+            flow_summary={},
+        )
+
+        rendered = str(payload["flow_worker_pool"])
+        self.assertNotIn("raw-token", rendered)
+        self.assertNotIn("Authorization", rendered)
+        self.assertNotIn("Cookie", rendered)
+        self.assertEqual(
+            payload["flow_worker_pool"]["pressure_reasons"],
+            ["flow_worker_slow_jobs"],
+        )
+
     def test_persistence_health_and_pressure_contribute_to_overall_ops(self):
         payload = build_monitoring_metrics(
             sniffer_state={"running": True},
@@ -342,7 +424,23 @@ class MonitoringMetricsApiTests(unittest.TestCase):
         self.assertIn("event_aggregator", payload)
         self.assertIn("websocket", payload)
         self.assertIn("persistence", payload)
+        self.assertIn("flow_worker_pool", payload)
         self.assertEqual(payload["health"], "healthy")
+
+    def test_runtime_observability_snapshot_includes_flow_worker_pool(self):
+        expected = {
+            "enabled": True,
+            "worker_count": 4,
+            "active_workers": 4,
+            "health": "healthy",
+        }
+        with patch(
+            "backend.app.main.sniffer_service.flow_worker_pool_stats",
+            return_value=expected,
+        ):
+            snapshot = _observability_snapshot()
+
+        self.assertEqual(snapshot["flow_worker_pool"], expected)
 
 
 if __name__ == "__main__":
