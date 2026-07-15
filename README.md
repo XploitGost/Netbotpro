@@ -69,9 +69,10 @@ or PCAP artifacts.
 | Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
-| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level performance hardening step; the Worker Pool is not implemented yet. |
+| Bounded Packet Intake Queue | Foundation step | Queue pressure metrics, accepted/drop counters, overflow policies, worker liveness, high-water mark, and Ops Snapshot packet queue visibility are tested. | First engine-level intake hardening step; it is separate from processing workers. |
+| Flow-aware Worker Pool | Foundation step | Stable per-flow lanes preserve ordering while different flows process concurrently; bounded queue pressure, latency, failures, and worker health are visible in Ops Snapshot. | This is not a benchmark claim or the complete performance engine. |
 | Batch Persistence / Storage Backpressure | Foundation step | Redacted packet, alert, and flow records use bounded batches with queue health, write latency, retry, backlog, failure, and Ops Snapshot visibility. | Audit and report exports remain synchronous; this is not a distributed storage engine or the complete performance pipeline. |
-| WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Realtime delivery batching only; the Worker Pool is not implemented yet. |
+| WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Realtime delivery batching only. |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -174,12 +175,17 @@ runtime pressure are surfaced without exposing packet payloads or secrets.
 The bounded queue is the first performance-pipeline foundation step, not the
 complete performance pipeline. It adds queue pressure metrics, drop counters,
 overflow policies, worker liveness, and Ops Snapshot visibility before future
-WebSocket batching, batch persistence, and worker-pool work.
+WebSocket batching, batch persistence, and flow-aware worker lanes.
 
-The WebSocket Event Aggregator is the next foundation step. It batches realtime
+The WebSocket Event Aggregator batches realtime
 packet and alert updates, coalesces summary updates, protects against slow
 clients with a bounded outgoing queue, and exposes WebSocket pressure metrics in
 Ops Snapshot. It is still not the complete performance pipeline.
+
+The Flow-aware Worker Pool sits after bounded packet intake. Stable
+bidirectional flow keys select FIFO worker lanes, preserving order within a flow
+while allowing different flows to process concurrently. It exposes bounded
+backlog, drops/rejections, failures, worker liveness, and processing latency.
 
 Packet intake queue tuning is controlled by:
 
@@ -188,7 +194,17 @@ Packet intake queue tuning is controlled by:
 - `NETBOT_PACKET_QUEUE_OVERFLOW_POLICY`: default `drop_oldest`; allowed values
   are `drop_oldest` and `drop_newest`.
 - `NETBOT_PACKET_QUEUE_DRAIN_TIMEOUT_SEC`: default `5.0`; increase to `10.0`
-  when heavier capture should get more shutdown drain time.
+  for a longer graceful intake drain.
+- `NETBOT_FLOW_WORKERS_ENABLED`: default `true`; set `false` for the existing
+  direct packet-processing fallback.
+- `NETBOT_FLOW_WORKER_COUNT`: default `4` fixed worker lanes.
+- `NETBOT_FLOW_WORKER_QUEUE_MAX`: default `2000` total pending processing jobs.
+- `NETBOT_FLOW_WORKER_OVERFLOW_POLICY`: default `drop_oldest`; also supports
+  `drop_newest`, `reject_new`, and bounded `block_short`.
+- `NETBOT_FLOW_WORKER_SHUTDOWN_TIMEOUT_SEC`: default `5` seconds.
+- `NETBOT_FLOW_WORKER_ERROR_THRESHOLD`: default `25` failures or drops before
+  critical health.
+- `NETBOT_FLOW_WORKER_SLOW_JOB_MS`: default `100` milliseconds.
 - `NETBOT_PERSISTENCE_BATCH_ENABLED`: batching toggle; default `true`. `false`
   uses compatible synchronous writes.
 - `NETBOT_PERSISTENCE_PACKET_BATCH_SIZE` / `PACKET_FLUSH_MS`: `500` / `1000`.

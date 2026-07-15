@@ -48,6 +48,19 @@ describe("OpsPanel", () => {
             worker_alive: true,
             health: "healthy",
           },
+          flow_worker_pool: {
+            enabled: true,
+            health: "healthy",
+            worker_count: 4,
+            active_workers: 4,
+            queue_depth_total: 0,
+            queue_max_total: 2000,
+            jobs_received_total: 42,
+            jobs_processed_total: 42,
+            per_worker: [
+              { worker_id: 0, worker_alive: true, queue_depth: 0, queue_max: 500, processed_total: 12 },
+            ],
+          },
           event_aggregator: {
             packet_batch_ms: 500,
             packet_batch_max: 250,
@@ -74,6 +87,8 @@ describe("OpsPanel", () => {
     expect(screen.getByText("60s")).toBeTruthy();
     expect(screen.getByText("Capture and Flow Pressure")).toBeTruthy();
     expect(screen.getByText("Packet Intake Queue")).toBeTruthy();
+    expect(screen.getByText("Flow Worker Pool")).toBeTruthy();
+    expect(screen.getByText("Worker 0")).toBeTruthy();
     expect(screen.getByText("WebSocket Event Aggregator")).toBeTruthy();
     expect(screen.getByText("Batches Sent")).toBeTruthy();
     expect(screen.getAllByText("20/100").length).toBeGreaterThan(0);
@@ -299,7 +314,7 @@ describe("OpsPanel", () => {
     expect(screen.getByText("Failed Writes")).toBeTruthy();
     expect(screen.getByText("Write Latency p95")).toBeTruthy();
     expect(screen.getByText("18.5 ms")).toBeTruthy();
-    expect(screen.getByText("Pressure Reasons")).toBeTruthy();
+    expect(screen.getAllByText("Pressure Reasons").length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(/authorization|cookie|raw-secret/i);
   });
 
@@ -498,6 +513,90 @@ describe("OpsPanel", () => {
 
     expect(screen.getByText("Queue pressure is approaching capacity. Consider increasing NETBOT_PACKET_QUEUE_MAX_SIZE.")).toBeTruthy();
     expect(screen.getAllByText("No drops recorded").length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toMatch(/raw-token|authorization/i);
+  });
+
+  it.each(["healthy", "degraded", "critical"])(
+    "renders flow worker pool %s health",
+    (health) => {
+      render(
+        <OpsPanel
+          observability={{}}
+          operationalMetrics={{
+            generated_at: "2026-06-17T10:01:00Z",
+            health,
+            capture: { running: true },
+            flows: { risk_distribution: {} },
+            flow_worker_pool: {
+              enabled: true,
+              health,
+              worker_count: 2,
+              active_workers: 2,
+              queue_max_total: 20,
+            },
+          }}
+        />
+      );
+
+      expect(screen.getByText("Flow Worker Pool")).toBeTruthy();
+      expect(screen.getAllByText(`Health ${health}`).length).toBeGreaterThan(0);
+    }
+  );
+
+  it("renders disabled flow worker pool state", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "healthy",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          flow_worker_pool: { enabled: false, health: "healthy", worker_count: 4 },
+        }}
+      />
+    );
+
+    expect(screen.getAllByText("Disabled").length).toBeGreaterThan(0);
+  });
+
+  it("renders flow worker pressure actions and sanitizes diagnostic text", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "critical",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          flow_worker_pool: {
+            enabled: true,
+            health: "critical",
+            worker_count: 4,
+            active_workers: 3,
+            queue_depth_total: 1900,
+            queue_max_total: 2000,
+            utilization_percent: 95,
+            jobs_failed_total: 2,
+            jobs_dropped_total: 3,
+            jobs_rejected_total: 1,
+            slow_jobs_total: 4,
+            p95_processing_latency_ms: 250,
+            last_error: "RuntimeError",
+            last_drop_reason: "Authorization: Bearer raw-token",
+            per_worker: [
+              { worker_id: 0, worker_alive: false, queue_depth: 500, queue_max: 500 },
+            ],
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Flow worker backlog is growing. Increase worker count, reduce capture pressure, or inspect slow packet processing.")).toBeTruthy();
+    expect(screen.getByText("Packet processing is slow. Review DPI cost, protocol analysis, and worker count.")).toBeTruthy();
+    expect(screen.getByText("Flow worker jobs are failing. Inspect backend logs and recent packet processing errors.")).toBeTruthy();
+    expect(screen.getByText("Flow worker jobs were dropped due to processing pressure. Review worker queue size and overflow policy.")).toBeTruthy();
+    expect(screen.getByText("A flow worker appears unhealthy. Restart capture or inspect backend runtime logs.")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/raw-token|authorization/i);
   });
 });

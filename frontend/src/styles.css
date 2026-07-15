@@ -1968,6 +1968,36 @@ a {
   padding-left: 18px;
 }
 
+.ops-worker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ops-worker-item {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ops-worker-item div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ops-worker-item span,
+.ops-worker-item small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .graph-summary-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;

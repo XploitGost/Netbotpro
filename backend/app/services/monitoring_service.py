@@ -116,6 +116,42 @@ def _safe_persistence_reasons(value: Any) -> list[str]:
     ]
 
 
+def _safe_flow_worker_error(value: Any) -> str:
+    error_type = str(value or "")
+    if error_type and len(error_type) <= 80 and error_type.replace("_", "").isalnum():
+        return error_type
+    return ""
+
+
+def _safe_flow_worker_drop_reason(value: Any) -> str:
+    reason = str(value or "")
+    allowed = {
+        "flow_worker_queue_full_drop_oldest",
+        "flow_worker_queue_full_after_drop_oldest",
+        "flow_worker_queue_full_drop_newest",
+        "flow_worker_queue_full_reject_new",
+        "flow_worker_queue_block_timeout",
+        "worker_pool_closed",
+    }
+    return reason if reason in allowed else ""
+
+
+def _safe_flow_worker_reasons(value: Any) -> list[str]:
+    allowed = {
+        "flow_worker_queue_backlog",
+        "flow_worker_high_utilization",
+        "flow_worker_slow_jobs",
+        "flow_worker_job_failures",
+        "flow_worker_dropped_jobs",
+        "flow_worker_not_alive",
+    }
+    return (
+        [str(reason) for reason in value if str(reason) in allowed]
+        if isinstance(value, list)
+        else []
+    )
+
+
 def build_monitoring_metrics(
     *,
     sniffer_state: dict[str, Any],
@@ -126,6 +162,7 @@ def build_monitoring_metrics(
 
     event_bus = dict(observability.get("event_bus") or {})
     packet_queue = dict(observability.get("packet_queue") or {})
+    flow_worker_pool = dict(observability.get("flow_worker_pool") or {})
     event_aggregator = dict(observability.get("event_aggregator") or {})
     websocket = dict(observability.get("websocket") or {})
     persistence = dict(observability.get("persistence") or {})
@@ -215,6 +252,12 @@ def build_monitoring_metrics(
         or []
     )
     pressure_reasons: list[str] = list(packet_queue_pressure_reasons)
+    flow_worker_reasons = _safe_flow_worker_reasons(
+        flow_worker_pool.get("pressure_reasons") or []
+    )
+    pressure_reasons.extend(
+        reason for reason in flow_worker_reasons if reason not in pressure_reasons
+    )
     pressure_reasons.extend(
         reason for reason in persistence_reasons if reason not in pressure_reasons
     )
@@ -268,6 +311,7 @@ def build_monitoring_metrics(
         or persistence.get("health") == "critical"
         or websocket_send_errors >= 3
         or websocket_drops >= _int(event_aggregator.get("client_queue_max") or 1000)
+        or flow_worker_pool.get("health") == "critical"
     ):
         health = "critical"
 
@@ -414,6 +458,57 @@ def build_monitoring_metrics(
                 pressure_reasons=packet_queue_pressure_reasons,
             ),
             "pressure_reasons": packet_queue_pressure_reasons,
+        },
+        "flow_worker_pool": {
+            "enabled": bool(flow_worker_pool.get("enabled")),
+            "health": str(flow_worker_pool.get("health") or "healthy"),
+            "worker_count": _int(flow_worker_pool.get("worker_count")),
+            "active_workers": _int(flow_worker_pool.get("active_workers")),
+            "queue_depth_total": _int(flow_worker_pool.get("queue_depth_total")),
+            "queue_max_total": _int(flow_worker_pool.get("queue_max_total")),
+            "utilization_percent": _number(flow_worker_pool.get("utilization_percent")),
+            "overflow_policy": str(
+                flow_worker_pool.get("overflow_policy") or "drop_oldest"
+            ),
+            "jobs_received_total": _int(flow_worker_pool.get("jobs_received_total")),
+            "jobs_processed_total": _int(flow_worker_pool.get("jobs_processed_total")),
+            "jobs_failed_total": _int(flow_worker_pool.get("jobs_failed_total")),
+            "jobs_dropped_total": _int(flow_worker_pool.get("jobs_dropped_total")),
+            "jobs_rejected_total": _int(flow_worker_pool.get("jobs_rejected_total")),
+            "unknown_flow_key_total": _int(
+                flow_worker_pool.get("unknown_flow_key_total")
+            ),
+            "slow_jobs_total": _int(flow_worker_pool.get("slow_jobs_total")),
+            "avg_processing_latency_ms": _number(
+                flow_worker_pool.get("avg_processing_latency_ms")
+            ),
+            "p95_processing_latency_ms": _number(
+                flow_worker_pool.get("p95_processing_latency_ms")
+            ),
+            "max_processing_latency_ms": _number(
+                flow_worker_pool.get("max_processing_latency_ms")
+            ),
+            "per_worker": [
+                {
+                    "worker_id": _int(worker.get("worker_id")),
+                    "worker_alive": bool(worker.get("worker_alive")),
+                    "queue_depth": _int(worker.get("queue_depth")),
+                    "queue_max": _int(worker.get("queue_max")),
+                    "processed_total": _int(worker.get("processed_total")),
+                    "failed_total": _int(worker.get("failed_total")),
+                    "dropped_total": _int(worker.get("dropped_total")),
+                    "avg_latency_ms": _number(worker.get("avg_latency_ms")),
+                    "p95_latency_ms": _number(worker.get("p95_latency_ms")),
+                }
+                for worker in flow_worker_pool.get("per_worker", [])
+                if isinstance(worker, dict)
+            ],
+            "last_error": _safe_flow_worker_error(flow_worker_pool.get("last_error")),
+            "last_drop_reason": _safe_flow_worker_drop_reason(
+                flow_worker_pool.get("last_drop_reason")
+            ),
+            "last_slow_job_at": str(flow_worker_pool.get("last_slow_job_at") or ""),
+            "pressure_reasons": flow_worker_reasons,
         },
         "persistence": {
             "enabled": bool(

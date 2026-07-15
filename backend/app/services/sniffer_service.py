@@ -11,12 +11,12 @@ from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.event_bus import EventBus
 from backend.app.services.flow_service import FlowService
+from backend.app.services.flow_worker_pool import FlowWorkerPool
 from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.service_attribution import enrich_service_attribution
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
-from backend.app.services.sniffer_detection_pipeline import \
-    SnifferDetectionPipeline
+from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
 from backend.app.services.sniffer_event_publisher import SnifferEventPublisher
 from backend.app.services.sniffer_persistence import SnifferPersistence
 from core.capture import CaptureProvider, CaptureSession, SystemCaptureProvider
@@ -74,6 +74,7 @@ class SnifferService:
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
         )
+        self._flow_worker_pool = FlowWorkerPool.from_env(self._process_packet)
         self._packet_worker_stop = threading.Event()
         self._packet_worker = threading.Thread(
             target=self._packet_worker_loop,
@@ -205,7 +206,10 @@ class SnifferService:
             except queue.Empty:
                 continue
             try:
-                self._process_packet(item.packet)
+                if self._flow_worker_pool.enabled:
+                    self._flow_worker_pool.submit(item.packet)
+                else:
+                    self._process_packet(item.packet)
             except Exception:
                 logger.exception("Packet processing pipeline crashed")
             finally:
@@ -214,7 +218,11 @@ class SnifferService:
     def drain_packet_queue(
         self, timeout_sec: float = PACKET_QUEUE_DRAIN_TIMEOUT_SEC
     ) -> bool:
-        return self._packet_queue.wait_until_drained(timeout_sec)
+        started = datetime.now().timestamp()
+        intake_drained = self._packet_queue.wait_until_drained(timeout_sec)
+        remaining = max(0.0, timeout_sec - (datetime.now().timestamp() - started))
+        workers_drained = self._flow_worker_pool.wait_until_drained(remaining)
+        return intake_drained and workers_drained
 
     @staticmethod
     def _apply_payload_policy(row: dict[str, Any], settings: dict[str, Any]) -> None:
@@ -257,6 +265,7 @@ class SnifferService:
         self._packet_worker_stop.set()
         if self._packet_worker.is_alive():
             self._packet_worker.join(timeout=1.0)
+        self._flow_worker_pool.close()
         self._persistence.close()
         close_flow_service = getattr(self._flow_service, "close", None)
         if callable(close_flow_service):
@@ -306,6 +315,9 @@ class SnifferService:
     def packet_queue_stats(self) -> dict[str, Any]:
         return self._packet_queue.stats(worker_alive=self._packet_worker.is_alive())
 
+    def flow_worker_pool_stats(self) -> dict[str, Any]:
+        return self._flow_worker_pool.stats()
+
     def auto_block_stats(self) -> dict[str, int | float]:
         return self._detection_pipeline.stats()
 
@@ -313,6 +325,7 @@ class SnifferService:
         return {
             "event_bus": self._event_bus.stats(),
             "packet_queue": self.packet_queue_stats(),
+            "flow_worker_pool": self.flow_worker_pool_stats(),
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }
