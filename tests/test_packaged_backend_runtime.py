@@ -1,8 +1,8 @@
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
-import json
 
 from scripts.qa import packaged_backend_smoke
 from scripts.release import stage_backend_runtime
@@ -16,13 +16,17 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
             runtime_dir = repo_root / "packaging" / "runtime" / "backend"
             bundle_dir.mkdir(parents=True)
 
-            binary_name = stage_backend_runtime.expected_binary_name("win32" if os.name == "nt" else "linux")
+            binary_name = stage_backend_runtime.expected_binary_name(
+                "win32" if os.name == "nt" else "linux"
+            )
             (bundle_dir / binary_name).write_text("binary", encoding="utf-8")
             (bundle_dir / "support.dll").write_text("support", encoding="utf-8")
             (bundle_dir / "data").mkdir()
             (bundle_dir / "data" / "config.json").write_text("{}", encoding="utf-8")
 
-            staged_binary = stage_backend_runtime.stage_backend_runtime(bundle_dir, runtime_dir)
+            staged_binary = stage_backend_runtime.stage_backend_runtime(
+                bundle_dir, runtime_dir
+            )
 
             self.assertEqual(staged_binary, runtime_dir / binary_name)
             self.assertTrue((runtime_dir / "support.dll").exists())
@@ -33,7 +37,9 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
             runtime_dir = Path(td) / "packaging" / "runtime" / "backend"
             runtime_dir.mkdir(parents=True)
 
-            binary = runtime_dir / packaged_backend_smoke.expected_binary_name("win32" if os.name == "nt" else "linux")
+            binary = runtime_dir / packaged_backend_smoke.expected_binary_name(
+                "win32" if os.name == "nt" else "linux"
+            )
             binary.write_text("binary", encoding="utf-8")
             support = runtime_dir / "python313.dll"
             support.write_text("support", encoding="utf-8")
@@ -54,13 +60,30 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
                     "recommendations": ["Run Netbotpro as Administrator."],
                 }
             )
+            packaged_backend_smoke.validate_monitoring_payload(
+                {
+                    "service_attribution": {
+                        "health": "healthy",
+                        "registry_size": 23,
+                    }
+                }
+            )
             with self.assertRaises(AssertionError):
-                packaged_backend_smoke.validate_status_payload({"ok": True, "project_root": "C:/secret"})
+                packaged_backend_smoke.validate_status_payload(
+                    {"ok": True, "project_root": "C:/secret"}
+                )
             with self.assertRaises(AssertionError):
-                packaged_backend_smoke.validate_interfaces_payload({"items": [], "degraded": True, "source": "fallback"})
+                packaged_backend_smoke.validate_interfaces_payload(
+                    {"items": [], "degraded": True, "source": "fallback"}
+                )
 
     def test_desktop_package_supports_cross_platform_dist_scripts(self):
-        package_json = Path(__file__).resolve().parents[1] / "desktop" / "electron" / "package.json"
+        package_json = (
+            Path(__file__).resolve().parents[1]
+            / "desktop"
+            / "electron"
+            / "package.json"
+        )
         data = json.loads(package_json.read_text(encoding="utf-8"))
         build_resources = package_json.parent / "build-resources"
 
@@ -68,8 +91,12 @@ class PackagedBackendRuntimeTests(unittest.TestCase):
         self.assertIn("dist:win", scripts)
         self.assertIn("dist:linux", scripts)
         self.assertNotIn("electronDist", data.get("build", {}))
-        self.assertEqual(data.get("build", {}).get("linux", {}).get("target"), ["AppImage", "deb"])
-        self.assertEqual(data.get("build", {}).get("win", {}).get("icon"), "build-resources/icon.ico")
+        self.assertEqual(
+            data.get("build", {}).get("linux", {}).get("target"), ["AppImage", "deb"]
+        )
+        self.assertEqual(
+            data.get("build", {}).get("win", {}).get("icon"), "build-resources/icon.ico"
+        )
         self.assertTrue((build_resources / "icon.ico").exists())
         self.assertTrue((build_resources / "icon.png").exists())
 

@@ -139,6 +139,32 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     pressure_reasons: safeLiveRingReasons(liveRingBuffer.pressure_reasons),
     categories: safeLiveRingCategories,
   };
+  const serviceAttribution = operationalMetrics?.service_attribution || observability?.service_attribution || {};
+  const safeServiceAttributionReasons = Array.isArray(serviceAttribution.pressure_reasons)
+    ? serviceAttribution.pressure_reasons.filter((reason) => [
+      "service_attribution_registry_error",
+      "service_attribution_high_latency",
+      "service_attribution_errors",
+      "service_attribution_high_unknown_rate",
+    ].includes(reason))
+    : [];
+  const safeServiceAttribution = {
+    enabled: serviceAttribution.enabled !== false,
+    health: ["healthy", "degraded", "critical"].includes(serviceAttribution.health) ? serviceAttribution.health : "healthy",
+    registry_size: toNumber(serviceAttribution.registry_size),
+    attributed_flows_total: toNumber(serviceAttribution.attributed_flows_total),
+    unknown_flows_total: toNumber(serviceAttribution.unknown_flows_total),
+    high_confidence_total: toNumber(serviceAttribution.high_confidence_total),
+    medium_confidence_total: toNumber(serviceAttribution.medium_confidence_total),
+    low_confidence_total: toNumber(serviceAttribution.low_confidence_total),
+    encrypted_unknown_total: toNumber(serviceAttribution.encrypted_unknown_total),
+    cdn_only_total: toNumber(serviceAttribution.cdn_only_total),
+    attribution_errors_total: toNumber(serviceAttribution.attribution_errors_total),
+    avg_attribution_latency_ms: toNumber(serviceAttribution.avg_attribution_latency_ms),
+    p95_attribution_latency_ms: toNumber(serviceAttribution.p95_attribution_latency_ms),
+    last_error: /^[A-Za-z0-9_]{1,80}$/.test(String(serviceAttribution.last_error || "")) ? String(serviceAttribution.last_error) : "",
+    pressure_reasons: safeServiceAttributionReasons,
+  };
   const persistence = operationalMetrics?.persistence || observability?.persistence || {};
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
@@ -254,10 +280,13 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
           ? "warning"
           : "healthy"
     : "healthy";
+  const serviceAttributionLevel = safeServiceAttribution.enabled
+    ? normalizeLevel(safeServiceAttribution.health)
+    : "healthy";
   const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
   const criticalFlows = toNumber(flows.risk_distribution?.critical);
   const highFlows = toNumber(flows.risk_distribution?.high);
-  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, liveRingLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, liveRingLevel, serviceAttributionLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
   const recommendedActions = [];
 
   if (backendLevel !== "healthy") {
@@ -304,6 +333,18 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   }
   if (liveRingEnabled && safeLiveRingBuffer.last_error) {
     recommendedActions.push("Live ring buffer reported errors. Inspect backend logs and recent live capture activity.");
+  }
+  if (safeServiceAttributionReasons.includes("service_attribution_registry_error")) {
+    recommendedActions.push("Service attribution registry failed to load. Check service_fingerprints.json.");
+  }
+  if (safeServiceAttributionReasons.includes("service_attribution_high_unknown_rate")) {
+    recommendedActions.push("Many flows could not be attributed. This may be normal with ECH, DoH, VPN, proxy, or shared CDN traffic.");
+  }
+  if (safeServiceAttributionReasons.includes("service_attribution_high_latency")) {
+    recommendedActions.push("Service attribution latency is high. Review fingerprint registry size and matching rules.");
+  }
+  if (safeServiceAttribution.attribution_errors_total > 0) {
+    recommendedActions.push("Service attribution errors were observed. Inspect backend logs and recent flow metadata.");
   }
   if (criticalFlows > 0) {
     recommendedActions.push("Review critical flows and related alerts first.");
@@ -400,6 +441,12 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       level: liveRingLevel,
     },
     {
+      label: "Attribution",
+      value: String(safeServiceAttribution.attributed_flows_total),
+      hint: `Unknown ${safeServiceAttribution.unknown_flows_total} | High ${safeServiceAttribution.high_confidence_total}`,
+      level: serviceAttributionLevel,
+    },
+    {
       label: "Write Queue",
       value: String(queueSize),
       hint: `${persistenceUtilization.toFixed(1)}% used | Max ${toNumber(persistence.queue_max ?? persistence.max_size)}`,
@@ -464,6 +511,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     safeFlowWorkerDropReason: safeFlowWorkerPool.last_drop_reason,
     liveRingBuffer: safeLiveRingBuffer,
     liveRingLevel,
+    serviceAttribution: safeServiceAttribution,
+    serviceAttributionLevel,
     persistence,
     history,
     autoBlock,

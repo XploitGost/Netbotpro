@@ -425,6 +425,8 @@ class MonitoringMetricsApiTests(unittest.TestCase):
         self.assertIn("websocket", payload)
         self.assertIn("persistence", payload)
         self.assertIn("flow_worker_pool", payload)
+        self.assertIn("service_attribution", payload)
+        self.assertIn("registry_size", payload["service_attribution"])
         self.assertEqual(payload["health"], "healthy")
 
     def test_runtime_observability_snapshot_includes_flow_worker_pool(self):

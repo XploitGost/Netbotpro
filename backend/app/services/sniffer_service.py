@@ -14,7 +14,7 @@ from backend.app.services.flow_service import FlowService
 from backend.app.services.flow_worker_pool import FlowWorkerPool
 from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
-from backend.app.services.service_attribution import enrich_service_attribution
+from backend.app.services.service_attribution import ServiceAttributionEngine
 from backend.app.services.settings_service import get_settings_snapshot
 from backend.app.services.sniffer_dashboard_state import SnifferDashboardState
 from backend.app.services.sniffer_detection_pipeline import SnifferDetectionPipeline
@@ -54,6 +54,7 @@ class SnifferService:
         capture_provider: CaptureProvider | None = None,
         flow_service: FlowService | None = None,
         live_ring_buffer: LiveRingBuffer | None = None,
+        service_attribution: ServiceAttributionEngine | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._event_bus = event_bus
@@ -74,6 +75,9 @@ class SnifferService:
         )
         self._publisher = SnifferEventPublisher(event_bus)
         self._live_ring_buffer = live_ring_buffer or LiveRingBuffer.from_env()
+        self._service_attribution = (
+            service_attribution or ServiceAttributionEngine.from_env()
+        )
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
@@ -186,7 +190,7 @@ class SnifferService:
         except Exception:
             logger.exception("Packet analysis pipeline crashed")
             alerts = []
-        enrich_service_attribution(packet)
+        self._service_attribution.enrich(packet)
         alerts = self._assign_alert_ids(packet, alerts)
         for alert in alerts:
             self._apply_payload_policy(alert, policy.to_public_dict())
@@ -344,6 +348,7 @@ class SnifferService:
         self._state.reset()
         self._flow_service.reset()
         self._live_ring_buffer.clear()
+        self._service_attribution.reset_runtime()
         state = self._state.state(running=running, iface=iface)
         state["observability"] = self.observability()
         self._publisher.publish_state("sniffer:reset", state)
@@ -365,6 +370,9 @@ class SnifferService:
 
     def live_ring_buffer_stats(self) -> dict[str, Any]:
         return self._live_ring_buffer.metrics()
+
+    def service_attribution_stats(self) -> dict[str, Any]:
+        return self._service_attribution.metrics()
 
     def recent_live_records(
         self,
@@ -390,6 +398,7 @@ class SnifferService:
             "packet_queue": self.packet_queue_stats(),
             "flow_worker_pool": self.flow_worker_pool_stats(),
             "live_ring_buffer": self.live_ring_buffer_stats(),
+            "service_attribution": self.service_attribution_stats(),
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }

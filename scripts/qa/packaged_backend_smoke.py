@@ -10,15 +10,27 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PACKAGED_BACKEND_DIR = PROJECT_ROOT / "packaging" / "runtime" / "backend"
-DESKTOP_PACKAGED_BACKEND_DIR = PROJECT_ROOT / "desktop" / "electron" / "dist" / "win-unpacked" / "resources" / "runtime" / "backend"
+DESKTOP_PACKAGED_BACKEND_DIR = (
+    PROJECT_ROOT
+    / "desktop"
+    / "electron"
+    / "dist"
+    / "win-unpacked"
+    / "resources"
+    / "runtime"
+    / "backend"
+)
 
 
 def expected_binary_name(platform_name: str | None = None) -> str:
     platform_name = platform_name or os.sys.platform
-    return "netbotpro-backend.exe" if platform_name.startswith("win") else "netbotpro-backend"
+    return (
+        "netbotpro-backend.exe"
+        if platform_name.startswith("win")
+        else "netbotpro-backend"
+    )
 
 
 def resolve_runtime_dir(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> Path:
@@ -43,7 +55,10 @@ def list_support_files(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> list[Path]:
     runtime_dir = resolve_runtime_dir(runtime_dir)
     runtime_dir = Path(runtime_dir)
     binary_path = find_binary(runtime_dir)
-    return sorted([entry for entry in runtime_dir.iterdir() if entry.name != binary_path.name], key=lambda item: item.name)
+    return sorted(
+        [entry for entry in runtime_dir.iterdir() if entry.name != binary_path.name],
+        key=lambda item: item.name,
+    )
 
 
 def _free_port() -> int:
@@ -86,13 +101,27 @@ def validate_interfaces_payload(payload: dict) -> None:
         raise AssertionError("Interfaces recommendations must be a list when present")
 
 
-def run_smoke(runtime_dir: Path = PACKAGED_BACKEND_DIR, timeout_sec: float = 20.0) -> None:
+def validate_monitoring_payload(payload: dict) -> None:
+    attribution = payload.get("service_attribution")
+    if not isinstance(attribution, dict):
+        raise AssertionError("Monitoring payload must include service_attribution")
+    if int(attribution.get("registry_size") or 0) < 1:
+        raise AssertionError("Packaged service attribution registry is unavailable")
+    if attribution.get("health") == "critical":
+        raise AssertionError("Packaged service attribution health must not be critical")
+
+
+def run_smoke(
+    runtime_dir: Path = PACKAGED_BACKEND_DIR, timeout_sec: float = 20.0
+) -> None:
     runtime_dir = resolve_runtime_dir(runtime_dir)
     runtime_dir = Path(runtime_dir)
     binary_path = find_binary(runtime_dir)
     support_files = list_support_files(runtime_dir)
     if not support_files:
-        raise AssertionError(f"Expected staged support files next to {binary_path.name}")
+        raise AssertionError(
+            f"Expected staged support files next to {binary_path.name}"
+        )
 
     port = _free_port()
     with tempfile.TemporaryDirectory() as td:
@@ -113,10 +142,20 @@ def run_smoke(runtime_dir: Path = PACKAGED_BACKEND_DIR, timeout_sec: float = 20.
             stderr=subprocess.DEVNULL,
         )
         try:
-            status_payload = _wait_for_http(f"http://127.0.0.1:{port}/api/status", timeout_sec=timeout_sec)
+            status_payload = _wait_for_http(
+                f"http://127.0.0.1:{port}/api/status", timeout_sec=timeout_sec
+            )
             validate_status_payload(status_payload)
-            interfaces_payload = _request_json(f"http://127.0.0.1:{port}/api/interfaces", timeout_sec=max(timeout_sec, 6.0))
+            interfaces_payload = _request_json(
+                f"http://127.0.0.1:{port}/api/interfaces",
+                timeout_sec=max(timeout_sec, 6.0),
+            )
             validate_interfaces_payload(interfaces_payload)
+            monitoring_payload = _request_json(
+                f"http://127.0.0.1:{port}/api/monitoring/metrics",
+                timeout_sec=max(timeout_sec, 6.0),
+            )
+            validate_monitoring_payload(monitoring_payload)
         finally:
             process.terminate()
             try:

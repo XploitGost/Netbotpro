@@ -1308,6 +1308,7 @@ function buildRisk(packet, guess, payload, context, signals) {
   const direction = normalizeDirection(packet?.direction || context?.direction);
   const endpoints = determineEndpoints(packet);
   const process = processSummary(packet);
+  const serviceAttribution = packet?.service_attribution || {};
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
   const behaviorEvidence = Array.isArray(context?.behavior_evidence) ? context.behavior_evidence : Array.isArray(context?.behaviorEvidence) ? context.behaviorEvidence : [];
 
@@ -2404,7 +2405,7 @@ function buildRelatedActivity(context) {
       body: cleanText(row?.body) || "Root-cause summary is not available for this sample yet",
       })),
     },
-  ].filter((group) => group.items.length);
+  ].filter((group) => group?.items?.length);
 }
 
 function buildBehaviorGroups(context) {
@@ -2607,6 +2608,7 @@ export function buildPacketInspectionModel(packet, options = {}) {
   const behaviorLabels = Array.isArray(context?.behavior_labels) ? context.behavior_labels : Array.isArray(context?.behaviorLabels) ? context.behaviorLabels : [];
   const riskExplanation = buildRiskExplanation(packet, risk, confidence, signals, process, context);
   const alertCorrelation = context?.alert_correlation || context?.alertCorrelation || {};
+  const serviceAttribution = packet?.service_attribution || {};
   const packetDirection = packet?.direction || context?.direction;
   const headline = `${formatDirection(packetDirection)} ${normalizeProto(packet?.proto) || "traffic"} ${ports.remotePort || ports.localPort || ""} traffic`.trim();
   const interpretedSummary = `${sentenceCase(cleanText(packetDirection) || "Unknown")} ${normalizeProto(packet?.proto) || "traffic"} ${cleanText(packet?.dport) || cleanText(packet?.sport) || ""}`.trim();
@@ -2637,6 +2639,12 @@ export function buildPacketInspectionModel(packet, options = {}) {
       tone: cleanText(packet?.process_name) || cleanText(packet?.pid) ? "active" : "warning",
     },
     {
+      label: "Destination Service",
+      value: serviceAttribution.service_name || packet?.service_name || "Unknown",
+      hint: `${serviceAttribution.service_category || packet?.service_category || "Unknown"} | ${serviceAttribution.attribution_confidence || packet?.service_confidence || "unknown"} confidence`,
+      tone: serviceAttribution.is_unknown ? "warning" : "active",
+    },
+    {
       label: "Why It Matters",
       value: actionHint(packet, risk, guess, context),
       hint: formatRemoteLocationLabel(packet),
@@ -2645,6 +2653,21 @@ export function buildPacketInspectionModel(packet, options = {}) {
   ];
 
   const applicationGroups = [
+    {
+      title: "Service Attribution",
+      rows: toRows([
+        { label: "Application", value: serviceAttribution.application_name || packet?.process_name },
+        { label: "Service", value: serviceAttribution.service_name || packet?.service_name },
+        { label: "Domain", value: serviceAttribution.domain || packet?.service_domain },
+        { label: "Category", value: serviceAttribution.service_category || packet?.service_category },
+        { label: "Confidence", value: serviceAttribution.attribution_confidence || packet?.service_confidence },
+        { label: "Confidence Score", value: serviceAttribution.confidence_score ?? packet?.service_confidence_score },
+        { label: "Evidence Sources", value: formatList(serviceAttribution.attribution_sources || packet?.service_sources) },
+        { label: "Attribution Reasons", value: formatList(serviceAttribution.attribution_reasons || packet?.service_reasons) },
+        { label: "Encrypted Unknown", value: serviceAttribution.is_unknown && serviceAttribution.is_encrypted ? "Yes" : "No" },
+        { label: "Shared CDN", value: serviceAttribution.is_cdn ? "Yes" : "No" },
+      ]),
+    },
     {
       title: "DNS",
       rows: toRows([
@@ -2704,6 +2727,14 @@ export function buildPacketInspectionModel(packet, options = {}) {
     "attribution_confidence",
     "attribution_reason_unavailable",
     "attribution_source",
+    "service_attribution",
+    "service_name",
+    "service_category",
+    "service_domain",
+    "service_confidence",
+    "service_confidence_score",
+    "service_reasons",
+    "service_sources",
     "src_mac",
     "dst_mac",
     "vendor_src",

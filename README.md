@@ -66,6 +66,7 @@ or PCAP artifacts.
 | Conversation Timeline | Active | Protocol, alert, destination, and lifecycle events are correlated per flow. | Timeline summaries and metadata pass through central redaction. |
 | Flow Risk Scoring | Active | Explainable `0..100` scoring covers alerts, volume, DNS failures, unusual protocols/ports, and destinations. | Risk is an investigation aid, not an automated verdict. |
 | Offline PCAP Flow Summary | Active | Offline analysis returns flows, conversations, protocol summaries, timelines, and risk distribution. | Existing API response fields remain compatible; output stays redacted. |
+| Service Attribution / Destination Intelligence | Active MVP | DNS, visible TLS SNI, HTTP Host, recent DNS-answer correlation, ASN metadata, and a local fingerprint registry produce confidence-scored destination labels with evidence. Browser/container identity and CDN infrastructure are handled conservatively; encrypted traffic without evidence remains Unknown. | Local metadata-only inference; no external lookup, TLS decryption, browser history, cookies, credentials, or payload inspection. |
 | Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
@@ -256,6 +257,7 @@ and surfaced in Ops Snapshot metrics.
 - [Performance Pipeline](docs/PERFORMANCE_PIPELINE.md)
 - [Performance Validation](docs/PERFORMANCE_VALIDATION.md)
 - [Flow Analysis And Protocol Intelligence](docs/FLOW_ANALYSIS.md)
+- [Service Attribution And Destination Intelligence](docs/SERVICE_ATTRIBUTION.md)
 - [Deep Packet Inspection](docs/DEEP_PACKET_INSPECTION.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)
@@ -484,9 +486,9 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build.ps1
 
 - Complete the performance foundation with a flow-aware worker pool, live ring
   buffer, and benchmark/soak validation.
-- Add conservative Service Attribution / Destination Intelligence using DNS,
-  TLS SNI, HTTP Host, QUIC-visible metadata, ASN, and local fingerprints. Low
-  confidence remains `Unknown`; no TLS decryption or credential collection.
+- Validate and tune the implemented metadata-only Service Attribution registry
+  against authorized deployment traffic while preserving conservative Unknown
+  results for weak or hidden evidence.
 - Build a read-only Incident / Correlation Engine after attribution quality is
   validated, then consider a strictly read-only AI Analyst.
 - Versioned SQLite schema migrations and longer-lived deployment operations.

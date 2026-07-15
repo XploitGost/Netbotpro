@@ -120,6 +120,11 @@ class SnifferPersistence:
                 "attribution_reason_unavailable"
             ),
             "attribution_source": packet.get("attribution_source"),
+            "service_attribution": packet.get("service_attribution"),
+            "service_name": packet.get("service_name"),
+            "service_category": packet.get("service_category"),
+            "service_domain": packet.get("service_domain"),
+            "service_confidence": packet.get("service_confidence"),
         }
         alert_rows = [
             {
@@ -325,8 +330,7 @@ class SnifferPersistence:
             return
         self._last_retention_cleanup = now
         try:
-            from backend.app.services.settings_service import \
-                get_settings_snapshot
+            from backend.app.services.settings_service import get_settings_snapshot
 
             cleanup_retention(
                 int(get_settings_snapshot().get("retention_minutes") or 0)

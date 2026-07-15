@@ -285,7 +285,9 @@ class SnifferServiceTests(unittest.TestCase):
                 {
                     "src": "10.0.0.1",
                     "dst": "8.8.8.8",
+                    "dport": 443,
                     "proto": "UDP",
+                    "tls_sni": "github.com",
                     "authorization": "Bearer ring-secret",
                 }
             )
@@ -295,6 +297,9 @@ class SnifferServiceTests(unittest.TestCase):
             service.close()
 
         self.assertEqual(len(result["items"]), 1)
+        attribution = result["items"][0]["payload"]["service_attribution"]
+        self.assertEqual(attribution["service_name"], "GitHub")
+        self.assertEqual(attribution["attribution_confidence"], "high")
         self.assertNotIn("ring-secret", str(result))
 
     @patch(
