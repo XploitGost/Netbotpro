@@ -88,6 +88,34 @@ def _safe_websocket_drop_reason(value: Any) -> str:
     return ""
 
 
+def _safe_persistence_error(value: Any) -> str:
+    error_type = str(value or "")
+    if error_type and len(error_type) <= 80 and error_type.replace("_", "").isalnum():
+        return error_type
+    return ""
+
+
+def _safe_persistence_drop_reason(value: Any) -> str:
+    reason = str(value or "")
+    if reason in {
+        "queue_full_drop_oldest",
+        "queue_full_drop_newest",
+        "queue_full_reject_new",
+    }:
+        return reason
+    return ""
+
+
+def _safe_persistence_reasons(value: Any) -> list[str]:
+    return [
+        reason
+        for item in (value if isinstance(value, list) else [])
+        if (reason := str(item)).startswith("persistence_")
+        and len(reason) <= 80
+        and reason.replace("_", "").isalnum()
+    ]
+
+
 def build_monitoring_metrics(
     *,
     sniffer_state: dict[str, Any],
@@ -116,22 +144,34 @@ def build_monitoring_metrics(
         packet_queue.get("dropped_total") or packet_queue.get("dropped_packets")
     )
     packet_queue_worker_alive = bool(packet_queue.get("worker_alive", True))
-    queue_size = _int(persistence.get("queue_depth") or persistence.get("queue_size"))
+    queue_size = _int(
+        persistence.get("persistence_queue_depth")
+        or persistence.get("queue_depth")
+        or persistence.get("queue_size")
+    )
     persistence_max_size = _int(
-        persistence.get("queue_max") or persistence.get("max_size") or 5000
+        persistence.get("persistence_queue_max")
+        or persistence.get("queue_max")
+        or persistence.get("max_size")
+        or 5000
     )
     persistence_utilization = _number(
-        persistence.get("queue_utilization_percent")
+        persistence.get("persistence_utilization_percent")
+        or persistence.get("queue_utilization_percent")
         or persistence.get("utilization_percent")
     )
     queue_high_water = _int(
         persistence.get("high_water_mark") or persistence.get("queue_high_water_mark")
     )
     dropped_writes = _int(
-        persistence.get("events_dropped_total") or persistence.get("dropped_writes")
+        persistence.get("persistence_events_dropped_total")
+        or persistence.get("events_dropped_total")
+        or persistence.get("dropped_writes")
     )
     failed_writes = _int(
-        persistence.get("events_failed_total") or persistence.get("failed_writes")
+        persistence.get("persistence_events_failed_total")
+        or persistence.get("events_failed_total")
+        or persistence.get("failed_writes")
     )
     flush_errors = _int(persistence.get("flush_errors"))
     persistence_worker_alive = bool(persistence.get("worker_alive", True))
@@ -169,7 +209,15 @@ def build_monitoring_metrics(
         worker_alive=packet_queue_worker_alive,
     )
 
+    persistence_reasons = _safe_persistence_reasons(
+        persistence.get("persistence_pressure_reasons")
+        or persistence.get("pressure_reasons")
+        or []
+    )
     pressure_reasons: list[str] = list(packet_queue_pressure_reasons)
+    pressure_reasons.extend(
+        reason for reason in persistence_reasons if reason not in pressure_reasons
+    )
     if persistence_utilization >= 80.0 or queue_size >= max(
         1, int(persistence_max_size * 0.8)
     ):
@@ -216,6 +264,8 @@ def build_monitoring_metrics(
         or failed_writes >= 100
         or not persistence_worker_alive
         or queue_size >= max(1, int(persistence_max_size * 0.95))
+        or persistence.get("persistence_health") == "critical"
+        or persistence.get("health") == "critical"
         or websocket_send_errors >= 3
         or websocket_drops >= _int(event_aggregator.get("client_queue_max") or 1000)
     ):
@@ -366,44 +416,73 @@ def build_monitoring_metrics(
             "pressure_reasons": packet_queue_pressure_reasons,
         },
         "persistence": {
-            "persistence_enabled": bool(
+            "enabled": bool(
                 persistence.get("persistence_enabled", persistence.get("enabled"))
             ),
             "queue_depth": queue_size,
             "queue_max": persistence_max_size,
-            "queue_utilization_percent": persistence_utilization,
+            "utilization_percent": persistence_utilization,
             "batches_written_total": _int(
-                persistence.get("batches_written_total")
+                persistence.get("persistence_batches_written_total")
+                or persistence.get("batches_written_total")
                 or persistence.get("flush_batches")
             ),
             "events_received_total": _int(
-                persistence.get("events_received_total")
+                persistence.get("persistence_events_received_total")
+                or persistence.get("events_received_total")
                 or persistence.get("accepted_writes")
             ),
-            "events_written_total": _int(persistence.get("events_written_total")),
+            "events_written_total": _int(
+                persistence.get("persistence_events_written_total")
+                or persistence.get("events_written_total")
+            ),
             "events_dropped_total": dropped_writes,
             "events_failed_total": failed_writes,
             "retry_total": _int(
-                persistence.get("retry_total") or persistence.get("flush_retries")
+                persistence.get("persistence_retry_total")
+                or persistence.get("retry_total")
+                or persistence.get("flush_retries")
             ),
-            "last_flush_at": persistence.get("last_flush_at") or "",
-            "last_error": persistence.get("last_error") or "",
-            "last_drop_reason": persistence.get("last_drop_reason") or "",
-            "write_latency_avg_ms": _number(
-                persistence.get("write_latency_avg_ms")
+            "last_flush_at": persistence.get("persistence_last_flush_at")
+            or persistence.get("last_flush_at")
+            or "",
+            "last_error": _safe_persistence_error(
+                persistence.get("persistence_last_error")
+                or persistence.get("last_error")
+            ),
+            "last_drop_reason": _safe_persistence_drop_reason(
+                persistence.get("persistence_last_drop_reason")
+                or persistence.get("last_drop_reason")
+            ),
+            "write_latency_ms_avg": _number(
+                persistence.get("persistence_write_latency_ms_avg")
+                or persistence.get("write_latency_avg_ms")
                 or persistence.get("avg_flush_ms")
             ),
-            "write_latency_p95_ms": _number(
-                persistence.get("write_latency_p95_ms")
+            "write_latency_ms_p95": _number(
+                persistence.get("persistence_write_latency_ms_p95")
+                or persistence.get("write_latency_p95_ms")
                 or persistence.get("p95_flush_ms")
             ),
-            "backlog_age_ms": _number(persistence.get("backlog_age_ms")),
+            "backlog_age_ms": _number(
+                persistence.get("persistence_backlog_age_ms")
+                or persistence.get("backlog_age_ms")
+            ),
             "high_water_mark": queue_high_water,
             "overflow_policy": persistence.get("overflow_policy")
             or persistence.get("overload_policy")
             or "drop_oldest",
-            "enabled": bool(
+            "persistence_enabled": bool(
                 persistence.get("persistence_enabled", persistence.get("enabled"))
+            ),
+            "queue_utilization_percent": persistence_utilization,
+            "write_latency_avg_ms": _number(
+                persistence.get("persistence_write_latency_ms_avg")
+                or persistence.get("write_latency_avg_ms")
+            ),
+            "write_latency_p95_ms": _number(
+                persistence.get("persistence_write_latency_ms_p95")
+                or persistence.get("write_latency_p95_ms")
             ),
             "max_size": persistence_max_size,
             "current_depth": queue_size,
@@ -426,8 +505,10 @@ def build_monitoring_metrics(
             "flush_retries": _int(persistence.get("flush_retries")),
             "overload_policy": persistence.get("overload_policy") or "drop_oldest",
             "worker_alive": persistence_worker_alive,
-            "health": persistence.get("health") or "healthy",
-            "pressure_reasons": list(persistence.get("pressure_reasons") or []),
+            "health": persistence.get("persistence_health")
+            or persistence.get("health")
+            or "healthy",
+            "pressure_reasons": persistence_reasons,
             "flows": {
                 "enabled": bool(flow_persistence.get("enabled")),
                 "queue_size": _int(flow_persistence.get("queue_size")),

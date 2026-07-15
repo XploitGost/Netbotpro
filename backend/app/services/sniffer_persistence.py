@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from typing import Any, Callable
@@ -29,43 +28,24 @@ class SnifferPersistence:
         retry_backoff_sec: float | None = None,
         flow_writer: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> None:
-        batch_size = batch_size or int(
-            os.environ.get("NETBOT_PERSISTENCE_PACKET_BATCH_SIZE", "500")
-        )
-        flush_interval = flush_interval or (
-            int(os.environ.get("NETBOT_PERSISTENCE_PACKET_FLUSH_MS", "1000")) / 1000.0
-        )
-        max_queue_size = max_queue_size or int(
-            os.environ.get("NETBOT_PERSISTENCE_QUEUE_MAX", "5000")
-        )
-        overload_policy = overload_policy or os.environ.get(
-            "NETBOT_PERSISTENCE_OVERFLOW_POLICY", "drop_oldest"
-        )
-        self._max_retries = max(
-            0,
-            int(
-                max_retries
-                if max_retries is not None
-                else os.environ.get("NETBOT_PERSISTENCE_RETRY_MAX", "3")
-            ),
-        )
-        self._retry_backoff_sec = max(
-            0.0,
-            float(
-                retry_backoff_sec
-                if retry_backoff_sec is not None
-                else int(os.environ.get("NETBOT_PERSISTENCE_RETRY_BACKOFF_MS", "250"))
-                / 1000.0
-            ),
-        )
-        self._batch_size = max(1, int(batch_size))
         _ = max_batch_size  # Kept only for constructor compatibility.
-        self._flush_interval = max(0.1, float(flush_interval))
-        self._max_queue_size = max(1, int(max_queue_size))
-        self._overload_policy = (
-            overload_policy
-            if overload_policy in {"drop_oldest", "drop_newest", "reject_new"}
-            else "drop_oldest"
+        batch_sizes = (
+            {"packet_record": batch_size, "alert_record": batch_size}
+            if batch_size is not None
+            else None
+        )
+        flush_ms = (
+            {
+                "packet_record": int(float(flush_interval) * 1000),
+                "alert_record": int(float(flush_interval) * 1000),
+            }
+            if flush_interval is not None
+            else None
+        )
+        retry_backoff_ms = (
+            int(float(retry_backoff_sec) * 1000)
+            if retry_backoff_sec is not None
+            else None
         )
         self._lock = threading.Lock()
         self._persisted_packets = 0
@@ -74,18 +54,12 @@ class SnifferPersistence:
         self._flow_writer = flow_writer
         self._batch_writer = BatchPersistenceWriter(
             self._write_central_batch,
-            queue_max=self._max_queue_size,
-            overflow_policy=self._overload_policy,
-            retry_max=self._max_retries,
-            retry_backoff_ms=int(self._retry_backoff_sec * 1000),
-            batch_sizes={
-                "packet_record": self._batch_size,
-                "alert_record": self._batch_size,
-            },
-            flush_ms={
-                "packet_record": int(self._flush_interval * 1000),
-                "alert_record": int(self._flush_interval * 1000),
-            },
+            queue_max=max_queue_size,
+            overflow_policy=overload_policy,
+            retry_max=max_retries,
+            retry_backoff_ms=retry_backoff_ms,
+            batch_sizes=batch_sizes,
+            flush_ms=flush_ms,
         )
 
     def persist(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> None:

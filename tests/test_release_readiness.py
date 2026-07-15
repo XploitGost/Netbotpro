@@ -130,6 +130,12 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("NETBOT_PERSISTENCE_FLOW_BATCH_SIZE", performance)
         self.assertIn("NETBOT_PERSISTENCE_QUEUE_MAX", readme)
         self.assertIn("Audit logging stays outside", architecture)
+        self.assertIn("Batch Persistence / Storage Backpressure", performance)
+        self.assertIn("write_latency_ms_p95", performance)
+        self.assertIn("persistence pressure contributes", performance.lower())
+        self.assertEqual(
+            readme.count("| Batch Persistence / Storage Backpressure |"), 1
+        )
         self.assertIn("Service Attribution / Destination Intelligence", performance)
         self.assertIn("tls decryption", performance_lower)
         self.assertIn("worker pool", performance_lower)

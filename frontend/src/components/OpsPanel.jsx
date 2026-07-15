@@ -125,19 +125,23 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
         defaultOpen
       >
         <dl className="ops-metric-grid">
-          <MetricRow label="Queue Depth" value={`${persistence.queue_depth ?? persistence.current_depth ?? persistence.queue_size ?? 0}/${persistence.queue_max ?? persistence.max_size ?? 0}`} level={levelFor("Write Queue")} hint={`${Number(persistence.queue_utilization_percent ?? persistence.utilization_percent ?? 0).toFixed(1)}% | High-water ${persistence.high_water_mark ?? persistence.queue_high_water_mark ?? 0}`} />
-          <MetricRow label="Worker" value={persistence.worker_alive === false ? "Stopped" : "Running"} level={persistence.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${persistence.health || "healthy"}`} />
+          <MetricRow label="Persistence Health" value={persistence.health || "healthy"} level={persistence.health || "healthy"} hint={persistence.worker_alive === false ? "Worker stopped" : "Worker running"} />
+          <MetricRow label="Queue Depth" value={String(persistence.queue_depth ?? persistence.current_depth ?? persistence.queue_size ?? 0)} level={levelFor("Write Queue")} hint={`Max ${persistence.queue_max ?? persistence.max_size ?? 0}`} />
+          <MetricRow label="Queue Max" value={String(persistence.queue_max ?? persistence.max_size ?? 0)} hint="NETBOT_PERSISTENCE_QUEUE_MAX" />
+          <MetricRow label="Utilization" value={`${Number(persistence.utilization_percent ?? persistence.queue_utilization_percent ?? 0).toFixed(1)}%`} level={Number(persistence.utilization_percent ?? persistence.queue_utilization_percent ?? 0) >= 80 ? "degraded" : "healthy"} hint={`High-water ${persistence.high_water_mark ?? persistence.queue_high_water_mark ?? 0}`} />
+          <MetricRow label="Batches Written" value={String(persistence.batches_written_total ?? persistence.flush_batches ?? 0)} />
           <MetricRow label="Events Received" value={String(persistence.events_received_total ?? persistence.accepted_writes ?? 0)} hint={`Written ${persistence.events_written_total || 0} | Batches ${persistence.batches_written_total ?? persistence.flush_batches ?? 0}`} />
+          <MetricRow label="Events Written" value={String(persistence.events_written_total || 0)} />
           <MetricRow label="Dropped Events" value={String(persistence.events_dropped_total ?? persistence.dropped_writes ?? 0)} level={levelFor("Dropped Writes")} hint={`Policy ${persistence.overflow_policy ?? persistence.overload_policy ?? "drop_oldest"}`} />
-          <MetricRow label="Failed Events" value={String(persistence.events_failed_total ?? persistence.failed_writes ?? 0)} level={Number(persistence.events_failed_total ?? persistence.failed_writes ?? 0) > 0 ? "degraded" : "healthy"} hint={`Last error ${persistence.last_error || "None"}`} />
-          <MetricRow label="Average Batch Size" value={Number(persistence.avg_batch_size || 0).toFixed(1)} hint={`Last batch ${persistence.last_batch_size || 0}`} />
-          <MetricRow label="Average Flush" value={formatMs(persistence.avg_flush_ms || 0)} level={Number(persistence.avg_flush_ms || 0) >= 250 ? "warning" : "healthy"} hint={`Last flush ${formatMs(persistence.last_flush_ms || 0)}`} />
-          <MetricRow label="P95 Write" value={formatMs(persistence.write_latency_p95_ms ?? persistence.p95_flush_ms ?? 0)} level={Number(persistence.write_latency_p95_ms ?? persistence.p95_flush_ms ?? 0) >= 250 ? "warning" : "healthy"} hint={`Average ${formatMs(persistence.write_latency_avg_ms ?? persistence.avg_flush_ms ?? 0)}`} />
+          <MetricRow label="Failed Writes" value={String(persistence.events_failed_total ?? persistence.failed_writes ?? 0)} level={Number(persistence.events_failed_total ?? persistence.failed_writes ?? 0) > 0 ? "degraded" : "healthy"} hint={`Last error ${persistence.last_error || "None"}`} />
           <MetricRow label="Retries" value={String(persistence.retry_total ?? persistence.flush_retries ?? 0)} level={Number(persistence.retry_total ?? persistence.flush_retries ?? 0) > 0 ? "warning" : "healthy"} hint={`Backlog age ${formatMs(persistence.backlog_age_ms || 0)}`} />
+          <MetricRow label="Write Latency Average" value={formatMs(persistence.write_latency_ms_avg ?? persistence.write_latency_avg_ms ?? persistence.avg_flush_ms ?? 0)} level={Number(persistence.write_latency_ms_avg ?? persistence.write_latency_avg_ms ?? persistence.avg_flush_ms ?? 0) >= 250 ? "warning" : "healthy"} />
+          <MetricRow label="Write Latency p95" value={formatMs(persistence.write_latency_ms_p95 ?? persistence.write_latency_p95_ms ?? persistence.p95_flush_ms ?? 0)} level={Number(persistence.write_latency_ms_p95 ?? persistence.write_latency_p95_ms ?? persistence.p95_flush_ms ?? 0) >= 500 ? "degraded" : "healthy"} />
+          <MetricRow label="Backlog Age" value={formatMs(persistence.backlog_age_ms || 0)} />
           <MetricRow label="Last Flush" value={persistence.last_flush_at || "Not yet"} hint={persistence.last_drop_reason || "No persistence drops"} />
-          <MetricRow label="Queue Drift" value={formatMs(persistence.last_queue_drift_ms || 0)} hint={`Batches ${persistence.flush_batches || 0}`} />
-          <MetricRow label="Drain Completed" value={Number(persistence.drain_completed || 0) ? "Yes" : "No"} level={Number(persistence.shutdown_flush_timeout || 0) ? "degraded" : "healthy"} hint={`Shutdown timeout ${persistence.shutdown_flush_timeout || 0}`} />
-          <MetricRow label="Flow Batches" value={String(persistence.flows?.flush_batches || 0)} level={Number(persistence.flows?.failed_total || 0) > 0 ? "degraded" : "healthy"} hint={`Persisted ${persistence.flows?.persisted_total || 0} | Failed ${persistence.flows?.failed_total || 0}`} />
+          <MetricRow label="Last Error" value={persistence.last_error || "None"} />
+          <MetricRow label="Last Drop Reason" value={persistence.last_drop_reason || "None"} />
+          <MetricRow label="Pressure Reasons" value={(persistence.pressure_reasons || []).join(", ") || "None"} level={(persistence.pressure_reasons || []).length ? "warning" : "healthy"} />
         </dl>
       </AccordionPanel>
 

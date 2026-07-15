@@ -208,7 +208,7 @@ The Operations UI shows:
 Recommended actions are emitted when utilization is high, drops occur, the
 worker is not alive, or the high-water mark approaches capacity.
 
-## Batch Persistence And Storage Backpressure
+## Batch Persistence / Storage Backpressure
 
 Step 4 places redacted packet, alert, and flow records behind one
 `BatchPersistenceWriter`. Producers enqueue a standard envelope with `type`,
@@ -244,10 +244,38 @@ Tune batch windows before enlarging the queue for heavier authorized capture.
 A larger queue costs memory and increases record age. Every drop is counted,
 logged with a fixed safe reason, and exposed in Ops.
 
-The `persistence` metrics report queue depth/capacity/utilization, received,
-written, dropped and failed events, batches, retries, high-water mark, average
-and p95 latency, backlog age, worker state, last flush, safe error type, safe
-drop reason, health, and pressure reasons. They never expose queued payloads.
+Invalid booleans, integers, batch sizes, flush windows, retry values, and
+overflow policies fall back to the defaults above. Retry is finite and uses
+exponential backoff. `drop_oldest` keeps recent work, `drop_newest` preserves
+queued order, and `reject_new` explicitly refuses new work. All three policies
+increment visible drop metrics when pressure causes loss.
+
+`/api/monitoring/metrics` exposes the clean `persistence` fields:
+
+- `enabled`, `health`, `queue_depth`, `queue_max`, and `utilization_percent`;
+- `batches_written_total`, `events_received_total`, and
+  `events_written_total`;
+- `events_dropped_total`, `events_failed_total`, and `retry_total`;
+- `last_flush_at`, safe `last_error`, and safe `last_drop_reason`;
+- `write_latency_ms_avg`, `write_latency_ms_p95`, and `backlog_age_ms`;
+- `pressure_reasons`.
+
+Health is `healthy` for normal latency and backlog with no meaningful loss,
+`degraded` for high utilization, repeated retry, slow writes, old backlog, or
+initial loss, and `critical` for a stopped worker, near-full queue, repeated
+terminal failures, or significant drops. Persistence pressure contributes to
+overall Ops health. Metrics never expose queued payloads.
+
+The Ops panel renders every field above and gives focused actions for growing
+backlog, slow disk/database writes, failed writes, and dropped events.
+
+Packet rows, flow snapshots, and alerts are the integrated high-pressure paths.
+Protocol metadata travels inside the redacted packet/flow records. Agent
+heartbeat and telemetry categories are supported by the envelope, but the
+existing reliable summary-only Agent storage path is intentionally unchanged.
+Reports stay synchronous so callers receive a definite result. Audit stays
+outside batching, writes immediately under its ordering lock, and is tested for
+ordered redacted output.
 
 This step does not add a worker pool, database sharding, ClickHouse, benchmark
 claims, or a new retention engine. Agent history remains on its existing safe

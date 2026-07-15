@@ -29,11 +29,26 @@ EVENT_TYPES = {
 
 def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name)
-    return (
-        default
-        if value is None
-        else value.strip().lower() in {"1", "true", "yes", "on"}
-    )
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _safe_int(value: Any, default: int, *, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= minimum else default
+
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    return _safe_int(os.environ.get(name), default, minimum=minimum)
 
 
 @dataclass(frozen=True)
@@ -86,8 +101,10 @@ class BatchPersistenceWriter:
             if enabled is None
             else enabled
         )
-        self._queue_max = max(
-            1, int(queue_max or os.environ.get("NETBOT_PERSISTENCE_QUEUE_MAX", "5000"))
+        self._queue_max = _safe_int(
+            queue_max,
+            _env_int("NETBOT_PERSISTENCE_QUEUE_MAX", 5000, minimum=1),
+            minimum=1,
         )
         policy = overflow_policy or os.environ.get(
             "NETBOT_PERSISTENCE_OVERFLOW_POLICY", "drop_oldest"
@@ -97,58 +114,52 @@ class BatchPersistenceWriter:
             if policy in {"drop_oldest", "drop_newest", "reject_new"}
             else "drop_oldest"
         )
-        self._retry_max = max(
-            0,
-            int(
-                retry_max
-                if retry_max is not None
-                else os.environ.get("NETBOT_PERSISTENCE_RETRY_MAX", "3")
-            ),
+        self._retry_max = _safe_int(
+            retry_max,
+            _env_int("NETBOT_PERSISTENCE_RETRY_MAX", 3),
         )
-        self._retry_backoff_ms = max(
-            0,
-            int(
-                retry_backoff_ms
-                if retry_backoff_ms is not None
-                else os.environ.get("NETBOT_PERSISTENCE_RETRY_BACKOFF_MS", "250")
-            ),
+        self._retry_backoff_ms = _safe_int(
+            retry_backoff_ms,
+            _env_int("NETBOT_PERSISTENCE_RETRY_BACKOFF_MS", 250),
         )
         self._batch_sizes = {
-            "packet_record": int(
-                os.environ.get("NETBOT_PERSISTENCE_PACKET_BATCH_SIZE", "500")
+            "packet_record": _env_int(
+                "NETBOT_PERSISTENCE_PACKET_BATCH_SIZE", 500, minimum=1
             ),
-            "flow_record": int(
-                os.environ.get("NETBOT_PERSISTENCE_FLOW_BATCH_SIZE", "250")
+            "flow_record": _env_int(
+                "NETBOT_PERSISTENCE_FLOW_BATCH_SIZE", 250, minimum=1
             ),
-            "alert_record": int(
-                os.environ.get("NETBOT_PERSISTENCE_ALERT_BATCH_SIZE", "100")
+            "alert_record": _env_int(
+                "NETBOT_PERSISTENCE_ALERT_BATCH_SIZE", 100, minimum=1
             ),
-            "agent_telemetry": int(
-                os.environ.get("NETBOT_PERSISTENCE_AGENT_BATCH_SIZE", "100")
+            "agent_telemetry": _env_int(
+                "NETBOT_PERSISTENCE_AGENT_BATCH_SIZE", 100, minimum=1
             ),
-            "agent_heartbeat": int(
-                os.environ.get("NETBOT_PERSISTENCE_AGENT_BATCH_SIZE", "100")
+            "agent_heartbeat": _env_int(
+                "NETBOT_PERSISTENCE_AGENT_BATCH_SIZE", 100, minimum=1
             ),
         }
         self._flush_ms = {
-            "packet_record": int(
-                os.environ.get("NETBOT_PERSISTENCE_PACKET_FLUSH_MS", "1000")
+            "packet_record": _env_int(
+                "NETBOT_PERSISTENCE_PACKET_FLUSH_MS", 1000, minimum=1
             ),
-            "flow_record": int(
-                os.environ.get("NETBOT_PERSISTENCE_FLOW_FLUSH_MS", "1500")
+            "flow_record": _env_int(
+                "NETBOT_PERSISTENCE_FLOW_FLUSH_MS", 1500, minimum=1
             ),
-            "alert_record": int(
-                os.environ.get("NETBOT_PERSISTENCE_ALERT_FLUSH_MS", "1000")
+            "alert_record": _env_int(
+                "NETBOT_PERSISTENCE_ALERT_FLUSH_MS", 1000, minimum=1
             ),
-            "agent_telemetry": int(
-                os.environ.get("NETBOT_PERSISTENCE_AGENT_FLUSH_MS", "3000")
+            "agent_telemetry": _env_int(
+                "NETBOT_PERSISTENCE_AGENT_FLUSH_MS", 3000, minimum=1
             ),
-            "agent_heartbeat": int(
-                os.environ.get("NETBOT_PERSISTENCE_AGENT_FLUSH_MS", "3000")
+            "agent_heartbeat": _env_int(
+                "NETBOT_PERSISTENCE_AGENT_FLUSH_MS", 3000, minimum=1
             ),
         }
-        self._batch_sizes.update(batch_sizes or {})
-        self._flush_ms.update(flush_ms or {})
+        for event_type, value in (batch_sizes or {}).items():
+            self._batch_sizes[event_type] = _safe_int(value, 100, minimum=1)
+        for event_type, value in (flush_ms or {}).items():
+            self._flush_ms[event_type] = _safe_int(value, 2000, minimum=1)
         self._queue: queue.Queue[PersistenceEvent | _EventGroup | _FlushCommand] = (
             queue.Queue(maxsize=self._queue_max)
         )
@@ -158,6 +169,7 @@ class BatchPersistenceWriter:
         self._lock = threading.Lock()
         self._events_received = self._events_written = self._events_dropped = 0
         self._events_failed = self._batches_written = self._retry_total = 0
+        self._consecutive_failures = 0
         self._high_water = 0
         self._last_flush_at = self._last_error = self._last_drop_reason = ""
         self._latencies: deque[float] = deque(maxlen=512)
@@ -274,6 +286,11 @@ class BatchPersistenceWriter:
                 (event.queued_at for rows in self._buffers.values() for event in rows),
                 default=None,
             )
+            queued_oldest = self._queued_oldest_at()
+            if queued_oldest is not None:
+                oldest = (
+                    min(oldest, queued_oldest) if oldest is not None else queued_oldest
+                )
             backlog_age = (
                 round(max(0.0, time.monotonic() - oldest) * 1000.0, 2)
                 if oldest
@@ -289,14 +306,24 @@ class BatchPersistenceWriter:
                 reasons.append("persistence_dropped_events")
             if self._events_failed:
                 reasons.append("persistence_failed_events")
+            if self._retry_total >= 2:
+                reasons.append("persistence_retries")
+            latency_avg = sum(latencies) / len(latencies) if latencies else 0.0
+            if latency_avg >= 250.0 or p95 >= 500.0:
+                reasons.append("persistence_write_latency")
+            if backlog_age >= max(self._flush_ms.values()) * 2:
+                reasons.append("persistence_backlog_age")
             if self._enabled and not worker_alive and not self._stop.is_set():
                 reasons.append("persistence_worker_stopped")
             health = "degraded" if reasons else "healthy"
-            if self._events_failed >= 3 or (
-                self._enabled and not worker_alive and not self._stop.is_set()
+            if (
+                self._consecutive_failures >= 3
+                or self._events_dropped >= 100
+                or utilization >= 95.0
+                or (self._enabled and not worker_alive and not self._stop.is_set())
             ):
                 health = "critical"
-            return {
+            metrics = {
                 "persistence_enabled": self._enabled,
                 "queue_depth": depth,
                 "queue_max": self._queue_max,
@@ -313,14 +340,34 @@ class BatchPersistenceWriter:
                 "last_flush_at": self._last_flush_at,
                 "last_error": self._last_error,
                 "last_drop_reason": self._last_drop_reason,
-                "write_latency_avg_ms": (
-                    round(sum(latencies) / len(latencies), 2) if latencies else 0.0
-                ),
+                "write_latency_avg_ms": round(latency_avg, 2),
                 "write_latency_p95_ms": round(p95, 2),
                 "backlog_age_ms": backlog_age,
                 "health": health,
                 "pressure_reasons": reasons,
             }
+            metrics.update(
+                {
+                    "persistence_queue_depth": depth,
+                    "persistence_queue_max": self._queue_max,
+                    "persistence_utilization_percent": utilization,
+                    "persistence_batches_written_total": self._batches_written,
+                    "persistence_events_received_total": self._events_received,
+                    "persistence_events_written_total": self._events_written,
+                    "persistence_events_dropped_total": self._events_dropped,
+                    "persistence_events_failed_total": self._events_failed,
+                    "persistence_retry_total": self._retry_total,
+                    "persistence_last_flush_at": self._last_flush_at,
+                    "persistence_last_error": self._last_error,
+                    "persistence_last_drop_reason": self._last_drop_reason,
+                    "persistence_write_latency_ms_avg": round(latency_avg, 2),
+                    "persistence_write_latency_ms_p95": round(p95, 2),
+                    "persistence_backlog_age_ms": backlog_age,
+                    "persistence_health": health,
+                    "persistence_pressure_reasons": reasons,
+                }
+            )
+            return metrics
 
     def _handle_overflow(self, event: PersistenceEvent | _EventGroup) -> bool:
         reason = f"queue_full_{self._overflow_policy}"
@@ -365,6 +412,19 @@ class BatchPersistenceWriter:
                 )
                 for item in self._queue.queue
             )
+
+    def _queued_oldest_at(self) -> float | None:
+        with self._queue.mutex:
+            timestamps = [
+                event.queued_at
+                for item in self._queue.queue
+                for event in (
+                    item.events
+                    if isinstance(item, _EventGroup)
+                    else (item,) if isinstance(item, PersistenceEvent) else ()
+                )
+            ]
+        return min(timestamps, default=None)
 
     def _run(self) -> None:
         while not self._stop.is_set() or not self._queue.empty() or self._buffers:
@@ -444,10 +504,12 @@ class BatchPersistenceWriter:
                 self._latencies.append(latency)
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
                 self._last_error = ""
+                self._consecutive_failures = 0
         except Exception as exc:
             with self._lock:
                 self._events_failed += events
                 self._last_error = type(exc).__name__
+                self._consecutive_failures += 1
             logger.error(
                 "persistence batch failed error_type=%s events=%s",
                 type(exc).__name__,
@@ -462,12 +524,14 @@ class BatchPersistenceWriter:
                 storage_retries = (
                     int(result.get("retries", 0)) if isinstance(result, dict) else 0
                 )
-                return retries + storage_retries
+                return storage_retries
             except Exception:
                 if retries >= self._retry_max or self._stop.is_set():
                     raise
                 delay = self._retry_backoff_ms / 1000.0 * (2**retries)
                 retries += 1
+                with self._lock:
+                    self._retry_total += 1
                 logger.warning(
                     "persistence retry attempt=%s delay_ms=%.0f",
                     retries,
@@ -492,11 +556,14 @@ class BatchPersistenceWriter:
                 self._retry_total += retries
                 self._latencies.append(latency)
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
+                self._last_error = ""
+                self._consecutive_failures = 0
             return True
         except Exception as exc:
             with self._lock:
                 self._events_failed += len(events)
                 self._last_error = type(exc).__name__
+                self._consecutive_failures += 1
             return False
 
 
