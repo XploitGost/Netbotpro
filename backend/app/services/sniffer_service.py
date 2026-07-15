@@ -12,6 +12,7 @@ from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.event_bus import EventBus
 from backend.app.services.flow_service import FlowService
 from backend.app.services.flow_worker_pool import FlowWorkerPool
+from backend.app.services.incident_correlation import IncidentCorrelationEngine
 from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.service_attribution import ServiceAttributionEngine
@@ -55,6 +56,7 @@ class SnifferService:
         flow_service: FlowService | None = None,
         live_ring_buffer: LiveRingBuffer | None = None,
         service_attribution: ServiceAttributionEngine | None = None,
+        incident_correlation: IncidentCorrelationEngine | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._event_bus = event_bus
@@ -77,6 +79,9 @@ class SnifferService:
         self._live_ring_buffer = live_ring_buffer or LiveRingBuffer.from_env()
         self._service_attribution = (
             service_attribution or ServiceAttributionEngine.from_env()
+        )
+        self._incident_correlation = (
+            incident_correlation or IncidentCorrelationEngine.from_env()
         )
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
@@ -199,9 +204,23 @@ class SnifferService:
             flow = self._flow_service.ingest(packet, alerts, persist=False)
         else:
             flow = self._flow_service.ingest(packet, alerts)
+        flow_key = str((flow or {}).get("flow_id") or flow_id_for(packet))
+        try:
+            expert_items = packet_expert_items(packet, flow_key)
+        except Exception as exc:  # pragma: no cover - defensive hot-path guard
+            logger.warning(
+                "live ring expert generation failed error_type=%s",
+                type(exc).__name__,
+            )
+            expert_items = []
+        incidents = self._incident_correlation.correlate(
+            packet=packet,
+            flow=flow,
+            alerts=alerts,
+            expert_items=expert_items,
+        )
         self._state.add_packet(packet)
         self._state.add_alerts(alerts)
-        flow_key = str((flow or {}).get("flow_id") or flow_id_for(packet))
         self._live_ring_buffer.append(
             "packet",
             packet,
@@ -225,14 +244,6 @@ class SnifferService:
                 timestamp=str(alert.get("ts") or alert.get("timestamp") or ""),
                 source="detection_engine",
             )
-        try:
-            expert_items = packet_expert_items(packet, flow_key)
-        except Exception as exc:  # pragma: no cover - defensive hot-path guard
-            logger.warning(
-                "live ring expert generation failed error_type=%s",
-                type(exc).__name__,
-            )
-            expert_items = []
         for expert_item in expert_items:
             self._live_ring_buffer.append(
                 "expert_info",
@@ -241,11 +252,20 @@ class SnifferService:
                 timestamp=str(expert_item.get("last_seen") or ""),
                 source="expert_info",
             )
+        for incident in incidents:
+            self._live_ring_buffer.append(
+                "incident",
+                incident,
+                flow_key=flow_key,
+                timestamp=str(incident.get("last_seen") or ""),
+                source="incident_correlation",
+            )
         self._persistence.persist(packet, alerts)
         if self._central_flow_persistence and isinstance(flow, dict):
             self._persistence.persist_flow(flow)
         self._publisher.publish_packet(packet)
         self._publisher.publish_alerts(alerts)
+        self._publisher.publish_incidents(incidents)
 
     def _packet_worker_loop(self) -> None:
         while not self._packet_worker_stop.is_set() or not self._packet_queue.empty():
@@ -349,6 +369,7 @@ class SnifferService:
         self._flow_service.reset()
         self._live_ring_buffer.clear()
         self._service_attribution.reset_runtime()
+        self._incident_correlation.reset()
         state = self._state.state(running=running, iface=iface)
         state["observability"] = self.observability()
         self._publisher.publish_state("sniffer:reset", state)
@@ -373,6 +394,15 @@ class SnifferService:
 
     def service_attribution_stats(self) -> dict[str, Any]:
         return self._service_attribution.metrics()
+
+    def incident_correlation_stats(self) -> dict[str, Any]:
+        return self._incident_correlation.metrics()
+
+    def list_incidents(self, **filters: Any) -> dict[str, Any]:
+        return self._incident_correlation.list_incidents(**filters)
+
+    def get_incident(self, incident_id: str) -> dict[str, Any] | None:
+        return self._incident_correlation.get_incident(incident_id)
 
     def recent_live_records(
         self,
@@ -399,6 +429,7 @@ class SnifferService:
             "flow_worker_pool": self.flow_worker_pool_stats(),
             "live_ring_buffer": self.live_ring_buffer_stats(),
             "service_attribution": self.service_attribution_stats(),
+            "incidents": self.incident_correlation_stats(),
             "persistence": self.persistence_stats(),
             "auto_block": self.auto_block_stats(),
         }

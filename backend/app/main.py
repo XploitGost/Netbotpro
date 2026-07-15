@@ -120,6 +120,7 @@ def _observability_snapshot() -> dict[str, Any]:
         "flow_worker_pool": sniffer_service.flow_worker_pool_stats(),
         "live_ring_buffer": sniffer_service.live_ring_buffer_stats(),
         "service_attribution": sniffer_service.service_attribution_stats(),
+        "incidents": sniffer_service.incident_correlation_stats(),
         "persistence": sniffer_service.persistence_stats(),
         "auto_block": sniffer_service.auto_block_stats(),
     }
@@ -248,6 +249,43 @@ def api_live_ring_metrics(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     return sniffer_service.live_ring_buffer_stats()
+
+
+@app.get("/api/incidents")
+def api_incidents(
+    status: str = "open",
+    severity: str = "",
+    limit: int = 100,
+    since: str | None = None,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    if status not in {"open", "resolved", "investigating", "suppressed", "all"}:
+        raise HTTPException(status_code=400, detail="Invalid incident status")
+    if severity and severity not in {"info", "low", "medium", "high", "critical"}:
+        raise HTTPException(status_code=400, detail="Invalid incident severity")
+    if not 1 <= limit <= 1000:
+        raise HTTPException(
+            status_code=400, detail="Incident limit must be between 1 and 1000"
+        )
+    return sniffer_service.list_incidents(
+        status=status,
+        severity=severity,
+        limit=limit,
+        since=since,
+    )
+
+
+@app.get("/api/incidents/{incident_id}")
+def api_incident_detail(
+    incident_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    incident = sniffer_service.get_incident(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return {"incident": incident}
 
 
 def _agent_headers(

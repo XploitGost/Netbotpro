@@ -5,6 +5,7 @@ const NAV_GROUPS = [
       { id: "monitor", label: "Monitor" },
       { id: "inspect", label: "Inspect" },
       { id: "flows", label: "Flows" },
+      { id: "incidents", label: "Incidents" },
     ],
   },
   {

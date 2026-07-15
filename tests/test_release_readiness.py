@@ -126,6 +126,27 @@ class ReleaseReadinessTests(unittest.TestCase):
         ]:
             self.assertIn(boundary, service_lower)
 
+    def test_incident_correlation_docs_and_boundaries_are_explicit(self):
+        incident_docs = self._read("docs/INCIDENT_CORRELATION.md")
+        incident_lower = incident_docs.lower()
+        readme = self._read("README.md")
+        architecture = self._read("docs/ARCHITECTURE.md")
+
+        self.assertIn("docs/INCIDENT_CORRELATION.md", readme)
+        self.assertIn("Incident Correlation Engine", readme)
+        self.assertIn("IncidentCorrelationEngine", architecture)
+        self.assertIn("NETBOT_INCIDENT_MAX_OPEN", incident_docs)
+        self.assertIn("single weak signal does not create", incident_lower)
+        for boundary in [
+            "raw payloads",
+            "credentials",
+            "does not block hosts",
+            "execute response actions",
+            "send commands to agents",
+            "decrypt tls",
+        ]:
+            self.assertIn(boundary, incident_lower)
+
     def test_performance_pipeline_docs_are_linked_and_scoped(self):
         readme = self._read("README.md")
         architecture = self._read("docs/ARCHITECTURE.md")

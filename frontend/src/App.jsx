@@ -7,6 +7,7 @@ import { DeepPacketPanel } from "./components/DeepPacketPanel";
 import { ExportPanel } from "./components/ExportPanel";
 import { FocusedIpPanel } from "./components/FocusedIpPanel";
 import { FlowsPanel } from "./components/FlowsPanel";
+import { IncidentsPanel } from "./components/IncidentsPanel";
 import { HeroPanel } from "./components/HeroPanel";
 import { LiveGraphPanel } from "./components/LiveGraphPanel";
 import { MiniList } from "./components/MiniList";
@@ -46,6 +47,7 @@ const WORKSPACE_META = {
   monitor: { eyebrow: "Analyze", title: "Live Monitor", subtitle: "Capture status, packets, alerts, and operational health.", links: [["inspect", "Inspect packet"], ["flows", "Open flows"]] },
   inspect: { eyebrow: "Analyze", title: "Packet Inspection", subtitle: "Investigate selected packets, alerts, streams, and protocol layers.", links: [["monitor", "Select packets"], ["flows", "Related flows"]] },
   flows: { eyebrow: "Analyze", title: "Flows & Conversations", subtitle: "Review protocol-aware sessions, timelines, and explainable risk.", links: [["monitor", "Live packets"], ["inspect", "Inspect packet"], ["reports", "Reports"]] },
+  incidents: { eyebrow: "Analyze", title: "Security Incidents", subtitle: "Review explainable groups of related alerts, flows, and service evidence.", links: [["monitor", "Live packets"], ["flows", "Related flows"], ["inspect", "Inspect evidence"]] },
   agents: { eyebrow: "Operations", title: "Agent Fleet", subtitle: "Read-only server health, capture status, alerts, and risk history.", links: [["reports", "Fleet reports"], ["settings", "Settings"]] },
   traceroute: { eyebrow: "Operations", title: "Traceroute", subtitle: "Probe and review a network route from the local backend.", links: [["monitor", "Monitor"], ["inspect", "Inspect"]] },
   offline: { eyebrow: "Operations", title: "Offline PCAP Analysis", subtitle: "Analyze an authorized capture without starting live monitoring.", links: [["inspect", "Inspect"], ["flows", "Flows"]] },
@@ -608,6 +610,14 @@ function App() {
     </section>
   );
 
+  const incidentsPage = (
+    <section className="page-grid page-grid-single">
+      <PageSection title="Incident Review" subtitle="Bounded, read-only correlation over redacted analysis signals" wide>
+        <IncidentsPanel api={api} />
+      </PageSection>
+    </section>
+  );
+
   const traceroutePage = (
     <section className="page-grid page-grid-single">
       <PageSection title="Route Probe" subtitle="Configure a target and inspect the resulting route" wide>
@@ -661,6 +671,7 @@ function App() {
     monitor: monitorPage,
     inspect: inspectPage,
     flows: flowsPage,
+    incidents: incidentsPage,
     agents: agentsPage,
     settings: settingsPage,
     traceroute: traceroutePage,

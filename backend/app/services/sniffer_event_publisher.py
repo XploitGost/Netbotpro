@@ -16,5 +16,9 @@ class SnifferEventPublisher:
         for alert in alerts:
             self._event_bus.publish("alert:new", alert)
 
+    def publish_incidents(self, incidents: list[dict[str, Any]]) -> None:
+        for incident in incidents:
+            self._event_bus.publish("incident:update", incident)
+
     def publish_state(self, event_type: str, state: dict[str, Any]) -> None:
         self._event_bus.publish(event_type, state)

@@ -10,10 +10,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app, sniffer_service
 from backend.app.security import require_local_token, require_trusted_client
-from backend.app.services.live_ring_buffer import (
-    DEFAULT_CAPACITIES,
-    LiveRingBuffer,
-)
+from backend.app.services.live_ring_buffer import DEFAULT_CAPACITIES, LiveRingBuffer
 from backend.app.services.monitoring_service import build_monitoring_metrics
 
 
@@ -30,7 +27,15 @@ class LiveRingBufferTests(unittest.TestCase):
 
         self.assertEqual(metrics["categories"]["packet"]["capacity"], 2)
         self.assertEqual(metrics["categories"]["flow"]["capacity"], 4)
-        self.assertEqual(len(metrics["categories"]), 7)
+        self.assertEqual(len(metrics["categories"]), 8)
+
+    def test_incident_records_are_supported_and_redacted(self):
+        ring = self.make_buffer()
+        ring.append(
+            "incident", {"id": "inc-1", "evidence": "Authorization: Bearer ring-secret"}
+        )
+        rendered = str(ring.query("incident"))
+        self.assertNotIn("ring-secret", rendered)
 
     def test_appends_supported_live_records(self):
         ring = self.make_buffer()

@@ -1832,6 +1832,117 @@ a {
   gap: 4px;
 }
 
+.incidents-workspace {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.incident-toolbar {
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) minmax(150px, 200px) max-content;
+  gap: 8px;
+  align-items: center;
+}
+
+.incident-toolbar select {
+  width: 100%;
+  min-width: 150px;
+}
+
+.incidents-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.4fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.incident-list,
+.incident-detail {
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.incident-list {
+  display: grid;
+  align-content: start;
+  max-height: 720px;
+  overflow-y: auto;
+}
+
+.incident-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 10px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.incident-row:hover,
+.incident-row-selected {
+  background: rgba(48, 198, 166, 0.09);
+}
+
+.incident-row span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.incident-row small,
+.incident-row em {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-style: normal;
+}
+
+.incident-row em {
+  grid-column: 2;
+  font-size: 12px;
+}
+
+.incident-detail {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 16px;
+  overflow-wrap: anywhere;
+}
+
+.incident-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.incident-detail h3,
+.incident-detail h4 {
+  margin: 0;
+}
+
+.incident-detail section {
+  display: grid;
+  gap: 8px;
+}
+
+.incident-related {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.incident-related span {
+  padding: 10px;
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
 .flow-attribution-summary {
   min-width: 0;
 }
@@ -2151,6 +2262,8 @@ button:disabled {
   }
 
   .flows-layout,
+  .incidents-layout,
+  .incident-toolbar,
   .flow-summary-grid,
   .flow-toolbar {
     grid-template-columns: 1fr;

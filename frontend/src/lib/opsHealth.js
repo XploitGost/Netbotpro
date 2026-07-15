@@ -114,7 +114,7 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const liveRingBuffer = operationalMetrics?.live_ring_buffer || observability?.live_ring_buffer || {};
   const safeLiveRingCategories = Object.fromEntries(
     Object.entries(liveRingBuffer.categories || {})
-      .filter(([category]) => ["packet", "flow", "alert", "expert_info", "protocol_metadata", "agent_status", "ops_event"].includes(category))
+      .filter(([category]) => ["packet", "flow", "alert", "incident", "expert_info", "protocol_metadata", "agent_status", "ops_event"].includes(category))
       .map(([category, values]) => [category, {
         records: toNumber(values?.records),
         capacity: toNumber(values?.capacity),
@@ -166,6 +166,23 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     pressure_reasons: safeServiceAttributionReasons,
   };
   const persistence = operationalMetrics?.persistence || observability?.persistence || {};
+  const rawIncidents = operationalMetrics?.incidents || observability?.incidents || {};
+  const incidentReasons = Array.isArray(rawIncidents.pressure_reasons)
+    ? rawIncidents.pressure_reasons.filter((reason) => ["incident_high_open_count", "incident_signal_pressure", "incident_correlation_latency", "incident_dropped_signals", "incident_engine_errors"].includes(reason))
+    : [];
+  const incidents = {
+    enabled: rawIncidents.enabled !== false,
+    health: ["healthy", "degraded", "critical"].includes(rawIncidents.health) ? rawIncidents.health : "healthy",
+    open_total: toNumber(rawIncidents.open_total), created_total: toNumber(rawIncidents.created_total), updated_total: toNumber(rawIncidents.updated_total),
+    resolved_total: toNumber(rawIncidents.resolved_total), suppressed_total: toNumber(rawIncidents.suppressed_total),
+    signals_received_total: toNumber(rawIncidents.signals_received_total), signals_correlated_total: toNumber(rawIncidents.signals_correlated_total),
+    signals_ignored_total: toNumber(rawIncidents.signals_ignored_total), signals_dropped_total: toNumber(rawIncidents.signals_dropped_total),
+    high_severity_total: toNumber(rawIncidents.high_severity_total), critical_severity_total: toNumber(rawIncidents.critical_severity_total),
+    avg_correlation_latency_ms: toNumber(rawIncidents.avg_correlation_latency_ms), p95_correlation_latency_ms: toNumber(rawIncidents.p95_correlation_latency_ms),
+    max_open_incidents: toNumber(rawIncidents.max_open_incidents), last_created_at: String(rawIncidents.last_created_at || ""),
+    last_updated_at: String(rawIncidents.last_updated_at || ""), last_error: /^[A-Za-z0-9_]{1,80}$/.test(String(rawIncidents.last_error || "")) ? String(rawIncidents.last_error) : "",
+    pressure_reasons: incidentReasons,
+  };
   const history = observability?.history || {};
   const autoBlock = observability?.auto_block || {};
   const capture = operationalMetrics?.capture || {};
@@ -283,10 +300,11 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   const serviceAttributionLevel = safeServiceAttribution.enabled
     ? normalizeLevel(safeServiceAttribution.health)
     : "healthy";
+  const incidentLevel = incidents.enabled ? normalizeLevel(incidents.health) : "healthy";
   const freshnessLevel = ageSeconds == null || ageSeconds <= 120 ? "healthy" : ageSeconds <= 300 ? "warning" : "degraded";
   const criticalFlows = toNumber(flows.risk_distribution?.critical);
   const highFlows = toNumber(flows.risk_distribution?.high);
-  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, liveRingLevel, serviceAttributionLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
+  const overall = worstLevel(backendLevel, freshnessLevel, packetQueueLevel, flowWorkerLevel, liveRingLevel, serviceAttributionLevel, incidentLevel, persistenceLevel, streamLevel, queryLevel, autoBlockLevel);
   const recommendedActions = [];
 
   if (backendLevel !== "healthy") {
@@ -346,6 +364,10 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
   if (safeServiceAttribution.attribution_errors_total > 0) {
     recommendedActions.push("Service attribution errors were observed. Inspect backend logs and recent flow metadata.");
   }
+  if (incidentReasons.includes("incident_high_open_count")) recommendedActions.push("Many incidents are open. Review high-severity incidents and suppress known benign patterns.");
+  if (incidents.signals_dropped_total > 0) recommendedActions.push("Incident signals were dropped due to correlation pressure. Review incident limits and event volume.");
+  if (incidentReasons.includes("incident_correlation_latency")) recommendedActions.push("Incident correlation latency is elevated. Review correlation window and signal volume.");
+  if (incidents.last_error) recommendedActions.push("Incident correlation errors occurred. Inspect backend logs and recent signal payloads.");
   if (criticalFlows > 0) {
     recommendedActions.push("Review critical flows and related alerts first.");
   } else if (highFlows > 0) {
@@ -447,6 +469,12 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
       level: serviceAttributionLevel,
     },
     {
+      label: "Incidents",
+      value: String(incidents.open_total),
+      hint: `High ${incidents.high_severity_total} | Critical ${incidents.critical_severity_total}`,
+      level: incidentLevel,
+    },
+    {
       label: "Write Queue",
       value: String(queueSize),
       hint: `${persistenceUtilization.toFixed(1)}% used | Max ${toNumber(persistence.queue_max ?? persistence.max_size)}`,
@@ -513,6 +541,8 @@ export function buildOpsSnapshot(observability, operationalMetrics = null) {
     liveRingLevel,
     serviceAttribution: safeServiceAttribution,
     serviceAttributionLevel,
+    incidents,
+    incidentLevel,
     persistence,
     history,
     autoBlock,
