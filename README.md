@@ -67,6 +67,7 @@ or PCAP artifacts.
 | Flow Risk Scoring | Active | Explainable `0..100` scoring covers alerts, volume, DNS failures, unusual protocols/ports, and destinations. | Risk is an investigation aid, not an automated verdict. |
 | Offline PCAP Flow Summary | Active | Offline analysis returns flows, conversations, protocol summaries, timelines, and risk distribution. | Existing API response fields remain compatible; output stays redacted. |
 | Service Attribution / Destination Intelligence | Active MVP | DNS, visible TLS SNI, HTTP Host, recent DNS-answer correlation, ASN metadata, and a local fingerprint registry produce confidence-scored destination labels with evidence. Browser/container identity and CDN infrastructure are handled conservatively; encrypted traffic without evidence remains Unknown. | Local metadata-only inference; no external lookup, TLS decryption, browser history, cookies, credentials, or payload inspection. |
+| Incident Correlation Engine | Active MVP | Related redacted alerts, flows, service attribution, and expert signals are grouped into bounded incidents with timeline, severity, confidence, and manual investigation guidance. | Read-only and in-memory in this release; no response actions, blocking, AI decisions, or agent commands. |
 | Deep Packet Inspection | Active MVP | Inspect renders a searchable layer tree, safe bytes view, streams, and Expert Info. | No TLS decryption; visible metadata and ASCII previews are centrally redacted. |
 | Display Filters | Active MVP | Safe packet and flow filter parser covers text, equality, range, and boolean operators. | Filters run on redacted metadata and never use Python `eval`. |
 | Offline PCAP Deep Analysis | Active MVP | Offline results include packet details, Expert Info, and stream summaries. | Previous API fields remain compatible; raw secrets are not exposed. |
@@ -258,6 +259,7 @@ and surfaced in Ops Snapshot metrics.
 - [Performance Validation](docs/PERFORMANCE_VALIDATION.md)
 - [Flow Analysis And Protocol Intelligence](docs/FLOW_ANALYSIS.md)
 - [Service Attribution And Destination Intelligence](docs/SERVICE_ATTRIBUTION.md)
+- [Incident Correlation](docs/INCIDENT_CORRELATION.md)
 - [Deep Packet Inspection](docs/DEEP_PACKET_INSPECTION.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)

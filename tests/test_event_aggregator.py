@@ -70,6 +70,18 @@ class EventAggregatorTests(unittest.TestCase):
         self.assertEqual(emitted[0]["count"], 2)
         self.assertEqual(emitted[0]["updates"][0]["payload"]["flow_id"], "flow-1")
 
+    def test_batches_and_redacts_incident_updates(self):
+        emitted = []
+        aggregator = EventAggregator(
+            emitted.append, alert_batch_ms=10000, alert_batch_max=1
+        )
+        aggregator.publish(
+            "incident:update", {"incident_id": "inc-1", "evidence": "token=raw-secret"}
+        )
+        self.assertEqual(emitted[0]["type"], "incident_batch")
+        self.assertNotIn("raw-secret", str(emitted[0]))
+        self.assertEqual(aggregator.stats()["pending_incident_events"], 0)
+
     def test_batch_interval_triggers_flush(self):
         emitted = []
         aggregator = EventAggregator(

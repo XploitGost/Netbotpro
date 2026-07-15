@@ -214,6 +214,21 @@ proxies, shared CDNs, and connection reuse can legitimately leave a destination
 Unknown. No TLS decryption, MITM, browser history inspection, cookie/session
 inspection, or credential collection is part of this layer.
 
+## Incident Correlation Layer
+
+After protocol analysis, alert generation, expert information, and Service
+Attribution, `IncidentCorrelationEngine` consumes bounded, centrally redacted
+metadata signals. It requires repeated or multi-source evidence before creating an
+incident and matches later signals by source, flow, destination, application,
+service/domain, and a bounded time window.
+
+Incident summaries and sorted bounded timelines are exposed through protected
+read-only APIs, the Incident workspace, the Live Ring Buffer, and batched WebSocket
+updates. Ops Monitoring reports engine count, latency, drops, and pressure. Incident
+persistence is not enabled in this step; the in-memory store has explicit count and
+retention limits. A future read-only analyst may consume this evidence, but no AI or
+response action is part of the current architecture.
+
 ## Performance Pipeline Foundation
 
 ### Batch Persistence Foundation

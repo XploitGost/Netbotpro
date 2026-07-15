@@ -765,4 +765,25 @@ describe("OpsPanel", () => {
       expect(screen.getAllByText(`Health ${health}`).length).toBeGreaterThan(0);
     }
   );
+
+  it("renders incident engine pressure without exposing diagnostics", () => {
+    render(
+      <OpsPanel observability={{}} operationalMetrics={{
+        generated_at: "2026-07-15T10:01:00Z", health: "degraded", capture: { running: true }, flows: { risk_distribution: {} },
+        incidents: {
+          enabled: true, health: "degraded", open_total: 80, max_open_incidents: 100,
+          created_total: 12, updated_total: 30, signals_received_total: 90,
+          signals_correlated_total: 40, signals_ignored_total: 50, signals_dropped_total: 2,
+          high_severity_total: 4, critical_severity_total: 1,
+          avg_correlation_latency_ms: 3, p95_correlation_latency_ms: 55,
+          last_error: "Authorization: Bearer ops-secret",
+          pressure_reasons: ["incident_high_open_count", "incident_dropped_signals", "incident_correlation_latency", "Authorization: Bearer ops-secret"],
+        },
+      }} />
+    );
+    expect(screen.getByText("Incident Correlation Engine")).toBeTruthy();
+    expect(screen.getByText("Many incidents are open. Review high-severity incidents and suppress known benign patterns.")).toBeTruthy();
+    expect(screen.getByText("Incident signals were dropped due to correlation pressure. Review incident limits and event volume.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/ops-secret|authorization/i);
+  });
 });

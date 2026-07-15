@@ -584,7 +584,7 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Incident / Correlation Engine
+1. Validate Incident / Correlation Engine quality and false-positive rates
 2. Read-only AI Analyst
 
 ### Recorded Product Direction
@@ -596,7 +596,10 @@ registry. The attribution stage adds bounded local matching work; its average
 and p95 latency, unknown rate, errors, and registry health are visible in Ops
 Snapshot. Missing or weak evidence remains `Unknown / Encrypted`.
 
-Incident correlation follows attribution, and a read-only AI Analyst follows
-incident quality validation. None of these roadmap items authorize TLS
+The Incident Correlation Engine now follows attribution. It consumes only bounded,
+redacted alerts, flows, attribution results, and expert signals, and exposes its
+own latency, count, and pressure metrics. Its in-memory incident and timeline
+limits preserve the performance pipeline's bounded-data guarantees. A read-only
+AI Analyst may follow incident quality validation. None of these roadmap items authorize TLS
 decryption, MITM, credential collection, command/control, autonomous actions,
 or Agent raw packet, payload, or PCAP forwarding.

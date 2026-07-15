@@ -80,6 +80,11 @@ export function useApiClient(localToken) {
     getProtocolsSummary: () => request("/protocols/summary"),
     getProtocolIntelligence: () => request("/protocols/intelligence"),
     getFlowSummaryReport: () => request("/reports/flows/summary"),
+    getIncidents: (params = {}) => {
+      const query = buildQueryString(params);
+      return request(`/incidents${query ? `?${query}` : ""}`);
+    },
+    getIncident: (id) => request(`/incidents/${encodeURIComponent(id)}`),
     getAgentsOverview: () => request("/agents/overview"),
     getAgentAlertsSummary: () => request("/agents/alerts/summary"),
     getAgentRiskSummary: () => request("/agents/risk/summary"),

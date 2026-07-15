@@ -39,6 +39,7 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
   const flowWorkerLastDropReason = snapshot.safeFlowWorkerDropReason || "No drops recorded";
   const liveRingBuffer = snapshot.liveRingBuffer;
   const serviceAttribution = snapshot.serviceAttribution;
+  const incidents = snapshot.incidents;
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
   const eventAggregator = snapshot.eventAggregator;
@@ -139,6 +140,25 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
           <MetricRow label="Average Latency" value={formatMs(serviceAttribution.avg_attribution_latency_ms || 0)} />
           <MetricRow label="Latency p95" value={formatMs(serviceAttribution.p95_attribution_latency_ms || 0)} level={Number(serviceAttribution.p95_attribution_latency_ms || 0) >= 25 ? "warning" : "healthy"} />
           <MetricRow label="Pressure Reasons" value={(serviceAttribution.pressure_reasons || []).join(", ") || "None"} level={(serviceAttribution.pressure_reasons || []).length ? "warning" : "healthy"} />
+        </dl>
+      </AccordionPanel>
+
+      <AccordionPanel
+        eyebrow="Intelligence"
+        title="Incident Correlation Engine"
+        subtitle="Bounded correlation of redacted alerts, flows, attribution, and expert signals."
+        badge={incidents.enabled ? levelLabel(snapshot.incidentLevel) : "Disabled"}
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Engine State" value={incidents.enabled ? "Enabled" : "Disabled"} level={snapshot.incidentLevel} hint={`Health ${incidents.health}`} />
+          <MetricRow label="Open Incidents" value={String(incidents.open_total)} hint={`Limit ${incidents.max_open_incidents}`} level={incidents.open_total >= incidents.max_open_incidents && incidents.max_open_incidents ? "degraded" : "healthy"} />
+          <MetricRow label="Created / Updated" value={`${incidents.created_total} / ${incidents.updated_total}`} hint={`Resolved ${incidents.resolved_total} | Suppressed ${incidents.suppressed_total}`} />
+          <MetricRow label="Signals" value={String(incidents.signals_received_total)} hint={`Correlated ${incidents.signals_correlated_total} | Ignored ${incidents.signals_ignored_total}`} />
+          <MetricRow label="Dropped Signals" value={String(incidents.signals_dropped_total)} level={incidents.signals_dropped_total ? "degraded" : "healthy"} />
+          <MetricRow label="High / Critical" value={`${incidents.high_severity_total} / ${incidents.critical_severity_total}`} level={incidents.critical_severity_total ? "degraded" : incidents.high_severity_total ? "warning" : "healthy"} />
+          <MetricRow label="Correlation Latency" value={formatMs(incidents.avg_correlation_latency_ms)} hint={`P95 ${formatMs(incidents.p95_correlation_latency_ms)}`} />
+          <MetricRow label="Last Created" value={incidents.last_created_at || "Not yet"} hint={`Updated ${incidents.last_updated_at || "Not yet"}`} />
+          <MetricRow label="Pressure Reasons" value={incidents.pressure_reasons.join(", ") || "None"} level={incidents.pressure_reasons.length ? "warning" : "healthy"} />
         </dl>
       </AccordionPanel>
 

@@ -188,6 +188,7 @@ def build_monitoring_metrics(
     flow_worker_pool = dict(observability.get("flow_worker_pool") or {})
     live_ring_buffer = dict(observability.get("live_ring_buffer") or {})
     service_attribution = dict(observability.get("service_attribution") or {})
+    incidents = dict(observability.get("incidents") or {})
     event_aggregator = dict(observability.get("event_aggregator") or {})
     websocket = dict(observability.get("websocket") or {})
     persistence = dict(observability.get("persistence") or {})
@@ -283,6 +284,16 @@ def build_monitoring_metrics(
     pressure_reasons.extend(
         reason for reason in flow_worker_reasons if reason not in pressure_reasons
     )
+    incident_reasons = [
+        reason
+        for value in incidents.get("pressure_reasons") or []
+        if (reason := str(value)).startswith("incident_")
+        and len(reason) <= 80
+        and reason.replace("_", "").isalnum()
+    ]
+    pressure_reasons.extend(
+        reason for reason in incident_reasons if reason not in pressure_reasons
+    )
     live_ring_reasons = _safe_live_ring_reasons(
         live_ring_buffer.get("pressure_reasons") or []
     )
@@ -357,6 +368,7 @@ def build_monitoring_metrics(
         or flow_worker_pool.get("health") == "critical"
         or live_ring_buffer.get("health") == "critical"
         or service_attribution.get("health") == "critical"
+        or incidents.get("health") == "critical"
     ):
         health = "critical"
 
@@ -395,6 +407,9 @@ def build_monitoring_metrics(
             ),
             "pending_alert_events": _int(event_aggregator.get("pending_alert_events")),
             "pending_flow_events": _int(event_aggregator.get("pending_flow_events")),
+            "pending_incident_events": _int(
+                event_aggregator.get("pending_incident_events")
+            ),
             "batches_sent_total": _int(event_aggregator.get("batches_sent_total")),
             "events_received_total": _int(
                 event_aggregator.get("events_received_total")
@@ -593,6 +608,7 @@ def build_monitoring_metrics(
                     "packet",
                     "flow",
                     "alert",
+                    "incident",
                     "expert_info",
                     "protocol_metadata",
                     "agent_status",
@@ -636,6 +652,33 @@ def build_monitoring_metrics(
                 service_attribution.get("last_error")
             ),
             "pressure_reasons": service_attribution_reasons,
+        },
+        "incidents": {
+            "enabled": bool(incidents.get("enabled", True)),
+            "health": str(incidents.get("health") or "healthy"),
+            "open_total": _int(incidents.get("open_total")),
+            "created_total": _int(incidents.get("created_total")),
+            "updated_total": _int(incidents.get("updated_total")),
+            "resolved_total": _int(incidents.get("resolved_total")),
+            "suppressed_total": _int(incidents.get("suppressed_total")),
+            "signals_received_total": _int(incidents.get("signals_received_total")),
+            "signals_correlated_total": _int(incidents.get("signals_correlated_total")),
+            "signals_ignored_total": _int(incidents.get("signals_ignored_total")),
+            "signals_dropped_total": _int(incidents.get("signals_dropped_total")),
+            "high_severity_total": _int(incidents.get("high_severity_total")),
+            "critical_severity_total": _int(incidents.get("critical_severity_total")),
+            "avg_correlation_latency_ms": _number(
+                incidents.get("avg_correlation_latency_ms")
+            ),
+            "p95_correlation_latency_ms": _number(
+                incidents.get("p95_correlation_latency_ms")
+            ),
+            "max_open_incidents": _int(incidents.get("max_open_incidents")),
+            "max_signals_per_incident": _int(incidents.get("max_signals_per_incident")),
+            "last_created_at": str(incidents.get("last_created_at") or ""),
+            "last_updated_at": str(incidents.get("last_updated_at") or ""),
+            "last_error": _safe_persistence_error(incidents.get("last_error")),
+            "pressure_reasons": incident_reasons,
         },
         "persistence": {
             "enabled": bool(
