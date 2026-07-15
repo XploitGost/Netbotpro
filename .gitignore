@@ -10,6 +10,8 @@ htmlcov/
 venv/
 .env
 .runtime/
+benchmark_results_*.json
+benchmark_summary_*.md
 
 node_modules/
 frontend/node_modules/
