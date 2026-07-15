@@ -100,6 +100,32 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("core/tcp_analysis.py", architecture)
         self.assertIn("core/dns_intelligence.py", architecture)
 
+    def test_service_attribution_docs_and_boundaries_are_explicit(self):
+        service_docs = self._read("docs/SERVICE_ATTRIBUTION.md")
+        service_lower = service_docs.lower()
+        readme = self._read("README.md")
+        architecture = self._read("docs/ARCHITECTURE.md")
+
+        self.assertIn("docs/SERVICE_ATTRIBUTION.md", readme)
+        self.assertIn("Service Attribution / Destination Intelligence", readme)
+        self.assertIn("ServiceAttributionEngine", architecture)
+        self.assertIn("service_fingerprints.json", architecture)
+        packaged_spec = self._read("packaging/pyinstaller/netbotpro_backend.spec")
+        self.assertIn('"backend/app/data"', packaged_spec)
+        self.assertIn("Unknown encrypted destination", service_docs)
+        self.assertIn("browser and container", service_lower)
+        self.assertIn("no outbound network request", service_lower)
+        for boundary in [
+            "tls decryption",
+            "mitm",
+            "credential collection",
+            "browser history scraping",
+            "cookie/session inspection",
+            "command/control",
+            "raw payload forwarding",
+        ]:
+            self.assertIn(boundary, service_lower)
+
     def test_performance_pipeline_docs_are_linked_and_scoped(self):
         readme = self._read("README.md")
         architecture = self._read("docs/ARCHITECTURE.md")

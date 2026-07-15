@@ -1832,6 +1832,19 @@ a {
   gap: 4px;
 }
 
+.flow-attribution-summary {
+  min-width: 0;
+}
+
+.flow-attribution-warning {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 3px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .flow-metadata {
   margin: 0;
   display: grid;

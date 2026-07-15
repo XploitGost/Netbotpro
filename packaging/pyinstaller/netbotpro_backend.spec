@@ -39,6 +39,7 @@ if project_root is None:
 
 desktop_entry = project_root / "backend" / "app" / "desktop_entry.py"
 config_dir = project_root / "config"
+service_registry_dir = project_root / "backend" / "app" / "data"
 
 hiddenimports = [
     "backend.app.desktop_entry",
@@ -55,6 +56,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(config_dir), "config"),
+        (str(service_registry_dir), "backend/app/data"),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

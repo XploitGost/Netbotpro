@@ -170,21 +170,36 @@ export function FlowsPanel({ api }) {
           </div>
           {selectedFlow ? (
             <>
+              {(() => {
+                const attribution = selectedFlow.service_attribution || {};
+                const serviceName = attribution.service_name || selectedFlow.service_name || "Unknown";
+                const domain = attribution.domain || selectedFlow.service_domain || "";
+                const confidence = attribution.attribution_confidence || selectedFlow.service_confidence || "unknown";
+                const score = attribution.confidence_score ?? selectedFlow.service_confidence_score ?? 0;
+                const reasons = attribution.attribution_reasons || selectedFlow.service_reasons || [];
+                const sources = attribution.attribution_sources || selectedFlow.service_sources || [];
+                return (
+                  <section className="flow-attribution-summary">
+                    <h4>Service attribution</h4>
+                    <dl className="flow-metadata">
+                      <div><dt>Application</dt><dd>{attribution.application_name || selectedFlow.process_name || "Not mapped"}</dd></div>
+                      <div><dt>Service</dt><dd>{serviceName}</dd></div>
+                      <div><dt>Category</dt><dd>{attribution.service_category || selectedFlow.service_category || "Unknown"}</dd></div>
+                      <div><dt>Domain</dt><dd>{domain || "Unavailable"}</dd></div>
+                      <div><dt>Confidence</dt><dd><span className={`flow-risk flow-risk-${confidence === "high" ? "low" : confidence === "medium" ? "medium" : "high"}`}>{confidence} {score}/100</span></dd></div>
+                      <div><dt>Evidence</dt><dd>{sources.length ? sources.join(", ") : "No visible metadata evidence"}</dd></div>
+                    </dl>
+                    {attribution.is_unknown && attribution.is_encrypted ? <p className="flow-attribution-warning">Unknown encrypted destination. ECH, DoH, VPN, proxy, or connection reuse may hide service metadata.</p> : null}
+                    {attribution.is_cdn ? <p className="flow-attribution-warning">Shared CDN infrastructure may represent more than one final service.</p> : null}
+                    {reasons.length ? <ul>{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}
+                  </section>
+                );
+              })()}
               <div className="flow-detail-metrics">
                 <span><small>Duration</small><strong>{selectedFlow.duration_ms} ms</strong></span>
                 <span><small>Process</small><strong>{selectedFlow.process_name || "Not mapped"}</strong></span>
                 <span><small>Sent / received</small><strong>{formatBytes(selectedFlow.bytes_sent)} / {formatBytes(selectedFlow.bytes_received)}</strong></span>
               </div>
-              <section>
-                <h4>Destination service</h4>
-                <dl className="flow-metadata">
-                  <div><dt>Service</dt><dd>{selectedFlow.service_name || "Unknown"}</dd></div>
-                  <div><dt>Category</dt><dd>{selectedFlow.service_category || "Unknown"}</dd></div>
-                  <div><dt>Domain</dt><dd>{selectedFlow.service_domain || "Not visible in encrypted metadata"}</dd></div>
-                  <div><dt>Confidence</dt><dd>{selectedFlow.service_confidence || "unknown"}</dd></div>
-                </dl>
-                <ul>{selectedFlow.service_reasons?.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-              </section>
               <section>
                 <h4>Risk reasons</h4>
                 <ul>{selectedFlow.risk_reasons?.map((reason) => <li key={reason}>{reason}</li>)}</ul>

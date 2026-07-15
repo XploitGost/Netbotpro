@@ -38,6 +38,7 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
   const flowWorkerPool = snapshot.flowWorkerPool;
   const flowWorkerLastDropReason = snapshot.safeFlowWorkerDropReason || "No drops recorded";
   const liveRingBuffer = snapshot.liveRingBuffer;
+  const serviceAttribution = snapshot.serviceAttribution;
   const persistence = snapshot.persistence;
   const eventBus = snapshot.eventBus;
   const eventAggregator = snapshot.eventAggregator;
@@ -117,6 +118,27 @@ export function OpsPanel({ observability, operationalMetrics = null, isRefreshin
           <MetricRow label="High-water Mark" value={String(packetQueue.high_water_mark ?? packetQueue.queue_high_water_mark ?? 0)} hint="Peak observed queue depth" />
           <MetricRow label="Overflow Policy" value={packetQueue.overflow_policy || "drop_oldest"} hint={packetQueueLastDropReason} />
           <MetricRow label="Worker" value={packetQueue.worker_alive === false ? "Stopped" : "Running"} level={packetQueue.worker_alive === false ? "degraded" : "healthy"} hint={`Health ${packetQueue.health || "healthy"}`} />
+        </dl>
+      </AccordionPanel>
+
+      <AccordionPanel
+        eyebrow="Intelligence"
+        title="Service Attribution"
+        subtitle="Metadata-only destination correlation using the local fingerprint registry."
+        badge={serviceAttribution.enabled ? levelLabel(snapshot.serviceAttributionLevel) : "Disabled"}
+        defaultOpen
+      >
+        <dl className="ops-metric-grid">
+          <MetricRow label="Attribution State" value={serviceAttribution.enabled ? "Enabled" : "Disabled"} level={snapshot.serviceAttributionLevel} hint={`Health ${serviceAttribution.health || "healthy"}`} />
+          <MetricRow label="Registry Size" value={String(serviceAttribution.registry_size || 0)} hint="Local service fingerprints" />
+          <MetricRow label="Attributed Flows" value={String(serviceAttribution.attributed_flows_total || 0)} hint={`Unknown ${serviceAttribution.unknown_flows_total || 0}`} />
+          <MetricRow label="High Confidence" value={String(serviceAttribution.high_confidence_total || 0)} hint={`Medium ${serviceAttribution.medium_confidence_total || 0} | Low ${serviceAttribution.low_confidence_total || 0}`} />
+          <MetricRow label="Encrypted Unknown" value={String(serviceAttribution.encrypted_unknown_total || 0)} level={Number(serviceAttribution.encrypted_unknown_total || 0) > 0 ? "warning" : "healthy"} />
+          <MetricRow label="CDN-only" value={String(serviceAttribution.cdn_only_total || 0)} hint="Shared infrastructure without final-service evidence" />
+          <MetricRow label="Attribution Errors" value={String(serviceAttribution.attribution_errors_total || 0)} level={Number(serviceAttribution.attribution_errors_total || 0) > 0 ? "degraded" : "healthy"} hint={serviceAttribution.last_error || "None"} />
+          <MetricRow label="Average Latency" value={formatMs(serviceAttribution.avg_attribution_latency_ms || 0)} />
+          <MetricRow label="Latency p95" value={formatMs(serviceAttribution.p95_attribution_latency_ms || 0)} level={Number(serviceAttribution.p95_attribution_latency_ms || 0) >= 25 ? "warning" : "healthy"} />
+          <MetricRow label="Pressure Reasons" value={(serviceAttribution.pressure_reasons || []).join(", ") || "None"} level={(serviceAttribution.pressure_reasons || []).length ? "warning" : "healthy"} />
         </dl>
       </AccordionPanel>
 

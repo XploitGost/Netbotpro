@@ -187,6 +187,7 @@ def build_monitoring_metrics(
     packet_queue = dict(observability.get("packet_queue") or {})
     flow_worker_pool = dict(observability.get("flow_worker_pool") or {})
     live_ring_buffer = dict(observability.get("live_ring_buffer") or {})
+    service_attribution = dict(observability.get("service_attribution") or {})
     event_aggregator = dict(observability.get("event_aggregator") or {})
     websocket = dict(observability.get("websocket") or {})
     persistence = dict(observability.get("persistence") or {})
@@ -288,6 +289,18 @@ def build_monitoring_metrics(
     pressure_reasons.extend(
         reason for reason in live_ring_reasons if reason not in pressure_reasons
     )
+    service_attribution_reasons = [
+        reason
+        for value in service_attribution.get("pressure_reasons") or []
+        if (reason := str(value)).startswith("service_attribution_")
+        and len(reason) <= 80
+        and reason.replace("_", "").isalnum()
+    ]
+    pressure_reasons.extend(
+        reason
+        for reason in service_attribution_reasons
+        if reason not in pressure_reasons
+    )
     pressure_reasons.extend(
         reason for reason in persistence_reasons if reason not in pressure_reasons
     )
@@ -343,6 +356,7 @@ def build_monitoring_metrics(
         or websocket_drops >= _int(event_aggregator.get("client_queue_max") or 1000)
         or flow_worker_pool.get("health") == "critical"
         or live_ring_buffer.get("health") == "critical"
+        or service_attribution.get("health") == "critical"
     ):
         health = "critical"
 
@@ -587,6 +601,41 @@ def build_monitoring_metrics(
                 and isinstance(values, dict)
             },
             "pressure_reasons": live_ring_reasons,
+        },
+        "service_attribution": {
+            "enabled": bool(service_attribution.get("enabled", True)),
+            "health": str(service_attribution.get("health") or "healthy"),
+            "registry_size": _int(service_attribution.get("registry_size")),
+            "attributed_flows_total": _int(
+                service_attribution.get("attributed_flows_total")
+            ),
+            "unknown_flows_total": _int(service_attribution.get("unknown_flows_total")),
+            "high_confidence_total": _int(
+                service_attribution.get("high_confidence_total")
+            ),
+            "medium_confidence_total": _int(
+                service_attribution.get("medium_confidence_total")
+            ),
+            "low_confidence_total": _int(
+                service_attribution.get("low_confidence_total")
+            ),
+            "encrypted_unknown_total": _int(
+                service_attribution.get("encrypted_unknown_total")
+            ),
+            "cdn_only_total": _int(service_attribution.get("cdn_only_total")),
+            "attribution_errors_total": _int(
+                service_attribution.get("attribution_errors_total")
+            ),
+            "avg_attribution_latency_ms": _number(
+                service_attribution.get("avg_attribution_latency_ms")
+            ),
+            "p95_attribution_latency_ms": _number(
+                service_attribution.get("p95_attribution_latency_ms")
+            ),
+            "last_error": _safe_persistence_error(
+                service_attribution.get("last_error")
+            ),
+            "pressure_reasons": service_attribution_reasons,
         },
         "persistence": {
             "enabled": bool(

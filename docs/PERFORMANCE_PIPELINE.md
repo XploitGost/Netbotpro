@@ -584,16 +584,17 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Service Attribution / Destination Intelligence
-2. Incident / Correlation Engine
-3. Read-only AI Analyst
+1. Incident / Correlation Engine
+2. Read-only AI Analyst
 
 ### Recorded Product Direction
 
-After the remaining performance work, NetBotPro will add conservative Service
-Attribution / Destination Intelligence. It will correlate process metadata
-with DNS, TLS SNI, HTTP Host, QUIC-visible metadata, ASN, and local service
-fingerprints. Missing or weak evidence must remain `Unknown / Encrypted`.
+NetBotPro now includes conservative Service Attribution / Destination Intelligence
+after packet metadata extraction and before flow aggregation. It
+uses DNS, visible TLS SNI, HTTP Host, ASN metadata, and a local fingerprint
+registry. The attribution stage adds bounded local matching work; its average
+and p95 latency, unknown rate, errors, and registry health are visible in Ops
+Snapshot. Missing or weak evidence remains `Unknown / Encrypted`.
 
 Incident correlation follows attribution, and a read-only AI Analyst follows
 incident quality validation. None of these roadmap items authorize TLS

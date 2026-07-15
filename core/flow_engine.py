@@ -77,6 +77,7 @@ def _safe_packet_sample(
         "length": int(packet.get("length") or 0),
         "summary": redact_sensitive_text(str(packet.get("summary") or "")),
         "metadata": deepcopy(protocol["metadata"]),
+        "service_attribution": deepcopy(packet.get("service_attribution") or {}),
     }
 
 
@@ -132,6 +133,12 @@ class FlowEngine:
                     "service_confidence": packet.get("service_confidence") or "unknown",
                     "service_reasons": list(packet.get("service_reasons") or []),
                     "service_sources": list(packet.get("service_sources") or []),
+                    "service_confidence_score": int(
+                        packet.get("service_confidence_score") or 0
+                    ),
+                    "service_attribution": deepcopy(
+                        packet.get("service_attribution") or {}
+                    ),
                     "country": packet.get("country_name") or packet.get("country"),
                     "asn": packet.get("asn"),
                     "related_alert_ids": [],
@@ -176,6 +183,12 @@ class FlowEngine:
                         "service_confidence": packet.get("service_confidence"),
                         "service_reasons": list(packet.get("service_reasons") or []),
                         "service_sources": list(packet.get("service_sources") or []),
+                        "service_confidence_score": int(
+                            packet.get("service_confidence_score") or 0
+                        ),
+                        "service_attribution": deepcopy(
+                            packet.get("service_attribution") or {}
+                        ),
                     }
                 )
             if len(flow["sample_packets"]) < _MAX_SAMPLE_PACKETS:

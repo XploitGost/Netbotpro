@@ -696,4 +696,73 @@ describe("OpsPanel", () => {
     expect(screen.getByText("Live ring buffer query limit was capped. Reduce requested result size or inspect a narrower time range.")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/raw-secret|authorization/i);
   });
+
+  it("renders service attribution health and safe recommended actions", () => {
+    render(
+      <OpsPanel
+        observability={{}}
+        operationalMetrics={{
+          generated_at: "2026-06-17T10:01:00Z",
+          health: "degraded",
+          capture: { running: true },
+          flows: { risk_distribution: {} },
+          service_attribution: {
+            enabled: true,
+            health: "degraded",
+            registry_size: 22,
+            attributed_flows_total: 14,
+            unknown_flows_total: 6,
+            high_confidence_total: 8,
+            medium_confidence_total: 4,
+            low_confidence_total: 8,
+            encrypted_unknown_total: 5,
+            cdn_only_total: 2,
+            attribution_errors_total: 1,
+            avg_attribution_latency_ms: 2.4,
+            p95_attribution_latency_ms: 31,
+            last_error: "Authorization: Bearer raw-attribution-secret",
+            pressure_reasons: [
+              "service_attribution_high_unknown_rate",
+              "service_attribution_high_latency",
+              "service_attribution_errors",
+              "Authorization: Bearer raw-attribution-secret",
+            ],
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText("Service Attribution")).toBeTruthy();
+    expect(screen.getByText("22")).toBeTruthy();
+    expect(screen.getAllByText("14").length).toBeGreaterThan(0);
+    expect(screen.getByText("Many flows could not be attributed. This may be normal with ECH, DoH, VPN, proxy, or shared CDN traffic.")).toBeTruthy();
+    expect(screen.getByText("Service attribution latency is high. Review fingerprint registry size and matching rules.")).toBeTruthy();
+    expect(screen.getByText("Service attribution errors were observed. Inspect backend logs and recent flow metadata.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/raw-attribution-secret|authorization/i);
+  });
+
+  it.each(["healthy", "degraded", "critical"])(
+    "renders service attribution %s health",
+    (health) => {
+      render(
+        <OpsPanel
+          observability={{}}
+          operationalMetrics={{
+            generated_at: "2026-06-17T10:01:00Z",
+            health,
+            capture: { running: true },
+            flows: { risk_distribution: {} },
+            service_attribution: {
+              enabled: true,
+              health,
+              registry_size: 23,
+            },
+          }}
+        />
+      );
+
+      expect(screen.getByText("Service Attribution")).toBeTruthy();
+      expect(screen.getAllByText(`Health ${health}`).length).toBeGreaterThan(0);
+    }
+  );
 });

@@ -41,6 +41,20 @@ describe("FlowsPanel", () => {
       risk_level: "high",
       risk_reasons: ["Unusual outbound destination"],
       metadata: { path: "/login?token=[REDACTED]" },
+      service_attribution: {
+        application_name: "chrome.exe",
+        service_name: "YouTube",
+        service_category: "Video Streaming",
+        domain: "r1.googlevideo.com",
+        attribution_confidence: "high",
+        confidence_score: 92,
+        attribution_sources: ["tls_sni", "fingerprint"],
+        attribution_reasons: ["TLS SNI matched r1.googlevideo.com"],
+        is_unknown: false,
+        is_encrypted: true,
+        is_cdn: true,
+        secret: "raw-flow-secret",
+      },
       related_alert_ids: [],
     };
     const api = {
@@ -52,7 +66,14 @@ describe("FlowsPanel", () => {
     };
     render(<FlowsPanel api={api} />);
     await waitFor(() => expect(screen.getByText("65 high")).toBeTruthy());
+    expect(screen.getByText("Service attribution")).toBeTruthy();
+    expect(screen.getByText("YouTube")).toBeTruthy();
+    expect(screen.getByText("Video Streaming")).toBeTruthy();
+    expect(screen.getByText("r1.googlevideo.com")).toBeTruthy();
+    expect(screen.getByText("high 92/100")).toBeTruthy();
+    expect(screen.getByText("tls_sni, fingerprint")).toBeTruthy();
+    expect(screen.getByText("Shared CDN infrastructure may represent more than one final service.")).toBeTruthy();
     expect(document.body.textContent).toContain("[REDACTED]");
-    expect(document.body.textContent).not.toContain("Bearer real-secret");
+    expect(document.body.textContent).not.toMatch(/Bearer real-secret|raw-flow-secret/);
   });
 });

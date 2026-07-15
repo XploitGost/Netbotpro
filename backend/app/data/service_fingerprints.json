@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "services": [
+    {"service_name":"YouTube","category":"Video Streaming","domain_patterns":["youtube.com","*.youtube.com","googlevideo.com","*.googlevideo.com","ytimg.com","*.ytimg.com","youtu.be"],"sni_patterns":["youtube.com","*.youtube.com","googlevideo.com","*.googlevideo.com","ytimg.com","*.ytimg.com"],"http_host_patterns":["youtube.com","*.youtube.com","googlevideo.com","*.googlevideo.com","ytimg.com","*.ytimg.com"],"asn_org_patterns":["google"],"cdn":true,"risk_notes":"Known video streaming service; review only for policy or volume anomalies."},
+    {"service_name":"Netflix","category":"Video Streaming","domain_patterns":["netflix.com","*.netflix.com","nflxvideo.net","*.nflxvideo.net","nflximg.net","*.nflximg.net"],"asn_org_patterns":["netflix"],"cdn":true},
+    {"service_name":"Twitch","category":"Video Streaming","domain_patterns":["twitch.tv","*.twitch.tv","ttvnw.net","*.ttvnw.net"],"asn_org_patterns":["twitch"],"cdn":true},
+    {"service_name":"Telegram Web","category":"Messaging","domain_patterns":["web.telegram.org","telegram.org","*.telegram.org","t.me","*.t.me"],"asn_org_patterns":["telegram"]},
+    {"service_name":"WhatsApp Web","category":"Messaging","domain_patterns":["web.whatsapp.com","whatsapp.com","*.whatsapp.com","whatsapp.net","*.whatsapp.net"],"asn_org_patterns":["meta platforms","facebook"]},
+    {"service_name":"Discord","category":"Messaging","domain_patterns":["discord.com","*.discord.com","discord.gg","*.discord.gg","discordapp.com","*.discordapp.com","discordapp.net","*.discordapp.net"],"asn_org_patterns":["discord"],"cdn":true},
+    {"service_name":"GitHub","category":"Developer Platform","domain_patterns":["github.com","*.github.com","githubusercontent.com","*.githubusercontent.com","githubassets.com","*.githubassets.com"],"asn_org_patterns":["github"]},
+    {"service_name":"GitLab","category":"Developer Platform","domain_patterns":["gitlab.com","*.gitlab.com"],"asn_org_patterns":["gitlab"]},
+    {"service_name":"Docker Hub","category":"Developer Platform","domain_patterns":["docker.com","*.docker.com","docker.io","*.docker.io"],"asn_org_patterns":["docker"]},
+    {"service_name":"npm Registry","category":"Developer Platform","domain_patterns":["npmjs.com","*.npmjs.com","npmjs.org","*.npmjs.org"],"asn_org_patterns":["npm"]},
+    {"service_name":"PyPI","category":"Developer Platform","domain_patterns":["pypi.org","*.pypi.org","pythonhosted.org","*.pythonhosted.org"],"asn_org_patterns":["python software foundation"]},
+    {"service_name":"Google","category":"Search / Cloud","domain_patterns":["google.com","*.google.com","gstatic.com","*.gstatic.com","1e100.net","*.1e100.net"],"asn_org_patterns":["google"]},
+    {"service_name":"Microsoft","category":"Search / Cloud","domain_patterns":["microsoft.com","*.microsoft.com","live.com","*.live.com","office.com","*.office.com"],"asn_org_patterns":["microsoft"]},
+    {"service_name":"AWS","category":"Cloud","domain_patterns":["amazonaws.com","*.amazonaws.com","aws.amazon.com"],"asn_org_patterns":["amazon","aws"],"cdn":true},
+    {"service_name":"Azure","category":"Cloud","domain_patterns":["azure.com","*.azure.com","azurewebsites.net","*.azurewebsites.net"],"asn_org_patterns":["microsoft"]},
+    {"service_name":"Instagram","category":"Social","domain_patterns":["instagram.com","*.instagram.com","cdninstagram.com","*.cdninstagram.com"],"asn_org_patterns":["meta platforms","facebook"],"cdn":true},
+    {"service_name":"X / Twitter","category":"Social","domain_patterns":["x.com","*.x.com","twitter.com","*.twitter.com","twimg.com","*.twimg.com"],"asn_org_patterns":["twitter"]},
+    {"service_name":"TikTok","category":"Social","domain_patterns":["tiktok.com","*.tiktok.com","tiktokcdn.com","*.tiktokcdn.com","byteoversea.com","*.byteoversea.com"],"asn_org_patterns":["bytedance"],"cdn":true},
+    {"service_name":"Cloudflare CDN","category":"CDN","domain_patterns":["cloudflare.com","*.cloudflare.com","cloudflare.net","*.cloudflare.net"],"asn_org_patterns":["cloudflare"],"cdn":true},
+    {"service_name":"Akamai","category":"CDN","domain_patterns":["akamaized.net","*.akamaized.net","akamai.net","*.akamai.net","akamaiedge.net","*.akamaiedge.net"],"asn_org_patterns":["akamai"],"cdn":true},
+    {"service_name":"Fastly","category":"CDN","domain_patterns":["fastly.net","*.fastly.net","fastlylb.net","*.fastlylb.net"],"asn_org_patterns":["fastly"],"cdn":true},
+    {"service_name":"Google CDN","category":"CDN","domain_patterns":["googleusercontent.com","*.googleusercontent.com","ggpht.com","*.ggpht.com"],"asn_org_patterns":["google"],"cdn":true},
+    {"service_name":"Amazon CloudFront","category":"CDN","domain_patterns":["cloudfront.net","*.cloudfront.net"],"asn_org_patterns":["amazon"],"cdn":true}
+  ]
+}

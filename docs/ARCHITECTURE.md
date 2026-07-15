@@ -186,6 +186,34 @@ Raw PCAP artifacts are not treated like normal reports. They are exposed only
 through the guarded raw export path, require Full or Forensic mode, require Safe
 Use acceptance, require token authorization, and create audit records.
 
+## Service Attribution / Destination Intelligence
+
+`ServiceAttributionEngine` runs after metadata extraction and before flow
+aggregation. It correlates only locally available DNS query/answer metadata,
+visible TLS SNI, HTTP Host, optional ASN organization metadata, and the bundled
+`backend/app/data/service_fingerprints.json` registry. It never performs a
+network lookup.
+
+Attribution is attached to packet summaries before `FlowEngine` ingestion, so
+the same centrally redacted structure can travel through flow snapshots,
+conversation views, the Live Ring Buffer, WebSocket Event Aggregator, batch
+persistence, Inspect, and Flow Details. Flat service fields remain available
+for backward compatibility.
+
+Each result includes a confidence score and label, evidence sources, human
+readable reasons, encryption/CDN/proxy hints, and an explicit Unknown state.
+HTTP Host and visible SNI are stronger evidence than recent DNS correlation;
+agreement can raise confidence and conflicting metadata lowers it. A browser
+or container process name alone is never treated as proof of a destination
+service. Shared CDN/ASN evidence is labeled conservatively.
+
+Ops Snapshot receives only fixed counters, latency, health, and bounded
+pressure-reason identifiers. It does not receive observed domains, headers,
+packet text, credentials, cookies, sessions, or tokens. ECH, DoH, VPNs,
+proxies, shared CDNs, and connection reuse can legitimately leave a destination
+Unknown. No TLS decryption, MITM, browser history inspection, cookie/session
+inspection, or credential collection is part of this layer.
+
 ## Performance Pipeline Foundation
 
 ### Batch Persistence Foundation
