@@ -237,7 +237,11 @@ retaining raw payloads or allowing unbounded memory growth.
 
 The Event Aggregator remains the realtime delivery-pressure boundary after the
 ring buffer, while Batch Persistence remains the storage-pressure boundary.
-Benchmark/soak validation remains a future step.
+The synthetic benchmark suite exercises each boundary independently and as a
+full local pipeline. Its CI-safe smoke test checks bounded queues, visible
+drops, report generation, and structural health without real capture,
+Administrator privileges, or external network access. Machine-dependent
+throughput is documented separately and is not treated as a capacity promise.
 
 ## WebSocket Event Aggregator
 

@@ -516,14 +516,66 @@ safe error type, per-category utilization, and fixed pressure reason enums.
 High utilization, frequent evictions, or capped queries degrade health; an
 internal read/write error is critical and contributes to overall Ops health.
 
+## Benchmark / Soak Tests
+
+The safe synthetic suite under `benchmarks/` validates the five bounded stages
+individually and through an integrated local soak path:
+
+```text
+Synthetic packet summaries
+-> Bounded Packet Intake Queue
+-> Flow-aware Worker Pool
+-> Live Ring Buffer
+-> WebSocket Event Aggregator
+-> Batch Persistence
+```
+
+The soak runner records generated, processed, dropped, and failed totals;
+throughput; process RSS and CPU samples; queue pressure; stage latency; ring
+evictions; and final Ops health. JSON and Markdown outputs pass through central
+redaction. The CI-safe profile caps duration and load and asserts structural
+properties instead of machine-specific throughput thresholds.
+
+Quick validation:
+
+```powershell
+python benchmarks/soak_test_pipeline.py `
+  --duration-sec 10 `
+  --events-per-sec 200 `
+  --flows 20 `
+  --ci-safe `
+  --output .runtime/benchmarks/smoke
+```
+
+Synthetic benchmarks do not prove production capacity, packet-capture driver
+performance, disk durability under host failure, or behavior on real traffic.
+They do make bounded pressure, drops, latency, and memory trends repeatable.
+See `docs/PERFORMANCE_VALIDATION.md` for the recorded validation run.
+
+### Tuning Guidance
+
+- Increase intake or persistence queue sizes only after checking sustained
+  utilization and memory headroom.
+- Prefer more flow workers only when CPU capacity exists and multiple flows are
+  active; same-flow work remains serialized by design.
+- Adjust WebSocket batch windows before increasing client queue capacity.
+- Size Live Ring categories for the investigation window actually needed;
+  eviction is expected bounded behavior, not data corruption.
+- Validate every production setting with an authorized workload representative
+  of the deployment.
+
 ## Current Limitations
 
 This is not the complete performance engine yet.
 
 Not implemented yet:
 
-- Benchmark / Soak Tests;
 - Optional ClickHouse or external metrics backend.
+
+The benchmark suite is synthetic and local-only. Real capture-driver load,
+real PCAP replay, multi-host clients, long production soaks, and machine sizing
+remain deployment validation work. This is still not the complete performance
+engine or a production capacity certification.
 
 This step also does not add command/control, remote shell, file collection,
 Agent raw packet forwarding, Agent raw payload forwarding, Agent PCAP
@@ -532,11 +584,9 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Benchmark and Soak Tests
-2. Performance Validation Report
-3. Service Attribution / Destination Intelligence
-4. Incident / Correlation Engine
-5. Read-only AI Analyst
+1. Service Attribution / Destination Intelligence
+2. Incident / Correlation Engine
+3. Read-only AI Analyst
 
 ### Recorded Product Direction
 
