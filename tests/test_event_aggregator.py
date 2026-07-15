@@ -79,10 +79,13 @@ class EventAggregatorTests(unittest.TestCase):
         )
 
         aggregator.publish("packet:new", {"id": "pkt-1"})
-        time.sleep(0.08)
+        deadline = time.monotonic() + 1.0
+        while not emitted and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         self.assertEqual(len(emitted), 1)
         self.assertEqual(emitted[0]["type"], "packet_batch")
+        aggregator.close()
 
     def test_metrics_track_drops_and_health(self):
         aggregator = EventAggregator(lambda _message: None)
@@ -118,7 +121,9 @@ class EventBusSlowClientTests(unittest.TestCase):
         queue = bus.subscribe()
 
         for index in range(5):
-            bus._publish_direct({"version": 1, "type": "manual", "payload": {"i": index}})
+            bus._publish_direct(
+                {"version": 1, "type": "manual", "payload": {"i": index}}
+            )
 
         return bus, queue
 
