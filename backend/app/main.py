@@ -288,6 +288,18 @@ def api_incident_detail(
     return {"incident": incident}
 
 
+@app.get("/api/incidents/{incident_id}/summary")
+def api_incident_summary(
+    incident_id: str,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, str]:
+    markdown = sniffer_service.incident_summary_markdown(incident_id)
+    if markdown is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return {"incident_id": incident_id, "markdown": markdown}
+
+
 def _agent_headers(
     agent_id: str = Header("", alias="X-NetBot-Agent-Id"),
     agent_token: str = Header("", alias="X-NetBot-Agent-Token"),
