@@ -85,6 +85,7 @@ export function useApiClient(localToken) {
       return request(`/incidents${query ? `?${query}` : ""}`);
     },
     getIncident: (id) => request(`/incidents/${encodeURIComponent(id)}`),
+    getIncidentSummary: (id) => request(`/incidents/${encodeURIComponent(id)}/summary`),
     getAgentsOverview: () => request("/agents/overview"),
     getAgentAlertsSummary: () => request("/agents/alerts/summary"),
     getAgentRiskSummary: () => request("/agents/risk/summary"),

@@ -12,7 +12,10 @@ from backend.app.services.capture_policy import current_capture_policy
 from backend.app.services.event_bus import EventBus
 from backend.app.services.flow_service import FlowService
 from backend.app.services.flow_worker_pool import FlowWorkerPool
-from backend.app.services.incident_correlation import IncidentCorrelationEngine
+from backend.app.services.incident_correlation import (
+    IncidentCorrelationEngine,
+    incident_markdown_summary,
+)
 from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.service_attribution import ServiceAttributionEngine
@@ -403,6 +406,10 @@ class SnifferService:
 
     def get_incident(self, incident_id: str) -> dict[str, Any] | None:
         return self._incident_correlation.get_incident(incident_id)
+
+    def incident_summary_markdown(self, incident_id: str) -> str | None:
+        incident = self.get_incident(incident_id)
+        return incident_markdown_summary(incident) if incident else None
 
     def recent_live_records(
         self,

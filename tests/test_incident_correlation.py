@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app, sniffer_service
 from backend.app.security import require_local_token, require_trusted_client
-from backend.app.services.incident_correlation import IncidentCorrelationEngine
+from backend.app.services.incident_correlation import (
+    IncidentCorrelationEngine,
+    incident_markdown_summary,
+)
 
 
 def signal(index: int = 1, **overrides):
@@ -106,6 +109,42 @@ class IncidentCorrelationTests(unittest.TestCase):
         self.assertEqual(metrics["signals_ignored_total"], 1)
         self.assertNotIn("secret", str(metrics))
 
+    def test_markdown_summary_contains_context_and_redacts_sensitive_values(self):
+        markdown = incident_markdown_summary(
+            {
+                "title": "Possible Beaconing",
+                "severity": "high",
+                "confidence": "medium",
+                "status": "open",
+                "first_seen": "2026-07-15T10:00:00Z",
+                "last_seen": "2026-07-15T10:05:00Z",
+                "source_hosts": ["10.0.0.5"],
+                "applications": ["browser.exe"],
+                "services": ["Unknown encrypted destination"],
+                "domains": ["unknown.example"],
+                "evidence": ["Authorization: Bearer markdown-secret"],
+                "correlation_reasons": ["Repeated encrypted destination"],
+                "recommended_investigation_steps": ["Review the destination."],
+                "false_positive_notes": ["Background update traffic."],
+                "timeline": [
+                    {
+                        "timestamp": "2026-07-15T10:01:00Z",
+                        "severity": "high",
+                        "summary": "Cookie: session=timeline-secret",
+                        "source": "alert",
+                    }
+                ],
+            }
+        )
+        self.assertIn("# Possible Beaconing", markdown)
+        self.assertIn("**Severity:** high", markdown)
+        self.assertIn("## Evidence", markdown)
+        self.assertIn("## Timeline", markdown)
+        self.assertIn("## Correlation Reasons", markdown)
+        self.assertNotIn("markdown-secret", markdown)
+        self.assertNotIn("timeline-secret", markdown)
+        self.assertIn("[REDACTED]", markdown)
+
 
 class IncidentApiTests(unittest.TestCase):
     def setUp(self):
@@ -130,6 +169,18 @@ class IncidentApiTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertIn("incidents", monitoring.json())
         self.assertNotIn("api-secret", listing.text + detail.text + monitoring.text)
+
+    def test_summary_endpoint_returns_redacted_markdown(self):
+        with patch.object(sniffer_service, "_incident_correlation", self.engine):
+            response = self.client.get(
+                f"/api/incidents/{self.incident['incident_id']}/summary"
+            )
+        self.assertEqual(response.status_code, 200)
+        markdown = response.json()["markdown"]
+        self.assertIn("# Possible Beaconing", markdown)
+        self.assertIn("## Evidence", markdown)
+        self.assertIn("## Timeline", markdown)
+        self.assertNotIn("api-secret", markdown)
 
 
 if __name__ == "__main__":

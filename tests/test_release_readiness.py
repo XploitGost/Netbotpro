@@ -137,6 +137,9 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("IncidentCorrelationEngine", architecture)
         self.assertIn("NETBOT_INCIDENT_MAX_OPEN", incident_docs)
         self.assertIn("single weak signal does not create", incident_lower)
+        self.assertIn("Redacted Summary Export", incident_docs)
+        self.assertIn("Generate Markdown", incident_docs)
+        self.assertIn("read-only text area", incident_lower)
         for boundary in [
             "raw payloads",
             "credentials",

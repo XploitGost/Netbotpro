@@ -25,13 +25,21 @@ const incident = {
 
 describe("IncidentsPanel", () => {
   it("renders an empty state", async () => {
-    const api = { getIncidents: vi.fn().mockResolvedValue({ items: [] }), getIncident: vi.fn() };
+    const api = { getIncidents: vi.fn().mockResolvedValue({ items: [] }), getIncident: vi.fn(), getIncidentSummary: vi.fn() };
     render(<IncidentsPanel api={api} />);
-    expect(await screen.findByText("No correlated incidents")).toBeTruthy();
+    expect(await screen.findByText("No correlated incidents in this view")).toBeTruthy();
   });
 
   it("renders incident details, evidence, timeline, and masks sensitive mock data", async () => {
-    const api = { getIncidents: vi.fn().mockResolvedValue({ items: [incident] }), getIncident: vi.fn().mockResolvedValue({ incident }) };
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+    const api = {
+      getIncidents: vi.fn().mockResolvedValue({ items: [incident] }),
+      getIncident: vi.fn().mockResolvedValue({ incident }),
+      getIncidentSummary: vi.fn().mockResolvedValue({
+        markdown: "# Possible Beaconing\n\n- **Severity:** high\n\n## Evidence\n\n- token=export-secret\n\n## Timeline\n\n- Authorization: Bearer timeline-export-secret",
+      }),
+    };
     render(<IncidentsPanel api={api} />);
     await screen.findAllByText("Possible Beaconing");
     await waitFor(() => expect(screen.getByText("Evidence")).toBeTruthy());
@@ -43,5 +51,15 @@ describe("IncidentsPanel", () => {
     expect(screen.getAllByText("high").length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: "Refresh incidents" }).at(-1));
     await waitFor(() => expect(api.getIncidents).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Markdown" }));
+    const summary = await screen.findByLabelText("Incident Markdown summary");
+    expect(summary.value).toContain("# Possible Beaconing");
+    expect(summary.value).toContain("## Evidence");
+    expect(summary.value).toContain("## Timeline");
+    expect(summary.value).not.toContain("export-secret");
+    expect(summary.value).not.toContain("timeline-export-secret");
+    fireEvent.click(screen.getByRole("button", { name: "Copy Markdown" }));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Copied")).toBeTruthy();
   });
 });

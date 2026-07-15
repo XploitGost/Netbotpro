@@ -55,6 +55,28 @@ Timeline entries contain only a timestamp, event type, redacted summary, source,
 and related safe identifiers. Entries are timestamp-sorted and capped by
 `NETBOT_INCIDENT_MAX_SIGNALS_PER_INCIDENT`.
 
+## Reading An Incident
+
+Start with severity to prioritize review, then use confidence to understand how
+strongly the evidence belongs together. Compare first and last seen to establish
+the activity window. Source hosts, applications, services, and domains provide
+scope, while evidence and correlation reasons explain why the signals were grouped.
+The timeline shows their order. Recommended investigation steps are manual guidance;
+false-positive notes highlight common benign explanations that should be checked.
+
+## Redacted Summary Export
+
+Select an incident and choose **Generate Markdown** in the Incident summary section.
+NetBotPro requests a fresh summary from the protected local API and displays it in
+a read-only text area. Use **Copy Markdown** to place that text on the clipboard for
+an authorized ticket, investigation note, or handoff.
+
+The export is generated in memory and is not persisted by NetBotPro. It contains
+only bounded incident fields and passes through central redaction. Raw payloads,
+credentials, cookies, authorization headers, sessions, and secrets are excluded or
+masked. Generating or copying a summary performs no response action and does not
+change incident state.
+
 ## Configuration
 
 | Variable | Default | Purpose |
