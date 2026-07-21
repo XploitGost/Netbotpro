@@ -58,6 +58,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         readme = self._read("README.md")
         for relative_path in [
             "docs/DEPLOYMENT_OVERVIEW.md",
+            "docs/INSTALL.md",
+            "docs/RELEASE_CHECKLIST.md",
             "docs/RELEASE_QA_CHECKLIST.md",
             "docs/RELEASE_NOTES_v0.2.0.md",
         ]:
@@ -65,6 +67,44 @@ class ReleaseReadinessTests(unittest.TestCase):
             self.assertIn(relative_path, readme)
 
         self.assertIn(f"v{TARGET_VERSION}", readme)
+
+    def test_release_hardening_docs_and_source_cleanliness_rules(self):
+        install = self._read("docs/INSTALL.md").lower()
+        checklist = self._read("docs/RELEASE_CHECKLIST.md").lower()
+        gitignore = self._read(".gitignore")
+        gitattributes = self._read(".gitattributes")
+        docs_text = "\n".join(
+            [
+                self._read("README.md"),
+                self._read("docs/INSTALL.md"),
+                self._read("docs/RELEASE_CHECKLIST.md"),
+                self._read("docs/REMOTE_SENSOR.md"),
+            ]
+        )
+
+        self.assertIn("npcap", install)
+        self.assertIn("packaged backend", install)
+        self.assertIn("electron download", install)
+        self.assertIn("safe use", install)
+        self.assertIn("source state", checklist)
+        self.assertIn("no command/control", checklist)
+        self.assertIn("naive utc timestamp", checklist)
+        self.assertIn("service_fingerprints.json", checklist)
+        self.assertNotRegex(docs_text, r"C:\\Users\\")
+
+        for ignored in [
+            ".runtime/",
+            "node_modules/",
+            "frontend/dist/",
+            "desktop/electron/dist/",
+            "__pycache__/",
+            ".venv/",
+            "*.zip",
+        ]:
+            self.assertIn(ignored, gitignore)
+
+        self.assertIn("*.py text eol=lf", gitattributes)
+        self.assertIn("*.ps1 text eol=crlf", gitattributes)
 
     def test_flow_analysis_docs_and_architecture_are_linked(self):
         readme = self._read("README.md")
