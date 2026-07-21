@@ -20,7 +20,7 @@ Use this mode only for systems, servers, and networks where you have explicit le
 ## Start the sensor on the server
 
 ```powershell
-cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+cd .\Netbotpro
 powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-sensor.ps1 -BindHost 0.0.0.0 -Port 8765 -AllowedOrigins "http://YOUR_DASHBOARD_HOST:5173" -CaptureMode metadata
 ```
 

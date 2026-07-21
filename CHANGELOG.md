@@ -4,11 +4,30 @@
 
 ### Added
 
+- Release hardening documentation with an install/run guide and release
+  checklist covering source cleanliness, audits, desktop validation,
+  PyInstaller smoke, security boundaries, and release artifacts.
+- Performance Pipeline foundation: bounded packet intake, WebSocket Event
+  Aggregator, Batch Persistence / Storage Backpressure, Flow-aware Worker
+  Pool, Live Ring Buffer, and CI-safe benchmark/soak validation.
+- Service Attribution / Destination Intelligence with metadata-only
+  confidence scoring and conservative handling for encrypted/CDN traffic.
+- Incident Correlation Engine with redacted incident timelines, severity,
+  confidence, investigation guidance, and read-only Markdown summary export.
 - Protocol Intelligence Expansion for TCP, DNS, HTTP, and visible TLS metadata.
 - Saved Display Filters with built-in recipes and safe field suggestions.
 - Protocol Statistics and safe Packet Search in the Inspect workspace.
 - Expanded Expert Info and redacted protocol/inspection summary reports.
 - Offline PCAP parity for protocol intelligence summaries.
+
+### Changed
+
+- Replaced remaining naive UTC timestamp call sites with timezone-aware UTC
+  timestamps.
+- Refreshed frontend development lockfile dependencies with compatible
+  patch/minor updates and cleaned desktop Electron audit findings.
+- Reduced expected-error test log noise while preserving production logging and
+  failure-path coverage.
 
 ## v0.2.0 - Agent & Fleet Monitoring Release - 2026-06-05
 

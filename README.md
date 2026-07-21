@@ -263,6 +263,8 @@ and surfaced in Ops Snapshot metrics.
 - [Deep Packet Inspection](docs/DEEP_PACKET_INSPECTION.md)
 - [Agent Operational QA Checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment Overview](docs/DEPLOYMENT_OVERVIEW.md)
+- [Install And Run Guide](docs/INSTALL.md)
+- [Release Checklist](docs/RELEASE_CHECKLIST.md)
 - [Release QA Checklist](docs/RELEASE_QA_CHECKLIST.md)
 - [v0.2.0 Release Notes](docs/RELEASE_NOTES_v0.2.0.md)
 - [Remote Sensor](docs/REMOTE_SENSOR.md)
@@ -307,7 +309,7 @@ Prerequisites:
 Install everything on Windows:
 
 ```powershell
-cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+cd .\Netbotpro
 powershell -ExecutionPolicy Bypass -File .\scripts\dev\setup.ps1
 ```
 
@@ -336,7 +338,7 @@ Copy `.env.example` to `.env` for local experiments. The default secure path is 
 Start the local web stack:
 
 ```powershell
-cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+cd .\Netbotpro
 powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-local.ps1
 ```
 
@@ -355,14 +357,14 @@ http://127.0.0.1:5173
 Start the Electron desktop shell after dependencies are installed:
 
 ```powershell
-cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro\desktop\electron"
+cd .\Netbotpro\desktop\electron
 npm run dev
 ```
 
 Start a remote sensor on a server you own or administer:
 
 ```powershell
-cd "C:\Users\ASIA SYSTEM\Desktop\netbotpro"
+cd .\Netbotpro
 powershell -ExecutionPolicy Bypass -File .\scripts\dev\start-sensor.ps1 -BindHost 0.0.0.0 -Port 8765 -AllowedOrigins "http://YOUR_DASHBOARD_HOST:5173"
 ```
 
@@ -524,6 +526,8 @@ GitHub Actions builds CI on push and pull request. Desktop release artifacts are
 - [Agent mode](docs/AGENT_MODE.md)
 - [Agent QA checklist](docs/AGENT_QA_CHECKLIST.md)
 - [Deployment overview](docs/DEPLOYMENT_OVERVIEW.md)
+- [Install and run guide](docs/INSTALL.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Release QA checklist](docs/RELEASE_QA_CHECKLIST.md)
 - [Desktop shell](docs/DESKTOP_SHELL.md)
 - [Web migration notes](docs/WEB_MIGRATION.md)
