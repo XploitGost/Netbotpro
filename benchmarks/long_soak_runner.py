@@ -392,7 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sample-interval-sec", type=float, default=1.0)
     parser.add_argument("--max-memory-growth-mb", type=float, default=150.0)
     parser.add_argument("--max-cpu-avg-percent", type=float, default=90.0)
-    parser.add_argument("--max-cpu-peak-percent", type=float, default=100.0)
+    parser.add_argument("--max-cpu-peak-percent", type=float, default=400.0)
     parser.add_argument("--fail-on-unbounded-growth", action="store_true")
     parser.add_argument("--pcap")
     parser.add_argument("--pcap-loop", action="store_true")

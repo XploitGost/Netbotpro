@@ -122,8 +122,10 @@ hard memory cap. This is expected when the ring reaches category capacity.
 
 The report includes memory start, end, peak, growth, growth slope, stabilization
 classification, CPU average, CPU p95, CPU peak, and sustained CPU pressure.
-Short runs can include normal warm-up growth. Treat memory-leak warnings as a
-signal to repeat a longer profile before changing production settings.
+Process CPU peak can exceed `100%` on multi-core runners, so average and p95 are
+usually better stability signals than one short spike. Short runs can include
+normal warm-up growth. Treat memory-leak warnings as a signal to repeat a
+longer profile before changing production settings.
 
 ## Safe Tuning
 
