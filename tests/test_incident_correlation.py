@@ -18,7 +18,7 @@ def signal(index: int = 1, **overrides):
     value = {
         "incident_type": "possible_beaconing",
         "timestamp": (
-            datetime(2026, 7, 15, tzinfo=timezone.utc) + timedelta(seconds=index)
+            datetime.now(timezone.utc) + timedelta(seconds=index)
         ).isoformat(),
         "source_host": "10.0.0.5",
         "destination_host": "203.0.113.20",
@@ -110,14 +110,15 @@ class IncidentCorrelationTests(unittest.TestCase):
         self.assertNotIn("secret", str(metrics))
 
     def test_markdown_summary_contains_context_and_redacts_sensitive_values(self):
+        summary_start = datetime.now(timezone.utc)
         markdown = incident_markdown_summary(
             {
                 "title": "Possible Beaconing",
                 "severity": "high",
                 "confidence": "medium",
                 "status": "open",
-                "first_seen": "2026-07-15T10:00:00Z",
-                "last_seen": "2026-07-15T10:05:00Z",
+                "first_seen": summary_start.isoformat(),
+                "last_seen": (summary_start + timedelta(minutes=5)).isoformat(),
                 "source_hosts": ["10.0.0.5"],
                 "applications": ["browser.exe"],
                 "services": ["Unknown encrypted destination"],
@@ -128,7 +129,7 @@ class IncidentCorrelationTests(unittest.TestCase):
                 "false_positive_notes": ["Background update traffic."],
                 "timeline": [
                     {
-                        "timestamp": "2026-07-15T10:01:00Z",
+                        "timestamp": (summary_start + timedelta(minutes=1)).isoformat(),
                         "severity": "high",
                         "summary": "Cookie: session=timeline-secret",
                         "source": "alert",
@@ -167,6 +168,13 @@ class IncidentApiTests(unittest.TestCase):
             monitoring = self.client.get("/api/monitoring/metrics")
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(detail.status_code, 200)
+        self.assertEqual(listing.json()["count"], 1)
+        self.assertEqual(
+            listing.json()["items"][0]["incident_id"], self.incident["incident_id"]
+        )
+        self.assertEqual(
+            detail.json()["incident"]["incident_id"], self.incident["incident_id"]
+        )
         self.assertIn("incidents", monitoring.json())
         self.assertNotIn("api-secret", listing.text + detail.text + monitoring.text)
 
