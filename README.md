@@ -76,7 +76,7 @@ or PCAP artifacts.
 | Live Ring Buffer | Foundation step | Recent packet, flow, alert, and Expert summaries are held in per-category bounded memory with eviction/query metrics and Ops Snapshot visibility. | Stored and returned records are redacted summaries; raw packet payloads and credentials are excluded. |
 | Batch Persistence / Storage Backpressure | Foundation step | Redacted packet, alert, and flow records use bounded batches with queue health, write latency, retry, backlog, failure, and Ops Snapshot visibility. | Audit and report exports remain synchronous; this is not a distributed storage engine or the complete performance pipeline. |
 | WebSocket Event Aggregator | Foundation step | Realtime packet/alert batching, slow-client protection, WebSocket pressure metrics, and Ops Snapshot visibility are tested. | Realtime delivery batching only. |
-| Performance Benchmark Suite | Validated foundation | Synthetic stage benchmarks, a bounded full-pipeline soak mode, JSON/Markdown reports, and a CI-safe structural smoke test cover the current pipeline. | No live capture, external network, admin privileges, or production throughput claims; see [Performance Validation](docs/PERFORMANCE_VALIDATION.md). |
+| Performance Benchmark Suite | Validated foundation | Synthetic stage benchmarks, bounded full-pipeline soak mode, named load profiles, resource sampling, JSON/Markdown/CSV reports, and a CI-safe structural smoke test cover the current pipeline. | No live capture, external network, admin privileges, or production throughput claims; see [Performance Validation](docs/PERFORMANCE_VALIDATION.md) and [Real Load Testing](docs/REAL_LOAD_TESTING.md). |
 | Demo and operational QA | Ready | Token-safe demo and Agent script behavior is tested. | Demo launchers and status commands do not print raw tokens. |
 | Windows release packaging | Validated path | Desktop smoke, version consistency, and release workflow checks run in CI. | Versioned artifacts include SHA256 checksums. |
 | Linux desktop packaging | Staged | Build workflow exists; native production validation remains pending. | Publish only after native smoke and release QA. |
@@ -257,6 +257,7 @@ and surfaced in Ops Snapshot metrics.
 - [Agent Mode](docs/AGENT_MODE.md)
 - [Performance Pipeline](docs/PERFORMANCE_PIPELINE.md)
 - [Performance Validation](docs/PERFORMANCE_VALIDATION.md)
+- [Real Load And Long Soak Testing](docs/REAL_LOAD_TESTING.md)
 - [Flow Analysis And Protocol Intelligence](docs/FLOW_ANALYSIS.md)
 - [Service Attribution And Destination Intelligence](docs/SERVICE_ATTRIBUTION.md)
 - [Incident Correlation](docs/INCIDENT_CORRELATION.md)
@@ -529,6 +530,7 @@ GitHub Actions builds CI on push and pull request. Desktop release artifacts are
 - [Install and run guide](docs/INSTALL.md)
 - [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Release QA checklist](docs/RELEASE_QA_CHECKLIST.md)
+- [Real load and long soak testing](docs/REAL_LOAD_TESTING.md)
 - [Desktop shell](docs/DESKTOP_SHELL.md)
 - [Web migration notes](docs/WEB_MIGRATION.md)
 - [Contributing](CONTRIBUTING.md)

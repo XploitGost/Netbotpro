@@ -52,3 +52,22 @@ Results are machine-dependent. They validate bounded behavior, observable
 drops, ordering, report generation, and resource trends; they are not a
 production capacity guarantee. Use authorized workload traces separately when
 sizing a deployment.
+
+## Real load and long soak profiles
+
+Step 11 adds named load profiles and resource time-series reports:
+
+```powershell
+python benchmarks/long_soak_runner.py `
+  --profile light_desktop `
+  --duration-sec 5 `
+  --events-per-sec 100 `
+  --flows 10 `
+  --websocket-clients 1 `
+  --ci-safe `
+  --output .runtime/benchmarks/ci-safe-real-load
+```
+
+Manual profiles include `normal_desktop`, `heavy_desktop`, `server_medium`,
+and `stress_short`. They remain local and synthetic by default and do not
+capture live traffic. See `docs/REAL_LOAD_TESTING.md`.

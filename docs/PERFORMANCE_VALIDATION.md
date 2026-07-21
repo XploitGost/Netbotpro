@@ -109,6 +109,22 @@ still required before making memory-retention conclusions.
   or production sizing certificate.
 - Optional ClickHouse or an external metrics backend is not implemented.
 
+## Step 11 Real Load And Long Soak Validation
+
+Step 11 adds named synthetic load profiles and longer resource sampling through
+`benchmarks/long_soak_runner.py`. It measures CPU average/p95/peak, memory
+start/end/peak/growth, bounded queue pressure, WebSocket client simulation,
+persistence backlog, live ring evictions, and safe tuning recommendations.
+
+The CI-safe run remains short and local:
+
+```powershell
+python benchmarks\long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --ci-safe --output .runtime\benchmarks\ci-safe-real-load
+```
+
+Long profiles such as `heavy_desktop` and `server_medium` are manual only. See
+[Real Load And Long Soak Testing](REAL_LOAD_TESTING.md).
+
 ## Next Product Phase
 
 The performance foundation is ready to close Step 7. The next recommended

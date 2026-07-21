@@ -79,6 +79,10 @@ Use this checklist before tagging or publishing a release candidate.
 
 - [ ] Run the CI-safe benchmark smoke:
   `python benchmarks/soak_test_pipeline.py --duration-sec 10 --events-per-sec 200 --flows 20 --ci-safe --output .runtime/benchmarks/release-hardening-smoke`
+- [ ] Run the CI-safe real-load benchmark:
+  `python benchmarks/long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --ci-safe --output .runtime/benchmarks/release-real-load-smoke`
+- [ ] For release candidates, run at least one manual local profile from
+  `docs/REAL_LOAD_TESTING.md` on representative hardware.
 - [ ] Confirm bounded queues and buffers remain visible in Ops Snapshot.
 - [ ] Confirm packet queue, event aggregator, worker pool, persistence, live
   ring buffer, service attribution, and incident sections are present.

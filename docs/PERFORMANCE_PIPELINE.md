@@ -552,6 +552,20 @@ performance, disk durability under host failure, or behavior on real traffic.
 They do make bounded pressure, drops, latency, and memory trends repeatable.
 See `docs/PERFORMANCE_VALIDATION.md` for the recorded validation run.
 
+### Real Load And Long Soak Validation
+
+Step 11 extends the synthetic benchmark foundation with named load profiles in
+`benchmarks/load_profiles.py` and `benchmarks/long_soak_runner.py`.
+The runner adds resource time-series sampling, memory-growth classification,
+CPU pressure classification, simulated normal/slow/reconnecting WebSocket
+clients, PCAP replay argument handling, JSON/Markdown/CSV output, and safe
+tuning recommendations.
+
+The short CI-safe profile is automated. Longer profiles such as
+`normal_desktop`, `heavy_desktop`, `server_medium`, and `stress_short` are
+manual deployment-validation tools and are not production capacity claims.
+See `docs/REAL_LOAD_TESTING.md`.
+
 ### Tuning Guidance
 
 - Increase intake or persistence queue sizes only after checking sustained
@@ -584,7 +598,7 @@ behavior, or AI autonomous actions.
 
 ## Next Planned Steps
 
-1. Validate Incident / Correlation Engine quality and false-positive rates
+1. Server Mode / Multi-node Deployment foundation
 2. Read-only AI Analyst
 
 ### Recorded Product Direction
