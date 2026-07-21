@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -47,7 +47,9 @@ class IncidentCorrelator:
         self.window = timedelta(seconds=int(window_sec))
         self._incidents: Dict[Tuple[str, str, str, str, str], Incident] = {}
 
-    def _make_key(self, meta: Dict[str, Any], alert: Dict[str, Any]) -> Tuple[str, str, str, str, str]:
+    def _make_key(
+        self, meta: Dict[str, Any], alert: Dict[str, Any]
+    ) -> Tuple[str, str, str, str, str]:
         src = _safe_str(meta.get("src"))
         dst = _safe_str(meta.get("dst"))
         atk = _safe_str(alert.get("attack_type") or alert.get("attack") or "Alert")
@@ -55,13 +57,15 @@ class IncidentCorrelator:
         eng = _safe_str(alert.get("engine") or "IDS")
         return (src, dst, atk, dport, eng)
 
-    def _make_id(self, key: Tuple[str, str, str, str, str], first_seen: datetime) -> str:
+    def _make_id(
+        self, key: Tuple[str, str, str, str, str], first_seen: datetime
+    ) -> str:
         base = "|".join(key) + "|" + first_seen.strftime("%Y%m%d%H%M%S")
         h = hashlib.sha1(base.encode("utf-8", errors="ignore")).hexdigest()
         return h[:12]
 
     def enrich_alert(self, meta: Dict[str, Any], alert: Dict[str, Any]) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         key = self._make_key(meta, alert)
 
         # Parse normalized score if present

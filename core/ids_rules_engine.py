@@ -1,10 +1,10 @@
 # ids_rules_engine.py
 # -*- coding: utf-8 -*-
-import os
 import json
+import os
 from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Tuple
 
 
 class RuleEngine:
@@ -66,7 +66,7 @@ class RuleEngine:
 
         src = meta.get("src")
         dport = int(meta.get("dport") or 0)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for idx, rule in enumerate(self.rules):
             if not rule or not rule.get("enabled", True):

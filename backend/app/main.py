@@ -3,6 +3,8 @@
 import csv
 import io
 import logging
+import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -103,8 +105,11 @@ packet_detail_service = PacketDetailService(
 saved_filter_service = SavedFilterService()
 logger = logging.getLogger("netbotpro.api")
 if not logger.handlers:
+    default_level = "CRITICAL" if "unittest" in sys.modules else "INFO"
+    log_level = os.environ.get("NETBOT_LOG_LEVEL", default_level).upper()
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+        level=getattr(logging, log_level, logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 MAX_PCAP_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_PCAP_SUFFIXES = {".pcap", ".pcapng"}

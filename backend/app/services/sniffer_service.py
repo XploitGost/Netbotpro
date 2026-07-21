@@ -4,7 +4,7 @@ import logging
 import os
 import queue
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.app.bootstrap import ensure_project_root_on_path
@@ -189,7 +189,7 @@ class SnifferService:
 
     def _process_packet(self, meta: dict[str, Any]) -> None:
         packet = dict(meta)
-        packet.setdefault("ts", datetime.utcnow().isoformat() + "Z")
+        packet.setdefault("ts", datetime.now(timezone.utc).isoformat())
         packet.setdefault("id", self._next_packet_id())
         policy = current_capture_policy()
         self._apply_payload_policy(packet, policy.to_public_dict())

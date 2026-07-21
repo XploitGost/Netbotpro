@@ -12,11 +12,11 @@ Rule types:
 
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Tuple, Optional
 import json
 import os
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class SignatureIDS:
@@ -28,7 +28,9 @@ class SignatureIDS:
 
     def __init__(self) -> None:
         # (src, dst) -> list[(ts, dport)]
-        self.port_scan_map: Dict[Tuple[str, str], List[Tuple[datetime, int]]] = defaultdict(list)
+        self.port_scan_map: Dict[Tuple[str, str], List[Tuple[datetime, int]]] = (
+            defaultdict(list)
+        )
         # (src, dst) -> list[ts]
         self.syn_counter: Dict[Tuple[str, str], List[datetime]] = defaultdict(list)
         # src -> list[ts]
@@ -47,7 +49,9 @@ class SignatureIDS:
         # Custom rules for Rule Editor
         self.custom_rules: List[Dict[str, Any]] = []
         # (rule_idx, src, dport) -> list[datetime]
-        self.custom_state: Dict[Tuple[int, str, int], List[datetime]] = defaultdict(list)
+        self.custom_state: Dict[Tuple[int, str, int], List[datetime]] = defaultdict(
+            list
+        )
 
         base_dir = os.path.abspath(os.path.dirname(__file__))
         self.rules_path: str = os.path.join(base_dir, "rules.json")
@@ -149,15 +153,17 @@ class SignatureIDS:
         Returns:
           alert dict or None
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self._cleanup(now)
 
         src = meta.get("src")
         dst = meta.get("dst")
         proto = meta.get("proto")
         dport = meta.get("dport")
-        flags = (meta.get("flags") or "")
-        length = int(meta.get("length") or 0)  # فعلاً استفاده نمی‌کنیم ولی برای آینده خوبه
+        flags = meta.get("flags") or ""
+        length = int(
+            meta.get("length") or 0
+        )  # فعلاً استفاده نمی‌کنیم ولی برای آینده خوبه
 
         alert: Optional[Dict[str, Any]] = None
 
@@ -176,7 +182,13 @@ class SignatureIDS:
                 }
 
         # ---------------- Port Scan detection ----------------
-        if alert is None and src and dst and dport is not None and proto in ("TCP", "UDP"):
+        if (
+            alert is None
+            and src
+            and dst
+            and dport is not None
+            and proto in ("TCP", "UDP")
+        ):
             key = (src, dst)
             arr2 = self.port_scan_map[key]
             arr2.append((now, int(dport)))
