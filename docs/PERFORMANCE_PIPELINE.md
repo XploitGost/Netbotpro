@@ -4,6 +4,11 @@ NetBotPro now has a bounded packet intake queue as the first engine-level
 performance hardening step. This page documents the current foundation only.
 It is not the complete performance pipeline yet.
 
+Linux server mode exposes the same bounded-pipeline health through
+`/api/monitoring/metrics` and summarizes deployment readiness through
+`/api/ready`. These endpoints are metadata-only and do not expose tokens,
+payloads, or raw packet artifacts.
+
 ## Why The Queue Was Added
 
 Live capture can receive packets faster than downstream analysis, persistence,

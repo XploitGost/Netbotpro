@@ -22,6 +22,13 @@ monitoring platform. It combines packet inspection, redacted reporting,
 authorized Remote Sensor capture, and summary-only Agent/Fleet monitoring in a
 single operator dashboard.
 
+Runtime profiles are explicit: `desktop` preserves the current local/Electron
+behavior, `server` enables strict Linux API/UI deployment validation, and
+`sensor`/`agent` remain metadata-only remote node modes. See
+[Linux Server Deployment](docs/LINUX_SERVER_DEPLOYMENT.md) for systemd,
+Docker/Compose, Nginx, Caddy, HTTPS, live-capture permission notes, and
+health/readiness checks.
+
 Agent Mode is intentionally read-only. It sends health, network, capture,
 alert, flow, and risk summaries without forwarding raw packets, raw payloads,
 or PCAP artifacts.
@@ -54,6 +61,7 @@ or PCAP artifacts.
 | Remote Sensor Mode | Controlled opt-in | Capture-mode, sensor-script, and policy tests are included. | Requires explicit remote access, strong token, allowlist controls, and owner/admin permission. |
 | Full and Forensic capture | Guarded opt-in | Safe-use, allow-full, duration, and raw-export gates are tested. | Authorized servers only; raw PCAP export is never available in Metadata mode. |
 | Agent and Fleet Mode | Ready, read-only | Registry/API/history tests plus Agents UI tests run in CI. | Summary telemetry only; no command/control, file collection, raw packet, payload, or PCAP forwarding. |
+| Linux Server Mode foundation | Foundation step | Runtime profile validation, health/readiness, systemd/static Docker checks, and docs are covered by tests. | Central API/UI node with strict config validation; remote nodes submit redacted metadata only. |
 | Agent history and risk | Ready | SQLite auto-init, history, offline detection, redaction, and risk scoring are tested. | Redacted history with configurable retention and `90s` default offline threshold. |
 | Flow Analysis | Active | Live packets are grouped into directional flows and bidirectional conversations. | Flow snapshots contain redacted metadata, not raw payloads or credentials. |
 | Protocol Intelligence | Active MVP | DNS, HTTP, TLS metadata, SSH, RDP, SMB, mail, ICMP, and unknown traffic are classified. | Metadata-safe detection only; no TLS decryption, MITM, or key extraction. |
@@ -175,6 +183,8 @@ history query latency, flow totals, and detection counters. Recommended actions
 in the UI are intentionally short and operational: stale snapshots, capture
 stops, queue pressure, dropped writes, websocket delivery gaps, and backend
 runtime pressure are surfaced without exposing packet payloads or secrets.
+`/api/health` reports alive/profile metadata and `/api/ready` reports readiness
+for server-mode deployment checks.
 
 The bounded queue is the first performance-pipeline foundation step, not the
 complete performance pipeline. It adds queue pressure metrics, drop counters,

@@ -19,6 +19,10 @@ Use this checklist before tagging or publishing a release candidate.
 - [ ] `python -m pip install -r requirements-dev.txt`
 - [ ] `python -m pip check`
 - [ ] `python -m unittest discover -s tests -v`
+- [ ] Confirm `/api/health` and `/api/ready` report profile/readiness without
+  exposing secrets.
+- [ ] Confirm `NETBOT_PROFILE=server` rejects missing tokens, wildcard CORS,
+  debug mode, default secrets, and unwritable runtime/log paths.
 - [ ] Review warnings and expected-error tests.
 - [ ] Confirm no naive UTC timestamp deprecation warnings remain.
 - [ ] Confirm expected-error logs do not make CI unreadable.
@@ -59,6 +63,7 @@ Use this checklist before tagging or publishing a release candidate.
 
 ## Security Boundaries
 
+- [ ] Server Mode is a central API/UI deployment profile, not command/control.
 - [ ] No command/control.
 - [ ] No remote shell.
 - [ ] No file collection.
@@ -72,15 +77,31 @@ Use this checklist before tagging or publishing a release candidate.
 - [ ] No browser history scraping, cookie/session inspection, browser
   extension injection, or keylogging.
 - [ ] Agent/Fleet telemetry-only boundary is unchanged.
+- [ ] Sensor/Agent node capabilities reject remote shell, command execution,
+  file collection, raw payload forwarding, raw packet forwarding, raw PCAP
+  forwarding, credential access, TLS decryption, and MITM.
 - [ ] Remote Sensor boundary is unchanged.
 - [ ] Metrics, reports, exports, and incident summaries are redacted.
+
+## Linux Server Deployment
+
+- [ ] `deploy/systemd/netbotpro.service` exists and does not run as root.
+- [ ] `deploy/systemd/netbotpro.env.example` exists and contains no real
+  secrets.
+- [ ] `Dockerfile`, `docker-compose.yml`, and `.dockerignore` exist.
+- [ ] Default Compose config is not privileged and binds the backend through a
+  safe localhost-facing deployment path.
+- [ ] `docs/LINUX_SERVER_DEPLOYMENT.md` covers systemd, Docker, Nginx, Caddy,
+  HTTPS/TLS, health/readiness, Linux live-capture permissions, and
+  troubleshooting.
+- [ ] README links to Linux Server Deployment.
 
 ## Performance
 
 - [ ] Run the CI-safe benchmark smoke:
   `python benchmarks/soak_test_pipeline.py --duration-sec 10 --events-per-sec 200 --flows 20 --ci-safe --output .runtime/benchmarks/release-hardening-smoke`
 - [ ] Run the CI-safe real-load benchmark:
-  `python benchmarks/long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --ci-safe --output .runtime/benchmarks/release-real-load-smoke`
+  `python benchmarks/long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --sample-interval-sec 0.25 --max-cpu-avg-percent 100 --max-cpu-peak-percent 1000 --ci-safe --output .runtime/benchmarks/release-real-load-smoke`
 - [ ] For release candidates, run at least one manual local profile from
   `docs/REAL_LOAD_TESTING.md` on representative hardware.
 - [ ] Confirm bounded queues and buffers remain visible in Ops Snapshot.
@@ -107,4 +128,6 @@ Use this checklist before tagging or publishing a release candidate.
 - [ ] Incident Engine is currently bounded/in-memory unless a later persistence
   step is added.
 - [ ] Server Mode is not a full production multi-node deployment yet.
+- [ ] Incident persistence may still be bounded/in-memory unless otherwise
+  implemented by a later persistence step.
 - [ ] AI Analyst is not implemented in this release.

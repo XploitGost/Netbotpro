@@ -16,6 +16,11 @@ The current validation is a sizing aid, not a production capacity guarantee.
 Run the longer profiles on the same hardware and operating system that will be
 used for authorized deployments.
 
+For Linux server mode, first verify `/api/health` and `/api/ready`, then run
+the CI-safe benchmark before attempting longer `server_medium` soaks. These
+benchmarks use synthetic redacted metadata only and do not require live capture
+or root privileges.
+
 ## Load Profiles
 
 | Profile | Duration | Events/sec | Flows | WebSocket clients | Target |

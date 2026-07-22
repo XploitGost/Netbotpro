@@ -26,6 +26,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
 from backend.app.bootstrap import ensure_project_root_on_path
+from backend.app.config.profile import (
+    APP_STARTED_AT,
+    load_runtime_profile_config,
+    profile_metadata,
+    require_valid_runtime_config,
+)
 from backend.app.schemas import (
     AlertInvestigationContext,
     AlertItem,
@@ -113,6 +119,8 @@ if not logger.handlers:
     )
 MAX_PCAP_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_PCAP_SUFFIXES = {".pcap", ".pcapng"}
+RUNTIME_CONFIG = load_runtime_profile_config()
+require_valid_runtime_config(RUNTIME_CONFIG)
 
 
 def _observability_snapshot() -> dict[str, Any]:
@@ -128,6 +136,91 @@ def _observability_snapshot() -> dict[str, Any]:
         "incidents": sniffer_service.incident_correlation_stats(),
         "persistence": sniffer_service.persistence_stats(),
         "auto_block": sniffer_service.auto_block_stats(),
+    }
+
+
+def _service_health(name: str, value: dict[str, Any]) -> tuple[str, list[str]]:
+    health = str(value.get("health") or value.get("persistence_health") or "healthy")
+    reasons = value.get("pressure_reasons")
+    if not isinstance(reasons, list):
+        reasons = []
+    return health, [f"{name}:{reason}" for reason in reasons if str(reason)]
+
+
+def _readiness_snapshot() -> dict[str, Any]:
+    observability = _observability_snapshot()
+    checks: dict[str, dict[str, Any]] = {}
+    reasons: list[str] = []
+
+    profile = load_runtime_profile_config()
+    checks["config"] = {
+        "status": "healthy" if not profile.validation_errors else "critical",
+        "warnings": list(profile.validation_warnings),
+    }
+    reasons.extend(profile.validation_errors)
+    checks["runtime_dir"] = {
+        "status": "healthy",
+        "configured": bool(profile.runtime_dir),
+        "writable": True,
+    }
+    try:
+        profile.runtime_dir.mkdir(parents=True, exist_ok=True)
+        probe = profile.runtime_dir / ".netbotpro_ready_test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception:
+        checks["runtime_dir"]["status"] = "critical"
+        checks["runtime_dir"]["writable"] = False
+        reasons.append("runtime_dir_not_writable")
+
+    service_map = {
+        "persistence": dict(observability.get("persistence") or {}),
+        "event_aggregator": dict(observability.get("event_aggregator") or {}),
+        "live_ring_buffer": dict(observability.get("live_ring_buffer") or {}),
+        "incident_engine": dict(observability.get("incidents") or {}),
+        "service_attribution": dict(observability.get("service_attribution") or {}),
+        "monitoring": build_monitoring_metrics(
+            sniffer_state=sniffer_service.get_state(),
+            observability=observability,
+            flow_summary=flow_service.summary(),
+        ),
+    }
+    for name, metrics in service_map.items():
+        health, service_reasons = _service_health(name, metrics)
+        checks[name] = {"status": health}
+        if name == "service_attribution":
+            checks[name]["registry_loaded"] = bool(metrics.get("registry_size"))
+            if not checks[name]["registry_loaded"]:
+                health = "critical"
+                checks[name]["status"] = health
+                service_reasons.append("service_attribution:registry_missing")
+        if health in {"degraded", "critical"}:
+            reasons.extend(service_reasons or [f"{name}_{health}"])
+
+    if profile.enable_live_capture:
+        try:
+            preflight = capture_provider.preflight().to_dict()
+        except Exception:
+            preflight = {"ready": False, "reason": "capture_preflight_failed"}
+        checks["capture"] = {
+            "status": "healthy" if preflight.get("ready") else "degraded",
+            "enabled": True,
+            "ready": bool(preflight.get("ready")),
+        }
+        if not preflight.get("ready"):
+            reasons.append("capture_not_ready")
+
+    overall = "ready"
+    if any(check.get("status") == "critical" for check in checks.values()):
+        overall = "not_ready"
+    elif reasons or any(check.get("status") == "degraded" for check in checks.values()):
+        overall = "degraded"
+    return {
+        "ok": overall == "ready",
+        "status": overall,
+        "profile": profile.profile,
+        "checks": checks,
+        "reasons": sorted(set(str(reason) for reason in reasons if reason)),
     }
 
 
@@ -216,16 +309,40 @@ def api_status(_: None = Depends(require_trusted_client)) -> dict[str, Any]:
     }
 
 
+@app.get("/api/health")
+def api_health() -> dict[str, Any]:
+    profile = load_runtime_profile_config(validate_paths=False)
+    return {
+        "ok": True,
+        "status": "alive",
+        "version": app.version,
+        "profile": profile.profile,
+        "uptime_seconds": max(0.0, round(time.time() - APP_STARTED_AT, 3)),
+        "metadata": {
+            "server_mode": profile.server_mode,
+            "public_base_url_configured": bool(profile.public_base_url),
+            "live_capture_enabled": profile.enable_live_capture,
+        },
+    }
+
+
+@app.get("/api/ready")
+def api_ready() -> dict[str, Any]:
+    return _readiness_snapshot()
+
+
 @app.get("/api/monitoring/metrics")
 def api_monitoring_metrics(
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
-    return build_monitoring_metrics(
+    metrics = build_monitoring_metrics(
         sniffer_state=sniffer_service.get_state(),
         observability=_observability_snapshot(),
         flow_summary=flow_service.summary(),
     )
+    metrics["profile"] = profile_metadata(load_runtime_profile_config(validate_paths=False))
+    return metrics
 
 
 @app.get("/api/live/recent")

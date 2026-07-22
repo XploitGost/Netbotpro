@@ -9,7 +9,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.app.services.agent_demo import seed_demo_data
-from backend.app.services.agent_registry import AgentRegistry, compute_agent_risk
+from backend.app.services.agent_registry import (
+    AgentRegistry,
+    compute_agent_risk,
+    normalize_capabilities,
+)
 
 
 class AgentRegistryTests(unittest.TestCase):
@@ -55,6 +59,46 @@ class AgentRegistryTests(unittest.TestCase):
         self.assertNotIn("alert-secret", public_text)
         self.assertNotIn("raw-api-secret", public_text)
         self.assertIn("[REDACTED]", public_text)
+
+    def test_node_metadata_is_redacted_and_capabilities_are_safe(self):
+        with tempfile.TemporaryDirectory() as td:
+            registry = AgentRegistry(Path(td) / "agents.jsonl")
+
+            agent = registry.register(
+                {
+                    "agent_id": "sensor-1",
+                    "node_name": "Branch sensor token=private-value",
+                    "node_type": "sensor",
+                    "profile": "sensor",
+                    "version": "0.2.0",
+                    "platform": "linux",
+                    "capabilities": [
+                        "telemetry",
+                        "redacted_flow_metadata",
+                    ],
+                },
+                "tok",
+            )
+
+        self.assertEqual(agent["node_id"], "sensor-1")
+        self.assertEqual(agent["node_type"], "sensor")
+        self.assertTrue(agent["metadata_redacted"])
+        self.assertNotIn("private-value", json.dumps(agent))
+
+    def test_forbidden_capabilities_are_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize_capabilities(["telemetry", "remote_shell"])
+
+        with tempfile.TemporaryDirectory() as td:
+            registry = AgentRegistry(Path(td) / "agents.jsonl")
+            with self.assertRaises(ValueError):
+                registry.register(
+                    {
+                        "agent_id": "unsafe-agent",
+                        "capabilities": ["command_execution"],
+                    },
+                    "tok",
+                )
 
     def test_verify_uses_configured_token_when_present(self):
         with tempfile.TemporaryDirectory() as td:

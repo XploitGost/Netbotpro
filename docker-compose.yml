@@ -1,0 +1,35 @@
+services:
+  netbotpro:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: netbotpro:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      NETBOT_PROFILE: server
+      NETBOT_SERVER_MODE: "true"
+      NETBOT_HOST: 0.0.0.0
+      NETBOT_PORT: "8000"
+      NETBOT_PUBLIC_BASE_URL: "https://netbotpro.example.com"
+      NETBOT_ALLOWED_ORIGINS: "https://netbotpro.example.com"
+      NETBOT_TRUSTED_TOKENS: "${NETBOT_TRUSTED_TOKENS:-}"
+      NETBOT_AGENT_TOKEN: "${NETBOT_AGENT_TOKEN:-}"
+      NETBOT_RUNTIME_DIR: /var/lib/netbotpro
+      NETBOT_LOG_DIR: /var/log/netbotpro
+      NETBOT_ENABLE_LIVE_CAPTURE: "false"
+      NETBOT_DEBUG: "false"
+    volumes:
+      - netbotpro-runtime:/var/lib/netbotpro
+      - netbotpro-logs:/var/log/netbotpro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)); raise SystemExit(0 if data.get('ok') else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  netbotpro-runtime:
+  netbotpro-logs:
