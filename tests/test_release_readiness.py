@@ -319,6 +319,39 @@ class ReleaseReadinessTests(unittest.TestCase):
         ]:
             self.assertNotIn(legacy_action, workflows)
 
+    def test_linux_server_deployment_foundation_is_present_and_safe(self):
+        systemd = self._read("deploy/systemd/netbotpro.service")
+        env_example = self._read("deploy/systemd/netbotpro.env.example")
+        dockerfile = self._read("Dockerfile")
+        compose = self._read("docker-compose.yml")
+        dockerignore = self._read(".dockerignore")
+        docs = self._read("docs/LINUX_SERVER_DEPLOYMENT.md")
+        readme = self._read("README.md")
+
+        self.assertIn("User=netbotpro", systemd)
+        self.assertIn("EnvironmentFile=/etc/netbotpro/netbotpro.env", systemd)
+        self.assertNotIn("User=root", systemd)
+        self.assertIn("NETBOT_PROFILE=server", env_example)
+        self.assertIn("NETBOT_ENABLE_LIVE_CAPTURE=false", env_example)
+        self.assertNotIn("sk_live_", env_example)
+        self.assertIn("USER netbotpro", dockerfile)
+        self.assertIn("HEALTHCHECK", dockerfile)
+        self.assertNotIn("privileged: true", compose.lower())
+        self.assertIn('"127.0.0.1:8000:8000"', compose)
+        for ignored in [".runtime", "node_modules", "*.pcap", "*.pcapng", ".env"]:
+            self.assertIn(ignored, dockerignore)
+        for required in [
+            "Nginx reverse proxy",
+            "Caddy reverse proxy",
+            "HTTPS/TLS",
+            "Linux live capture permissions",
+            "/api/health",
+            "/api/ready",
+            "not command/control",
+        ]:
+            self.assertIn(required, docs)
+        self.assertIn("docs/LINUX_SERVER_DEPLOYMENT.md", readme)
+
 
 if __name__ == "__main__":
     unittest.main()

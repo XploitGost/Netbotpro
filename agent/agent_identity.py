@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 AGENT_VERSION = "0.2.0"
-AGENT_CAPABILITIES = ["health", "capture_status", "alerts_summary", "flows_summary"]
+AGENT_CAPABILITIES = [
+    "telemetry",
+    "health",
+    "capture_status",
+    "alerts_summary",
+    "flows_summary",
+]
 
 
 def default_identity_path(base_dir: str | Path | None = None) -> Path:
@@ -54,5 +60,11 @@ def build_registration_payload(agent_id: str, display_name: str = "") -> dict[st
         "os_version": platform.version(),
         "machine": platform.machine(),
         "agent_version": AGENT_VERSION,
+        "version": AGENT_VERSION,
+        "node_id": agent_id,
+        "node_name": display_name or hostname,
+        "node_type": "agent",
+        "profile": "agent",
+        "metadata_redacted": True,
         "capabilities": list(AGENT_CAPABILITIES),
     }

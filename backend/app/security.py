@@ -11,6 +11,8 @@ from pathlib import Path
 
 from fastapi import HTTPException, Request
 
+from backend.app.config.profile import load_runtime_profile_config
+
 _HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
 _RATE_LIMITS: dict[tuple[str, str], list[float]] = {}
 _RATE_LOCK = threading.Lock()
@@ -69,6 +71,10 @@ def allowed_origins() -> list[str]:
     return normalized
 
 
+def trusted_tokens() -> list[str]:
+    return list(load_runtime_profile_config(validate_paths=False).trusted_tokens)
+
+
 def require_loopback(request: Request) -> None:
     client_host = request.client.host if request.client else ""
     if not _is_loopback_host(client_host):
@@ -84,19 +90,20 @@ def is_remote_access_enabled() -> bool:
 
 
 def is_local_token_enabled() -> bool:
-    return bool(os.environ.get("NETBOT_LOCAL_TOKEN", "").strip())
+    return bool(trusted_tokens())
 
 
 def _expected_local_token() -> str:
-    return os.environ.get("NETBOT_LOCAL_TOKEN", "").strip()
+    tokens = trusted_tokens()
+    return tokens[0] if tokens else ""
 
 
 def check_local_token(provided: str) -> bool:
-    expected = _expected_local_token()
-    if not expected:
+    expected_tokens = trusted_tokens()
+    if not expected_tokens:
         return True
     actual = (provided or "").strip()
-    return hmac.compare_digest(actual, expected)
+    return any(hmac.compare_digest(actual, expected) for expected in expected_tokens)
 
 
 def normalize_ip_network_csv(value: str, *, max_items: int = 128) -> str:

@@ -13,8 +13,16 @@ NetBotPro is a local-first defensive network analysis product. The project is in
 - `agent/`: read-only Agent runner, stable identity, redacted summary payloads,
   and central API client.
 - `config/`: persisted runtime settings.
+- `deploy/`: Linux server deployment templates for systemd and Docker notes.
 - `packaging/`: PyInstaller and Electron packaging scripts.
 - `scripts/`: dev setup, local runtime, QA smoke checks, and release staging.
+
+Runtime profiles keep deployment intent explicit. `desktop` is the local
+trusted/Electron path, `server` is a stricter central Linux API/UI profile, and
+`sensor`/`agent` are metadata-only remote node profiles. Server mode adds
+config validation and health/readiness endpoints; it does not add
+command/control, remote shell, file collection, raw payload forwarding, PCAP
+forwarding, TLS decryption, or autonomous response actions.
 
 ## Runtime Flow
 

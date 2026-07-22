@@ -20,6 +20,34 @@ from log_manager import LOG_DIR  # noqa: E402
 
 DEFAULT_AGENT_OFFLINE_AFTER_SECONDS = 90
 _MAX_HISTORY_LIMIT = 500
+SAFE_NODE_TYPES = {"server", "sensor", "agent"}
+SAFE_AGENT_CAPABILITIES = {
+    "telemetry",
+    "health",
+    "capture_status",
+    "alerts_summary",
+    "flows_summary",
+    "redacted_flow_metadata",
+    "redacted_service_metadata",
+    "local_capture_metadata",
+    "offline_pcap_metadata",
+    "demo",
+}
+FORBIDDEN_NODE_CAPABILITIES = {
+    "remote_shell",
+    "command_execution",
+    "command_control",
+    "file_collection",
+    "raw_payload_forwarding",
+    "raw_packet_forwarding",
+    "raw_pcap_forwarding",
+    "raw_payload",
+    "raw_packet",
+    "raw_pcap",
+    "credential_access",
+    "tls_decryption",
+    "mitm",
+}
 _SENSITIVE_KEYS = {
     "api_key",
     "apikey",
@@ -99,6 +127,27 @@ def _redact(value: Any) -> Any:
     if isinstance(value, str):
         return redact_sensitive_text(value)
     return value
+
+
+def normalize_node_type(value: Any) -> str:
+    node_type = str(value or "agent").strip().lower()
+    if node_type not in SAFE_NODE_TYPES:
+        raise ValueError("node_type must be server, sensor, or agent")
+    return node_type
+
+
+def normalize_capabilities(value: Any) -> list[str]:
+    items = value if isinstance(value, list) else []
+    capabilities: list[str] = []
+    for item in items[:64]:
+        capability = str(item or "").strip().lower()
+        if not capability:
+            continue
+        if capability in FORBIDDEN_NODE_CAPABILITIES:
+            raise ValueError(f"Forbidden node capability: {capability}")
+        if capability in SAFE_AGENT_CAPABILITIES and capability not in capabilities:
+            capabilities.append(capability)
+    return capabilities
 
 
 def _count(alerts: dict[str, Any], *keys: str) -> int:
@@ -389,12 +438,31 @@ class AgentRegistry:
         configured_token = os.environ.get("NETBOT_AGENT_TOKEN", "").strip()
         if configured_token and not hmac.compare_digest(configured_token, token):
             raise PermissionError("invalid agent token")
+        node_type = normalize_node_type(payload.get("node_type") or payload.get("type"))
+        capabilities = normalize_capabilities(payload.get("capabilities") or [])
         now = _now()
         with self._lock:
             existing = self._agents.get(agent_id, {})
             record = {
                 **existing,
                 "agent_id": agent_id,
+                "node_id": agent_id,
+                "node_name": redact_sensitive_text(
+                    str(
+                        payload.get("node_name")
+                        or payload.get("display_name")
+                        or payload.get("hostname")
+                        or agent_id
+                    )
+                ),
+                "node_type": node_type,
+                "profile": redact_sensitive_text(
+                    str(payload.get("profile") or node_type)
+                ),
+                "version": redact_sensitive_text(
+                    str(payload.get("version") or payload.get("agent_version") or "")
+                ),
+                "metadata_redacted": True,
                 "hostname": redact_sensitive_text(str(payload.get("hostname") or "")),
                 "display_name": redact_sensitive_text(
                     str(
@@ -412,7 +480,7 @@ class AgentRegistry:
                 "agent_version": redact_sensitive_text(
                     str(payload.get("agent_version") or "")
                 ),
-                "capabilities": list(payload.get("capabilities") or []),
+                "capabilities": capabilities,
                 "token_hash": _token_digest(token),
                 "status": "online",
                 "registered_at": existing.get("registered_at") or now,

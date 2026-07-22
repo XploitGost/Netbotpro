@@ -27,6 +27,10 @@ not require packet-capture privileges.
 Live capture behavior depends on OS drivers, interface visibility, privileges,
 and what traffic is observable from the selected host/interface.
 
+Linux live capture may require libpcap/tcpdump plus `sudo` or narrowly scoped
+`CAP_NET_RAW`/`CAP_NET_ADMIN`. Do not run the central server as root just to
+capture packets; prefer a separate authorized sensor or offline PCAP analysis.
+
 ## Windows Notes
 
 Install Npcap before using live capture. Reopen the terminal after installing
@@ -60,6 +64,12 @@ The backend status endpoint is available at:
 ```text
 http://127.0.0.1:8765/api/status
 ```
+
+For Linux central API/UI deployment, use `NETBOT_PROFILE=server` and follow
+[Linux Server Deployment](LINUX_SERVER_DEPLOYMENT.md). Server profile adds
+strict startup validation: explicit allowed origins, strong trusted tokens,
+debug disabled, writable runtime/log directories, and no wildcard CORS for
+public binds.
 
 ## Frontend From Source
 

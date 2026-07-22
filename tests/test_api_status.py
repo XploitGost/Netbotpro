@@ -26,6 +26,45 @@ class ApiStatusTests(unittest.TestCase):
         self.assertNotIn("capture_preflight", payload)
         self.assertFalse(parsed.local_token_required)
 
+    def test_health_exposes_profile_without_secrets(self):
+        with patch.dict(
+            main.os.environ,
+            {"NETBOT_PROFILE": "desktop", "NETBOT_TRUSTED_TOKENS": "secret-token"},
+            clear=False,
+        ):
+            payload = main.api_health()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["profile"], "desktop")
+        self.assertNotIn("secret-token", str(payload))
+
+    def test_readiness_reports_not_ready_reasons_without_secrets(self):
+        with (
+            patch.object(
+                main,
+                "_observability_snapshot",
+                return_value={
+                    "persistence": {"health": "critical", "last_error": "RuntimeError"},
+                    "event_aggregator": {"health": "healthy"},
+                    "live_ring_buffer": {"health": "healthy"},
+                    "incidents": {"health": "healthy"},
+                    "service_attribution": {"health": "critical", "registry_size": 0},
+                },
+            ),
+            patch.object(main.sniffer_service, "get_state", return_value={}),
+            patch.object(main.flow_service, "summary", return_value={}),
+            patch.dict(
+                main.os.environ,
+                {"NETBOT_TRUSTED_TOKENS": "ready-secret"},
+                clear=False,
+            ),
+        ):
+            payload = main.api_ready()
+
+        self.assertEqual(payload["status"], "not_ready")
+        self.assertIn("service_attribution:registry_missing", payload["reasons"])
+        self.assertNotIn("ready-secret", str(payload))
+
 
 if __name__ == "__main__":
     unittest.main()

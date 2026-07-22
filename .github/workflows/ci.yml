@@ -27,7 +27,7 @@ jobs:
       - name: Run backend tests
         run: python -m unittest discover -s tests -v
       - name: Run CI-safe real-load benchmark
-        run: python benchmarks/long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --sample-interval-sec 0.25 --ci-safe --output .runtime/benchmarks/ci-safe-real-load
+        run: python benchmarks/long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --sample-interval-sec 0.25 --max-cpu-avg-percent 100 --max-cpu-peak-percent 1000 --ci-safe --output .runtime/benchmarks/ci-safe-real-load
 
   frontend-build:
     name: Frontend Build (${{ matrix.os }})
