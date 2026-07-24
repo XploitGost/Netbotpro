@@ -172,6 +172,7 @@ The default compose deployment binds localhost only, uses runtime/log volumes, a
 ```bash
 python -m pip check
 python -m unittest discover -s tests -v
+python scripts/qa/server_deployment_smoke.py
 cd frontend && npm ci && npm run test:ui && npm run build
 cd ../desktop/electron && npm ci && npm audit --omit=dev
 cd ../..
@@ -193,4 +194,3 @@ These checks do not require root, Docker daemon access, live capture, Nginx, Cad
 - Nginx/Caddy proxy issue: verify backend health on `127.0.0.1:8000`.
 - High CPU/RAM pressure: run the CI-safe benchmark and inspect `/api/monitoring/metrics`.
 - Benchmark degraded: treat it as sizing guidance, then lower capture/load or increase CPU/RAM.
-

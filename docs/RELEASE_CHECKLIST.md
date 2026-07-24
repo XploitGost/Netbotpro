@@ -102,6 +102,8 @@ Use this checklist before tagging or publishing a release candidate.
   `python benchmarks/soak_test_pipeline.py --duration-sec 10 --events-per-sec 200 --flows 20 --ci-safe --output .runtime/benchmarks/release-hardening-smoke`
 - [ ] Run the CI-safe real-load benchmark:
   `python benchmarks/long_soak_runner.py --profile light_desktop --duration-sec 5 --events-per-sec 100 --flows 10 --websocket-clients 1 --sample-interval-sec 0.25 --max-cpu-avg-percent 100 --max-cpu-peak-percent 1000 --ci-safe --output .runtime/benchmarks/release-real-load-smoke`
+- [ ] Run server deployment static smoke:
+  `python scripts/qa/server_deployment_smoke.py`
 - [ ] For release candidates, run at least one manual local profile from
   `docs/REAL_LOAD_TESTING.md` on representative hardware.
 - [ ] Confirm bounded queues and buffers remain visible in Ops Snapshot.
