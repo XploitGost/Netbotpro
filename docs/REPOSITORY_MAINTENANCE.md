@@ -34,9 +34,11 @@ modules; `.editorconfig` guides editors. Existing files are not mass-reformatted
 
 As configured on 2026-11-09, `main` disallows force pushes and deletion, including
 for administrators. Conversation resolution is required for pull requests.
-Normal direct pushes remain allowed; mandatory PR approval and mandatory status
-checks are not configured. Prefer PRs voluntarily until a stable required-check
-policy is agreed. Repository settings are remote state, not installed by cloning.
+After the security/docs checkpoint passes remote CI, changes to `main` require
+a pull request and successful hygiene, dependency, backend, frontend and Windows
+desktop checks against an up-to-date base. No second-person approval is required
+for this single-maintainer project. Repository settings are remote state, not
+installed by cloning; confirm the actual branch protection before assuming it.
 
 Secret scanning and push protection are enabled. Dependency vulnerability alerts
 and private vulnerability reporting are enabled. Security-update PRs
@@ -47,15 +49,16 @@ are not deleted by this maintenance work.
 
 ## CI and Artifact Limits
 
-### Open Dependency Remediation
+### Dependency Remediation Checkpoint
 
-Enabling security alerts surfaced outstanding dependency advisories. The Vite
-locks were advanced to 6.4.5 and frontend tests/build passed. This does not resolve
-all dependency alerts. Review the Dependabot security dashboard and its upgrade
-PRs, especially Pillow, Electron, HTTP/multipart dependencies and certificate
-bundles. Test upgrades in an isolated environment, including packaged runtime
-probes, before merging or installing. A green CI run alone does not certify
-security, and no advisories were dismissed to make the dashboard look clean.
+The reviewed requirements and all three npm lockfiles were upgraded and audited
+with no known advisories reported at the checkpoint. This includes Pillow,
+Electron, HTTP/multipart dependencies and certificate bundles, plus a targeted
+minimatch override in the packaging graph. Fresh-environment tests and packaged
+ML/export probes validate more than optional-import fallback. GitHub recomputes
+its own alerts after a push; wait for that result rather than dismissing alerts.
+Clean audits are time-bounded evidence, not proof of absence of vulnerabilities.
+These source changes do not silently replace an older installed application.
 
 ### Workflow Policy
 

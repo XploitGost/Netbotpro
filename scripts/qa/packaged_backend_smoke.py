@@ -165,9 +165,25 @@ def run_smoke(
                 process.wait(timeout=5)
 
 
+def run_runtime_probes(runtime_dir: Path = PACKAGED_BACKEND_DIR) -> None:
+    binary = find_binary(runtime_dir)
+    results = {}
+    for flag in ("--ml-runtime-probe", "--export-runtime-probe"):
+        result = subprocess.run([str(binary.resolve()), flag], capture_output=True,
+                                text=True, check=True, timeout=90)
+        results[flag] = json.loads(result.stdout)
+    ml = results["--ml-runtime-probe"]
+    if ml.get("ml_available") is not True or ml.get("trained") is not True:
+        raise AssertionError("Packaged ML must be available and actually train")
+    exports = results["--export-runtime-probe"]
+    if any(exports.get(kind) != "ok" for kind in ("csv", "xlsx", "pdf", "html", "zip")):
+        raise AssertionError("Packaged export probe is incomplete")
+
+
 def main() -> int:
     run_smoke()
-    print("Packaged backend smoke passed.")
+    run_runtime_probes()
+    print("Packaged backend, ML training and export probes passed.")
     return 0
 
 

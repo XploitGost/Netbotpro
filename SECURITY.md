@@ -6,8 +6,26 @@ NetBotPro is a defensive network analysis tool. Security reports, hardening sugg
 
 | Version | Support status |
 | --- | --- |
-| 0.2.0 | Current release |
-| 0.1.3 and older | Historical; upgrade recommended |
+| `main` / 0.2.0 development line | Active fixes and validation; not production certification |
+| Published 0.2.0 binaries | Historical build; do not assume current source fixes are bundled |
+| 0.1.3 and older | Historical; no current security maintenance promise |
+
+Reviewed 2026-11-09. No guaranteed response SLA is offered. Dependency scanning,
+tests and green CI do not prove absence of vulnerabilities. Do not deploy old
+public binaries as if they contain the current dependency set.
+
+## Dependency And Release Policy
+
+Python pins and all npm lockfiles are audited in CI. Security updates require
+compatibility tests; major Electron/Pillow updates are not automatically merged.
+The Electron packaging graph uses a targeted minimatch override for vulnerable
+7.x through 10.x ranges; remove it only when upstream constraints select a fixed
+version and packaging has been validated. No advisory is dismissed merely to
+produce a clean dashboard.
+
+The transitional desktop UI overlay is not a reproducible release build. Follow
+[architecture boundaries](docs/ARCHITECTURE_BOUNDARIES.md) and
+[validation gates](docs/VALIDATION.md) before publishing a new release.
 
 ## Reporting A Security Issue
 

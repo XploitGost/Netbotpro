@@ -3,6 +3,7 @@ import {Search,Filter,Check,ChevronLeft,ChevronRight,ArrowRight,ExternalLink,X,P
 import {Traffic} from './CommandCenter.jsx';
 import {packetTime,packetRisk,packetProtocol,packetInfo,flowRows,orderedEvidence,evidenceDate,capturedDissection,destinationDomain} from './monitorModel.js';
 import {resolveCaptureInterface,captureInterfaceLabel} from './dashboardModel.js';
+import {useWindowedRows} from '../src/hooks/useWindowedRows.js';
 
 const title=value=>String(value??'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 const count=value=>Number(value||0).toLocaleString('en-US');
@@ -38,8 +39,7 @@ function PacketTable({packets,meta,capturedTotal,query,selectedId,loading,error,
  const selectOriginal=onSelect;
  onSelect=(item,index)=>selectOriginal(item,ordered[index].index);
  const protocols=useMemo(()=>[...new Set(['TCP','UDP','ICMP','DNS','HTTP','HTTPS','TLS','ARP','SSDP','MDNS',...packets.flatMap(packet=>[packet.proto,packet.app_protocol]),query.proto].filter(Boolean))],[packets,query.proto]);
- // Keep the installed row-windowing hook for large history pages.
- const {visibleItems,startIndex,topSpacerHeight,bottomSpacerHeight,onScroll}=Of(sorted,{enabled:packets.length>60,rowHeight:25,containerHeight:375,resetKey:JSON.stringify({offset:meta.offset,query})});
+ const {visibleItems,startIndex,topSpacerHeight,bottomSpacerHeight,onScroll}=useWindowedRows(sorted,{enabled:packets.length>60,rowHeight:25,containerHeight:375,resetKey:JSON.stringify({offset:meta.offset,query})});
  return <section className="lm-packets lm-panel"><header><h2>Packets <span>({count(!focusedTarget?.ip&&!Object.entries(query).some(([key,value])=>key!=='only_remote'&&!!value)?capturedTotal??meta.total:meta.total)})</span></h2><form className="lm-filters" onSubmit={event=>{event.preventDefault();onApply();}}><label className="lm-search"><Search size={16}/><input aria-label="Search packets" placeholder="Search packets..." value={query.text||''} onChange={event=>onChange('text',event.target.value)}/></label><IconButton label="More packet filters" Icon={Filter} expanded={advanced} onClick={()=>setAdvanced(!advanced)}/><select aria-label="Protocol filter" value={query.proto||''} onChange={event=>onChange('proto',event.target.value)}><option value="">All Protocols</option>{protocols.map(protocol=><option key={protocol}>{protocol}</option>)}</select><select aria-label="Risk filter" value={query.only_alerts?'alerts':'all'} onChange={event=>onChange('only_alerts',event.target.value==='alerts')}><option value="all">All Risk</option><option value="alerts">Alerts only</option></select><IconButton label="Apply packet filters" Icon={Check} onClick={onApply} disabled={loading}/></form></header>
  {advanced&&<div className="lm-advanced">{[['src','Source IP'],['dst','Destination IP'],['process','Process'],['pid','PID']].map(([key,name])=><label key={key}>{name}<input aria-label={`${name} filter`} value={query[key]||''} onChange={event=>onChange(key,event.target.value)}/></label>)}<label className="lm-checkbox"><input type="checkbox" checked={!!query.only_remote} onChange={event=>onChange('only_remote',event.target.checked)}/>Remote traffic only</label></div>}
  {focusedTarget?.ip&&<p className="lm-focus">Focused endpoint: {focusedTarget.ip} <button type="button" onClick={onClearFocus}>Clear focus</button></p>}

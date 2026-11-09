@@ -4,6 +4,12 @@
 
 ### Added
 
+- Synthetic, reproducible Command Center, Monitor, Investigation and Fleet
+  documentation screenshots, an updated architecture/roadmap, and Persian overview.
+- Known-advisory audits for all requirement/lock files and packaged ML/export probes.
+- Explicit per-core versus available-capacity CPU budgets for benchmark validation.
+- Isolated Electron renderer/IPC/startup/drain smoke on the upgraded runtime.
+
 - Repository source-safety guard and regression tests, contribution templates,
   dependency update policy and explicit repository maintenance documentation.
 - Preserved desktop UI source checkpoint and architecture boundary roadmap.
@@ -26,6 +32,10 @@
 - Offline PCAP parity for protocol intelligence summaries.
 
 ### Changed
+
+- Updated vulnerable Python dependencies, Electron/tooling and npm packaging graph.
+- Restored dynamically imported export/ML modules to packaged backend builds.
+- Replaced a compiled-bundle row-windowing symbol with the shared source hook.
 
 - Replaced remaining naive UTC timestamp call sites with timezone-aware UTC
   timestamps.

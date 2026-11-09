@@ -35,3 +35,17 @@ a replacement for reviewing the diff, secret scanning or privacy review.
 - Run `python -m unittest discover -s tests`
 - Run `cd frontend && npm run build`
 - Use `packaging/windows/build.ps1` for the Windows packaging path
+
+## Dependency And Documentation Changes
+
+- Use Python 3.13 and Node.js 22.12+; install from pinned requirements and lockfiles.
+- For security updates, run fresh-environment tests, `pip check`, all dependency
+  audits and packaged runtime probes. Do not use `npm audit fix --force` blindly.
+- Preserve the MIT license and copyright. Documentation updates do not authorize
+  changing the project's legal terms.
+- Update current architecture separately from target architecture. Rust remains
+  a possible future optimization, not an existing implementation.
+- Refresh screenshots through the synthetic component harness, never live user
+  traffic. See [screenshots](docs/SCREENSHOTS.md) and [validation](docs/VALIDATION.md).
+- Historical release notes remain historical; link to current development docs
+  rather than rewriting old release results as new measurements.

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from PyInstaller.building import build_main as _build_main
+from PyInstaller.utils.hooks import collect_submodules
 
 
 _original_find_binary_dependencies = _build_main.find_binary_dependencies
@@ -48,7 +49,17 @@ hiddenimports = [
     "core.capture",
     "core.capture.system_provider",
     "core.netbotpro_sniffer_core",
+    "numpy",
+    "scipy",
+    "pandas",
+    "openpyxl",
+    "fpdf",
+    "multipart",
+    "core.netbotpro_logging.exporters",
+    "core.netbotpro_logging.privacy",
 ]
+hiddenimports += collect_submodules("sklearn", filter=lambda name: ".tests" not in name)
+hiddenimports += collect_submodules("scapy")
 
 a = Analysis(
     [str(desktop_entry)],
@@ -62,7 +73,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["_tkinter", "numpy", "scipy", "setuptools", "sklearn", "tkinter"],
+    excludes=["_tkinter", "tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -1,55 +1,33 @@
-# Docs
+# Documentation Index
 
-## Primary path
+Current development documentation, reviewed 2026-11-09. Historical release notes
+describe their own release, not the current branch or installed desktop overlay.
 
-The maintained product path is:
+## Start Here
 
-- `backend/`
-- `frontend/`
-- `core/`
-- `config/`
+- [Project overview](../README.md) and [Persian overview](../README.fa.md)
+- [Install and run](INSTALL.md)
+- [Contributing](../CONTRIBUTING.md), [security policy](../SECURITY.md), [MIT license](../LICENSE)
 
-## Cleanup policy
+## Design And Evidence
 
-The repository should stay focused on the active desktop and web runtime. Old debug artifacts and abandoned UI paths should not remain in the tree.
+- [Current architecture](ARCHITECTURE.md)
+- [Target boundaries](ARCHITECTURE_BOUNDARIES.md)
+- [Roadmap and acceptance gates](ROADMAP.md)
+- [Validation and CPU measurement](VALIDATION.md)
+- [Screenshot provenance](SCREENSHOTS.md)
+- [Repository and GitHub maintenance](REPOSITORY_MAINTENANCE.md)
 
-Do not keep:
+## Operations And Features
 
-- `__pycache__/`
-- `*.pyc`
-- `.runtime-cache/`
-- `.codex_tmp_stage2/`
-- `frontend/node_modules/`
-- `frontend/dist/`
-- backup zips or nested zips
-- `*.save`, `*.bak`, `*.old`
+- [Deployment overview](DEPLOYMENT_OVERVIEW.md) and [Linux server](LINUX_SERVER_DEPLOYMENT.md)
+- [Flow analysis](FLOW_ANALYSIS.md), [packet inspection](DEEP_PACKET_INSPECTION.md)
+- [Destination evidence](SERVICE_ATTRIBUTION.md), [incident correlation](INCIDENT_CORRELATION.md)
+- [Pipeline configuration](PERFORMANCE_PIPELINE.md)
+- [Performance validation](PERFORMANCE_VALIDATION.md), [real-load tests](REAL_LOAD_TESTING.md)
+- [Release checklist](RELEASE_CHECKLIST.md), [release QA](RELEASE_QA_CHECKLIST.md)
+- [Historical v0.2.0 release notes](RELEASE_NOTES_v0.2.0.md)
 
-## Current layout
-
-```text
-project/
-├── backend/
-├── frontend/
-├── core/
-├── config/
-├── tests/
-├── docs/
-├── requirements.txt
-└── .gitignore
-```
-
-## Operational Monitoring
-
-Operational monitoring is intentionally compact. The backend exposes
-`/api/monitoring/metrics` with capture state, packet intake queue pressure,
-websocket delivery counters, SQLite persistence pressure, history query
-latency, flow totals, and detection counters.
-
-The UI uses that snapshot to show short recommended actions for stale metrics,
-stopped capture, packet queue drops, persistence backlog, websocket delivery
-gaps, and backend runtime pressure. These metrics are operational metadata only;
-they do not include raw payloads, credentials, cookies, authorization headers,
-or Agent raw packet forwarding.
-
-See [Performance Pipeline](PERFORMANCE_PIPELINE.md) for the bounded packet queue
-configuration, exposed metrics, and next planned performance steps.
+The architecture and validation documents take precedence over older descriptions
+of development readiness. Feature documents are not promises of universal network
+visibility, automated attack confirmation or lossless capture on every driver.

@@ -8,6 +8,11 @@ and its build remain in the parent directory.
 Run the model tests with `node --test *Model.test.mjs` from this directory.
 Dependencies can be installed with `npm ci`.
 
+The standalone documentation harness (`docs-preview.jsx`, `capture-docs.mjs`,
+`docs-shell.css`) renders these components with synthetic fixtures and a
+preview-only host layout. See `../../docs/SCREENSHOTS.md`. It does not require
+the historical compiled baseline and is not a production shell implementation.
+
 ## Transitional build limitation
 
 `build.mjs` is a historical compatibility overlay: it patches named boundaries

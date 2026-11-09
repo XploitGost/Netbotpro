@@ -69,7 +69,7 @@ For `0.2.0`, the release artifacts are:
 
 ## Windows Toolchain Notes
 
-- Node 20 works for CI builds; Node 22 is preferred locally for newer Electron tooling.
+- Node.js 22.12+ is required by the current Electron dependency; CI uses Node 22.
 - Python 3.13 is used by CI.
 - `packaging/windows/build.ps1` reuses local Electron dependencies when possible.
 - Packaged backend smoke tests should pass before publishing a desktop release.

@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import psutil
 
@@ -29,17 +29,27 @@ from benchmarks.load_profiles import get_profile, profile_names
 from benchmarks.soak_test_pipeline import run_soak_test
 
 
+class ResourceSample(TypedDict):
+    elapsed_sec: float
+    memory_mb: float
+    cpu_percent: float | None
+
+
 class LongSoakSampler:
     def __init__(self, sample_interval_sec: float = 1.0) -> None:
         self._process = psutil.Process()
+        self._available_cpus = available_cpu_count(self._process)
         self._interval_sec = max(0.05, float(sample_interval_sec))
         self._stop = threading.Event()
-        self._samples: list[dict[str, float]] = []
+        self._samples: list[ResourceSample] = []
         self._thread: threading.Thread | None = None
         self._started_at = time.perf_counter()
+        self._last_cpu_at = self._started_at
 
     def start(self) -> None:
         self._process.cpu_percent(interval=None)
+        self._last_cpu_at = time.perf_counter()
+        self._append_sample()
         self._thread = threading.Thread(
             target=self._sample_loop,
             name="netbotpro-long-soak-sampler",
@@ -52,28 +62,46 @@ class LongSoakSampler:
         if self._thread:
             self._thread.join(timeout=2.0)
         self._append_sample()
-        return summarize_resource_samples(self._samples)
+        summary = summarize_resource_samples(self._samples)
+        summary["available_cpu_count"] = self._available_cpus
+        summary["cpu_measurement_basis"] = "one_logical_cpu_equals_100_percent"
+        return summary
 
-    def samples(self) -> list[dict[str, float]]:
+    def samples(self) -> list[ResourceSample]:
         return list(self._samples)
 
     def _sample_loop(self) -> None:
-        self._append_sample()
         while not self._stop.wait(self._interval_sec):
             self._append_sample()
 
     def _append_sample(self) -> None:
+        now = time.perf_counter()
+        # Windows CPU-time granularity makes near-zero intervals misleading.
+        cpu = None
+        if now - self._last_cpu_at >= 0.05:
+            cpu = round(float(self._process.cpu_percent(interval=None)), 3)
+            self._last_cpu_at = now
         memory_mb = self._process.memory_info().rss / 1024 / 1024
         self._samples.append(
             {
-                "elapsed_sec": round(time.perf_counter() - self._started_at, 3),
+                "elapsed_sec": round(now - self._started_at, 3),
                 "memory_mb": round(memory_mb, 3),
-                "cpu_percent": round(float(self._process.cpu_percent(interval=None)), 3),
+                "cpu_percent": cpu,
             }
         )
 
 
-def summarize_resource_samples(samples: list[dict[str, float]]) -> dict[str, Any]:
+def available_cpu_count(process: Any) -> int:
+    try:
+        affinity = process.cpu_affinity()
+        if affinity:
+            return len(affinity)
+    except (AttributeError, OSError, psutil.Error):
+        pass
+    return max(1, psutil.cpu_count() or 1)
+
+
+def summarize_resource_samples(samples: list[ResourceSample]) -> dict[str, Any]:
     if not samples:
         return {
             "memory_start_mb": 0.0,
@@ -85,6 +113,7 @@ def summarize_resource_samples(samples: list[dict[str, float]]) -> dict[str, Any
             "possible_memory_leak": False,
             "memory_pressure_reasons": [],
             "cpu_avg_percent": 0.0,
+            "cpu_sample_count": 0,
             "cpu_p95_percent": 0.0,
             "cpu_peak_percent": 0.0,
             "sustained_cpu_pressure": False,
@@ -92,7 +121,7 @@ def summarize_resource_samples(samples: list[dict[str, float]]) -> dict[str, Any
             "tuning_hint": "No samples collected.",
         }
     memory_values = [sample["memory_mb"] for sample in samples]
-    cpu_values = [sample["cpu_percent"] for sample in samples]
+    cpu_values = [sample["cpu_percent"] for sample in samples if sample.get("cpu_percent") is not None]
     elapsed_min = max(
         (samples[-1]["elapsed_sec"] - samples[0]["elapsed_sec"]) / 60.0,
         1.0 / 60.0,
@@ -111,9 +140,9 @@ def summarize_resource_samples(samples: list[dict[str, float]]) -> dict[str, Any
     if possible_memory_leak:
         memory_pressure_reasons.append("possible_continuous_memory_growth")
 
-    cpu_avg = round(statistics.mean(cpu_values), 3)
-    cpu_p95 = percentile(cpu_values, 0.95)
-    cpu_peak = round(max(cpu_values), 3)
+    cpu_avg = round(statistics.mean(cpu_values), 3) if cpu_values else 0.0
+    cpu_p95 = percentile(cpu_values, 0.95) if cpu_values else 0.0
+    cpu_peak = round(max(cpu_values), 3) if cpu_values else 0.0
     cpu_pressure_reasons: list[str] = []
     sustained_cpu_pressure = cpu_avg >= 80.0 or cpu_p95 >= 90.0
     if cpu_avg >= 80.0:
@@ -137,6 +166,7 @@ def summarize_resource_samples(samples: list[dict[str, float]]) -> dict[str, Any
         "possible_memory_leak": possible_memory_leak,
         "memory_pressure_reasons": memory_pressure_reasons,
         "cpu_avg_percent": cpu_avg,
+        "cpu_sample_count": len(cpu_values),
         "cpu_p95_percent": cpu_p95,
         "cpu_peak_percent": cpu_peak,
         "sustained_cpu_pressure": sustained_cpu_pressure,
@@ -190,25 +220,37 @@ def classify_profile_result(
     max_cpu_avg_percent: float,
     max_cpu_peak_percent: float,
     fail_on_unbounded_growth: bool,
+    cpu_budget_basis: str = "one-core",
 ) -> dict[str, Any]:
+    if cpu_budget_basis not in {"one-core", "available-cpus"}:
+        raise ValueError("Unknown CPU budget basis")
     resources = results["resource_profile"]
+    divisor = max(1, int(resources.get("available_cpu_count", 1))) if cpu_budget_basis == "available-cpus" else 1
+    cpu_average = resources["cpu_avg_percent"] / divisor
+    cpu_peak = resources["cpu_peak_percent"] / divisor
     general = results["general"]
     failures: list[str] = []
+    if resources.get("cpu_sample_count", 1) == 0:
+        failures.append("cpu_samples_unavailable")
     if (
         fail_on_unbounded_growth
         and resources["memory_growth_mb"] > max_memory_growth_mb
         and not resources["memory_stabilized"]
     ):
         failures.append("memory_growth_threshold_exceeded")
-    if resources["cpu_avg_percent"] > max_cpu_avg_percent:
+    if cpu_average > max_cpu_avg_percent:
         failures.append("cpu_average_threshold_exceeded")
-    if resources["cpu_peak_percent"] > max_cpu_peak_percent:
+    if cpu_peak > max_cpu_peak_percent:
         failures.append("cpu_peak_threshold_exceeded")
     if general.get("events_failed_total", 0):
         failures.append("pipeline_failures_detected")
     return {
         "passed": not failures,
         "failures": failures,
+        "cpu_budget_basis": cpu_budget_basis,
+        "cpu_budget_divisor": divisor,
+        "cpu_budget_average_percent": round(cpu_average, 3),
+        "cpu_budget_peak_percent": round(cpu_peak, 3),
         "bounded_pressure_visible": bool(results["ops_health"].get("pressure_reasons") is not None),
         "external_network_used": False,
         "live_capture_used": False,
@@ -359,13 +401,14 @@ def run_long_soak(args: argparse.Namespace) -> dict[str, Any]:
             max_cpu_avg_percent=args.max_cpu_avg_percent,
             max_cpu_peak_percent=args.max_cpu_peak_percent,
             fail_on_unbounded_growth=args.fail_on_unbounded_growth,
+            cpu_budget_basis=getattr(args, "cpu_budget_basis", "one-core"),
         )
     )
     results["tuning_recommendations"] = generate_tuning_recommendations(results)
     return redact_sensitive_data(results)
 
 
-def write_timeseries_csv(samples: list[dict[str, float]], output: str | Path) -> str:
+def write_timeseries_csv(samples: list[ResourceSample], output: str | Path) -> str:
     destination = Path(output)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / "resource_timeseries.csv"
@@ -393,6 +436,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-memory-growth-mb", type=float, default=150.0)
     parser.add_argument("--max-cpu-avg-percent", type=float, default=90.0)
     parser.add_argument("--max-cpu-peak-percent", type=float, default=400.0)
+    parser.add_argument("--cpu-budget-basis", choices=("one-core", "available-cpus"), default="one-core",
+                        help="Interpret CPU limits per logical CPU (default) or as a share of available CPU affinity")
     parser.add_argument("--fail-on-unbounded-growth", action="store_true")
     parser.add_argument("--pcap")
     parser.add_argument("--pcap-loop", action="store_true")

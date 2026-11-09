@@ -1,0 +1,34 @@
+/* Preview-only host layout; production shell integration is a separate migration. */
+.docs-shell * { box-sizing: border-box; letter-spacing: 0; }
+.docs-shell { font-family: 'Segoe UI', Arial, sans-serif; }
+.docs-shell > .app-nav { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 0; border: 0; border-right: 1px solid #17313e; border-radius: 0; background: #071823; }
+.docs-shell .app-nav-copy { display: block; flex: none; padding: 22px 24px; min-height: 100px; border-bottom: 1px solid #17313e; }
+.docs-shell .app-nav-copy strong { display: block; color: #00a9ed; font-size: 27px; white-space: nowrap; }
+.docs-shell .app-nav-copy strong span { color: #e6edf4; }
+.docs-shell .app-nav-copy small { display: block; color: #a4bfd0; font-size: 11px; margin-top: 4px; white-space: nowrap; }
+.docs-shell .app-nav-actions { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; flex: 1; width: 100%; padding: 20px 0; gap: 0; }
+.docs-shell .nav-group, .docs-shell .nav-group-items { display: flex; flex-direction: column; gap: 0; width: 100%; }
+.docs-shell .nav-button { display: flex; align-items: center; justify-content: flex-start; gap: 20px; min-height: 54px; width: 100%; margin: 0; padding: 10px 23px; border: 0; border-left: 5px solid transparent; border-radius: 0; color: #a6c8df; background: transparent; box-shadow: none; transform: none; }
+.docs-shell .nav-button[aria-current='page'] { color: #00c6ec; border-left-color: #00b9ef; background: #07394f; }
+.docs-shell .nav-button-icon { display: flex; flex: none; }
+.docs-shell .nav-button-copy { display: block; text-align: left; font-size: 12px; text-transform: uppercase; white-space: nowrap; }
+.docs-shell .app-nav-footer { display: flex; align-items: flex-start; gap: 10px; margin: 0 24px; padding: 18px 0 24px; border-top: 1px solid #17313e; font-size: 11px; color: #a4bfd0; }
+.docs-shell .app-nav-footer strong, .docs-shell .app-nav-footer small { display: block; margin-bottom: 5px; }
+.docs-shell .app-nav-footer strong { color: #00d88c; }
+.docs-shell .nav-signal-dot { width: 8px; height: 8px; border-radius: 50%; background: #00d88c; margin-top: 4px; }
+.docs-shell > .soc-topbar { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: #061722; border-bottom: 1px solid #17313e; font-size: 12px; }
+.docs-shell .soc-nav-toggle { display: none; }
+.docs-shell .soc-topbar-section { display: flex; align-items: center; flex: none; gap: 8px; border-right: 1px solid #17313e; padding-right: 12px; white-space: nowrap; }
+.docs-shell .soc-live-state strong { font-size: 12px; }
+.docs-shell .soc-live-dot { display: inline-block; height: 12px; width: 12px; border-radius: 50%; background: #00d88c; }
+.docs-shell .ref-adapter { display: flex; align-items: center; gap: 8px; color: #e5edf5; }
+.docs-shell .soc-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; white-space: nowrap; background: #073d32; border: 1px solid #006c54; border-radius: 4px; }
+.docs-shell .soc-counter-state { color: #a4bfd0; }
+.docs-shell .soc-counter-state strong { color: #e5edf5; }
+.docs-shell .soc-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.docs-shell .soc-topbar-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 90px; height: 34px; padding: 0 12px; border-radius: 4px; border: 1px solid #007f71; color: #f2f8fc; }
+.docs-shell .soc-topbar-actions .soc-stop { border-color: #a02f3d; }
+.docs-shell .soc-topbar-actions .soc-settings { min-width: 34px; padding: 0; background: transparent; border: 0; }
+.docs-shell .soc-main { background: #06141e; }
+.docs-shell .workspace-header { display: block; }
+.docs-shell .ref-command { display: grid; gap: 11px; }

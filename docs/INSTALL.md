@@ -7,8 +7,7 @@ networks you own or have explicit permission to administer.
 ## Requirements
 
 - Python 3.13 is recommended for source and CI parity.
-- Node.js 20 or newer is recommended. Node 20.17+ avoids newer Electron
-  tooling engine warnings.
+- Node.js 22.12 or newer is required by the current Electron toolchain.
 - Npcap on Windows for live packet capture.
 - Administrator privileges on Windows, or root/capture capabilities on Linux,
   when live packet capture is required.
@@ -140,7 +139,7 @@ decrypt TLS or collect credentials.
 | Electron download fails | Network, proxy, cache, or registry issue | Re-run `npm ci` in `desktop\electron` on a network that can reach Electron releases, or configure an approved Electron cache/mirror. |
 | Port already in use | Another backend or dev server is running | Stop the old process or set a different `NETBOT_PORT` / Vite port. |
 | Python dependency install fails | Old pip, incompatible Python, or wheel download issue | Upgrade pip and use Python 3.13 where possible. |
-| Node/npm install fails | Old Node/npm, cache issue, or corporate proxy | Use Node 20.17+ and retry `npm ci` after clearing the npm cache if needed. |
+| Node/npm install fails | Old Node/npm, cache issue, or corporate proxy | Use Node 22.12+ and retry `npm ci`; inspect proxy settings before modifying caches. |
 | Antivirus flags the build | Packet capture and unsigned bundles can look unusual | Verify the source, checksums, and build pipeline before allowing the artifact. |
 
 ## Safe Use Reminder
