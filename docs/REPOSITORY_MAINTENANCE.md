@@ -47,6 +47,18 @@ are not deleted by this maintenance work.
 
 ## CI and Artifact Limits
 
+### Open Dependency Remediation
+
+Enabling security alerts surfaced outstanding dependency advisories. The Vite
+locks were advanced to 6.4.5 and frontend tests/build passed. This does not resolve
+all dependency alerts. Review the Dependabot security dashboard and its upgrade
+PRs, especially Pillow, Electron, HTTP/multipart dependencies and certificate
+bundles. Test upgrades in an isolated environment, including packaged runtime
+probes, before merging or installing. A green CI run alone does not certify
+security, and no advisories were dismissed to make the dashboard look clean.
+
+### Workflow Policy
+
 CI uses read-only repository permissions, bounded job timeouts and cancellation
 of superseded runs on the same ref. It checks tracked source hygiene, Python,
 frontend/model tests, builds and Windows desktop smoke. Release packaging has
