@@ -4,6 +4,11 @@
 
 ### Added
 
+- Repository source-safety guard and regression tests, contribution templates,
+  dependency update policy and explicit repository maintenance documentation.
+- Preserved desktop UI source checkpoint and architecture boundary roadmap.
+- Capture recovery, flow-detail compaction and expanded regression coverage.
+
 - Release hardening documentation with an install/run guide and release
   checklist covering source cleanliness, audits, desktop validation,
   PyInstaller smoke, security boundaries, and release artifacts.

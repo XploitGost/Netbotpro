@@ -17,6 +17,19 @@ It combines a FastAPI backend, a React investigation console, an Electron deskto
 
 ## Project Overview
 
+### Current Development Checkpoint
+
+The latest source checkpoint includes capture recovery, bounded pipeline work,
+flow-detail compression, domain attribution and regression tests. These changes
+are under validation, not a new production release. The desktop UI sources in
+[`frontend/desktop-reference`](frontend/desktop-reference/README.md) still use a
+transitional overlay build and are not yet integrated into the normal frontend
+entry point. See [architecture boundaries and remaining work](docs/ARCHITECTURE_BOUNDARIES.md).
+
+For contribution, source-safety checks and Git workflow, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Repository controls, CI limits and maintenance policy are documented in
+[Repository Maintenance](docs/REPOSITORY_MAINTENANCE.md).
+
 NetBotPro v0.2.0 is a local-first defensive network analysis and fleet
 monitoring platform. It combines packet inspection, redacted reporting,
 authorized Remote Sensor capture, and summary-only Agent/Fleet monitoring in a

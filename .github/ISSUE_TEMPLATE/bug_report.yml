@@ -1,0 +1,36 @@
+name: Bug report
+description: Report a reproducible NetBotPro defect without sharing private traffic.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include tokens, credentials, raw packets, browsing history or unredacted screenshots. Report security vulnerabilities privately, following SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, capture backend, interface type and VPN state. Omit personal IPs and host names.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Include counter deltas, timing and health reasons, not private packet data.
