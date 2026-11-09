@@ -10,6 +10,9 @@
 - Explicit persistence flush receipts distinguish completion, timeout, eviction
   and unavailable workers. New write failures or drops prevent false success;
   existing overflow/retry policies remain unchanged (ADR 0003).
+- Journal batch acknowledgement boundary, stage-specific failure diagnostics and
+  completed-versus-acknowledged counters, with encrypted replay regression tests
+  (ADR 0002); no change to downstream durability or automatic retry policy.
 - Typed analysis-to-delivery handoff and explicit delivery ports, preserving
   existing destination order and redaction responsibilities (ADR 0001).
 - Regression coverage for later clean stability windows without erasing historical
