@@ -57,3 +57,9 @@ Record capture/analysis counters, driver-stat coverage, raw and journal backlog,
 history progress, errors, memory and sampling continuity. Treat ring/view eviction
 separately from capture loss. Any unexplained gap invalidates continuous-window
 qualification. No complete production stability certification is claimed here.
+
+The recorder keeps historical errors sticky in the run assessment while allowing
+a later clean window to accumulate from error-counter deltas. A new increment,
+counter reset, missing previously observed metric, backlog, session change or
+sampling gap interrupts that window. Recovering a window never erases cumulative
+driver drops or certifies the entire earlier run as healthy.

@@ -4,6 +4,11 @@
 
 ### Added
 
+- Typed analysis-to-delivery handoff and explicit delivery ports, preserving
+  existing destination order and redaction responsibilities (ADR 0001).
+- Regression coverage for later clean stability windows without erasing historical
+  failures or treating counter resets/missing metrics as healthy samples.
+
 - Synthetic, reproducible Command Center, Monitor, Investigation and Fleet
   documentation screenshots, an updated architecture/roadmap, and Persian overview.
 - Known-advisory audits for all requirement/lock files and packaged ML/export probes.

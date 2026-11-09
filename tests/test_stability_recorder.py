@@ -18,6 +18,50 @@ def snapshot(received=10, pending=0):
 
 
 class StabilityRecorderTests(unittest.TestCase):
+    def test_historical_drop_does_not_block_a_later_clean_window(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = snapshot()
+            source['capture']['driver_stats'].update(sample_age_seconds=0, buffer_dropped_reported=2)
+            ticks = iter((0, 5, 10, 15, 20))
+            recorder = StabilityRecorder(lambda: source, Path(folder) / 's.jsonl',
+                                         clock=lambda: next(ticks), resources=self.usage)
+            recorder._summary['target_seconds'] = 10
+            for _ in range(4):
+                recorder.sample()
+            self.assertEqual(recorder.stats()['qualified_continuous_seconds'], 10)
+            self.assertEqual(recorder.stats()['window_assessment'], 'ready_for_review')
+            self.assertEqual(recorder.stats()['assessment'], 'needs_review')
+            self.assertEqual(recorder.stats()['health'], 'degraded')
+            self.assertEqual(recorder.stats()['error_intervals'], 1)
+            source['capture']['driver_stats']['buffer_dropped_reported'] = 3
+            recorder.sample()
+            self.assertEqual(recorder.stats()['qualified_continuous_seconds'], 0)
+            self.assertEqual(recorder.stats()['error_intervals'], 2)
+
+    def test_counter_reset_and_missing_metric_are_not_healthy_intervals(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = snapshot()
+            driver = source['capture']['driver_stats']
+            driver.update(sample_age_seconds=0, buffer_dropped_reported=2)
+            ticks = iter(range(0, 35, 5))
+            recorder = StabilityRecorder(lambda: source, Path(folder) / 's.jsonl',
+                                         clock=lambda: next(ticks), resources=self.usage)
+            recorder.sample()
+            recorder.sample()
+            driver['buffer_dropped_reported'] = 0
+            recorder.sample()
+            self.assertEqual(recorder.stats()['counter_reset_intervals'], 1)
+            self.assertEqual(recorder.stats()['qualified_continuous_seconds'], 0)
+            driver.pop('buffer_dropped_reported')
+            recorder.sample()
+            recorder.sample()
+            self.assertEqual(recorder.stats()['qualified_continuous_seconds'], 0)
+            driver['buffer_dropped_reported'] = 0
+            recorder.sample()
+            recorder.sample()
+            self.assertEqual(recorder.stats()['qualified_continuous_seconds'], 5)
+            self.assertEqual(recorder.stats()['assessment'], 'needs_review')
+
     def test_compaction_error_is_recorded_without_sensitive_metadata(self):
         with tempfile.TemporaryDirectory() as folder:
             source = snapshot()

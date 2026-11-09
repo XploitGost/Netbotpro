@@ -23,6 +23,7 @@ from backend.app.services.incident_correlation import (
 )
 from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
+from backend.app.services.packet_delivery import AnalyzedPacket, DeliveryPorts, PacketDelivery
 from backend.app.services.redaction import redact_sensitive_data
 from core.privacy_redaction import redaction_backend
 from backend.app.services.service_attribution import ServiceAttributionEngine
@@ -116,6 +117,7 @@ class SnifferService:
         self._incident_correlation = (
             incident_correlation or IncidentCorrelationEngine.from_env()
         )
+        self._packet_delivery = self._make_packet_delivery()
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
@@ -125,6 +127,8 @@ class SnifferService:
             self._stage_profiler = StageProfiler()
             for owner, method, label in (
                 (self, '_process_packet', 'total_packet'),
+                (self, '_analyze_packet', 'analysis'),
+                (self._packet_delivery, 'deliver', 'delivery'),
                 (self._detection_pipeline, 'analyze', 'detection'),
                 (self._service_attribution, 'enrich', 'attribution'),
                 (self._flow_service, 'ingest_for_analysis', 'flow'),
@@ -242,7 +246,43 @@ class SnifferService:
         if not accepted:
             logger.warning("packet intake queue full; dropped newest packet")
 
+    def _make_packet_delivery(self) -> PacketDelivery:
+        return PacketDelivery(DeliveryPorts(
+            add_packet=lambda row: self._state.add_packet(row),
+            add_alerts=lambda rows: self._state.add_alerts(rows),
+            append_view=lambda *args, **kwargs: self._live_ring_buffer.append(*args, **kwargs),
+            append_incident_view=self._append_incident_view,
+            submit_flow_view=self._submit_flow_view,
+            persist_packet=lambda packet, alerts: self._persistence.persist(packet, alerts),
+            persist_flow=self._persist_analyzed_flow,
+            publish_packet=lambda row: self._publisher.publish_packet(row),
+            publish_alerts=lambda rows: self._publisher.publish_alerts(rows),
+            publish_incidents=lambda rows: self._publisher.publish_incidents(rows),
+        ))
+
+    def _append_incident_view(self, *args, **kwargs):
+        append = (self._live_ring_buffer.append_redacted
+                  if type(self._incident_correlation) is IncidentCorrelationEngine
+                  else self._live_ring_buffer.append)
+        return append(*args, **kwargs)
+
+    def _submit_flow_view(self, flow: dict[str, Any]) -> None:
+        if self._flow_views is not None:
+            self._flow_views.submit(flow)
+        else:
+            self._record_flow_view(flow)
+
+    def _persist_analyzed_flow(self, flow: dict[str, Any]) -> None:
+        if self._central_flow_persistence:
+            self._persistence.persist_flow(
+                {"flow_id": flow["flow_id"]} if self._deferred_flow_snapshots else flow
+            )
+
     def _process_packet(self, meta: dict[str, Any]) -> None:
+        result = self._analyze_packet(meta)
+        self._packet_delivery.deliver(result)
+
+    def _analyze_packet(self, meta: dict[str, Any]) -> AnalyzedPacket:
         packet = dict(meta)
         packet.setdefault("ts", datetime.now(timezone.utc).isoformat())
         packet.setdefault("id", self._next_packet_id())
@@ -290,65 +330,8 @@ class SnifferService:
             expert_items=expert_items,
             compact=True,
         )
-        self._state.add_packet(packet)
-        self._state.add_alerts(alerts)
-        self._live_ring_buffer.append(
-            "packet",
-            packet,
-            flow_key=flow_key,
-            timestamp=str(packet.get("ts") or packet.get("timestamp") or ""),
-            source="live_capture",
-            return_record=False,
-        )
-        if isinstance(flow, dict):
-            live_flow = dict(flow)
-            for field in ("timeline", "related_alert_ids"):
-                values = flow.get(field) or []
-                live_flow[field] = values[-20:]
-                live_flow[f"{field}_total"] = flow.get(f"{field}_total", len(values))
-                live_flow[f"{field}_truncated"] = flow.get(f"{field}_truncated", len(values) > 20)
-            if self._flow_views is not None:
-                self._flow_views.submit(live_flow)
-            else:
-                self._record_flow_view(live_flow)
-        for alert in alerts:
-            self._live_ring_buffer.append(
-                "alert",
-                alert,
-                flow_key=flow_key,
-                timestamp=str(alert.get("ts") or alert.get("timestamp") or ""),
-                source="detection_engine",
-                return_record=False,
-            )
-        for expert_item in expert_items:
-            self._live_ring_buffer.append(
-                "expert_info",
-                expert_item,
-                flow_key=flow_key,
-                timestamp=str(expert_item.get("last_seen") or ""),
-                source="expert_info",
-                return_record=False,
-            )
-        for incident in incidents:
-            append_incident = (self._live_ring_buffer.append_redacted
-                               if type(self._incident_correlation) is IncidentCorrelationEngine
-                               else self._live_ring_buffer.append)
-            append_incident(
-                "incident",
-                incident,
-                flow_key=flow_key,
-                timestamp=str(incident.get("last_seen") or ""),
-                source="incident_correlation",
-                return_record=False,
-            )
-        self._persistence.persist(packet, alerts)
-        if self._central_flow_persistence and isinstance(flow, dict):
-            self._persistence.persist_flow(
-                {"flow_id": flow["flow_id"]} if self._deferred_flow_snapshots else flow
-            )
-        self._publisher.publish_packet(packet)
-        self._publisher.publish_alerts(alerts)
-        self._publisher.publish_incidents(incidents)
+        return AnalyzedPacket(packet=packet, flow=flow, flow_key=flow_key,
+                              alerts=alerts, expert_items=expert_items, incidents=incidents)
 
     def _packet_worker_loop(self) -> None:
         while not self._packet_worker_stop.is_set() or not self._packet_queue.empty():

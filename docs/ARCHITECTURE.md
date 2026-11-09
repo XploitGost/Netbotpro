@@ -46,6 +46,14 @@ This is logical ownership, not identical thread/process topology on all platform
 `SnifferService` still mixes orchestration concerns; metadata dictionaries are not
 yet a fully versioned independent contract everywhere.
 
+The first extraction now hands an `AnalyzedPacket` result from `_analyze_packet`
+to `PacketDelivery` through explicit `DeliveryPorts`. Delivery owns the existing
+ordered state/view/persistence/event fan-out, not capture or detector lifecycle.
+Its envelope is not a sanitized or deeply immutable record, and completion is not
+a durable commit acknowledgement. Legacy flow adapters may retain their existing
+ingest side effects; this is not yet a pure domain-analysis implementation.
+See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md) for the contract and tests.
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch
