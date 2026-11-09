@@ -10,7 +10,7 @@ defusedxml==0.7.1
 et_xmlfile==2.0.0
 fastapi==0.135.3
 fonttools==4.62.1
-fpdf2==2.8.7
+fpdf2==2.8.8
 h11==0.16.0
 idna==3.11
 joblib==1.5.3
