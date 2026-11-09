@@ -83,7 +83,11 @@ class _EventGroup:
 
 
 class BatchPersistenceWriter:
-    """Bounded, redacting write-behind queue for non-audit history records."""
+    """Bounded, redacting write-behind queue for non-audit history records.
+
+    Optional prepare_write owns progress for one batch's retry cycle. Its callable
+    replaces write_batch for those attempts; it is never shared across batches.
+    """
 
     def __init__(
         self,
@@ -96,8 +100,10 @@ class BatchPersistenceWriter:
         retry_backoff_ms: int | None = None,
         batch_sizes: dict[str, int] | None = None,
         flush_ms: dict[str, int] | None = None,
+        prepare_write: Callable[[dict[str, list[dict[str, Any]]]], Callable[[], Any]] | None = None,
     ) -> None:
         self._write_batch = write_batch
+        self._prepare_write = prepare_write
         self._enabled = (
             _env_bool("NETBOT_PERSISTENCE_BATCH_ENABLED", True)
             if enabled is None
@@ -577,10 +583,13 @@ class BatchPersistenceWriter:
             )
 
     def _write_with_retry(self, grouped: dict[str, list[dict[str, Any]]]) -> int:
+        # One operation owns retry progress; never share it with another batch.
+        write = (self._prepare_write(grouped) if self._prepare_write is not None
+                 else lambda: self._write_batch(grouped))
         retries = 0
         while True:
             try:
-                result = self._write_batch(grouped)
+                result = write()
                 storage_retries = (
                     int(result.get("retries", 0)) if isinstance(result, dict) else 0
                 )

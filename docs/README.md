@@ -15,6 +15,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [Target boundaries](ARCHITECTURE_BOUNDARIES.md)
 - [ADR 0001: analysis-to-delivery handoff](adr/0001-packet-analysis-delivery-boundary.md)
 - [ADR 0003: persistence flush results](adr/0003-persistence-flush-receipts.md)
+- [ADR 0004: partial persistence retry](adr/0004-partial-persistence-retry.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Screenshot provenance](SCREENSHOTS.md)

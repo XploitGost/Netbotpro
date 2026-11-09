@@ -61,6 +61,12 @@ success from evicted flush commands and internally handled write errors; it does
 not turn the existing storage adapter into a crash-atomic commit protocol.
 See [ADR 0003](adr/0003-persistence-flush-receipts.md).
 
+Prepared central writes keep batch-local progress during retries, so a later
+flow write failure does not reinsert history whose callback already returned.
+This is not persistent deduplication or a cross-database transaction; replay after
+restart and uncertain callback outcomes remain open.
+See [ADR 0004](adr/0004-partial-persistence-retry.md).
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch

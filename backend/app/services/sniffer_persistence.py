@@ -61,6 +61,7 @@ class SnifferPersistence:
             retry_backoff_ms=retry_backoff_ms,
             batch_sizes=batch_sizes,
             flush_ms=flush_ms,
+            prepare_write=self._prepare_central_batch,
         )
 
     def persist(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> None:
@@ -318,21 +319,40 @@ class SnifferPersistence:
     def _write_central_batch(
         self, grouped: dict[str, list[dict[str, Any]]]
     ) -> dict[str, int]:
+        return self._prepare_central_batch(grouped)()
+
+    def _prepare_central_batch(
+        self, grouped: dict[str, list[dict[str, Any]]]
+    ) -> Callable[[], dict[str, int]]:
+        """Own confirmed-step progress for one bounded retry cycle, not restart.
+
+        A callback that raises after committing is unconfirmed and may replay.
+        No cross-database transaction or durable deduplication is implied.
+        """
         packet_rows = [row["payload"] for row in grouped.get("packet_record", [])]
         alert_rows = [row["payload"] for row in grouped.get("alert_record", [])]
-        result = (
-            insert_batch(packet_rows, alert_rows)
-            if packet_rows or alert_rows
-            else {"retries": 0}
-        )
         flow_rows = [row["payload"] for row in grouped.get("flow_record", [])]
-        if flow_rows and self._flow_writer is not None:
-            self._flow_writer(flow_rows)
-        with self._lock:
-            self._persisted_packets += len(packet_rows)
-            self._persisted_alerts += len(alert_rows)
-        self._run_retention_cleanup()
-        return result if isinstance(result, dict) else {"retries": 0}
+        history_done = flow_done = False
+        result = {"retries": 0}
+
+        def write() -> dict[str, int]:
+            nonlocal history_done, flow_done, result
+            if not history_done:
+                returned = (insert_batch(packet_rows, alert_rows)
+                            if packet_rows or alert_rows else {"retries": 0})
+                result = returned if isinstance(returned, dict) else {"retries": 0}
+                history_done = True
+                with self._lock:
+                    self._persisted_packets += len(packet_rows)
+                    self._persisted_alerts += len(alert_rows)
+            if not flow_done:
+                if flow_rows and self._flow_writer is not None:
+                    self._flow_writer(flow_rows)
+                flow_done = True
+            self._run_retention_cleanup()
+            return result
+
+        return write
 
     def _run_retention_cleanup(self) -> None:
         now = time.time()

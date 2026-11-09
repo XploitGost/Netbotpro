@@ -4,6 +4,9 @@
 
 ### Added
 
+- Prepared persistence operations preserve successful history/flow steps within
+  one retry cycle, preventing duplicate history inserts after later flow failure
+  without adding a disk ledger or claiming crash-safe deduplication (ADR 0004).
 - Explicit persistence flush receipts distinguish completion, timeout, eviction
   and unavailable workers. New write failures or drops prevent false success;
   existing overflow/retry policies remain unchanged (ADR 0003).
