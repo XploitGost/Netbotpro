@@ -6,6 +6,22 @@ from backend.app.services.sniffer_persistence import SnifferPersistence
 
 
 class SnifferPersistenceTests(unittest.TestCase):
+    @patch("backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True)
+    @patch("backend.app.services.sniffer_persistence.insert_batch")
+    def test_explicit_flush_result_reports_storage_failure(self, insert, _enabled):
+        insert.side_effect = OSError('Cookie: private-storage-context')
+        persistence = SnifferPersistence(batch_size=100, flush_interval=60, max_retries=0)
+        try:
+            persistence.persist({'id': 'packet-1', 'ts': '1'}, [])
+            receipt = persistence.flush_result()
+            self.assertEqual(receipt.status, 'completed')
+            self.assertFalse(receipt.succeeded)
+            self.assertEqual((receipt.failed_before, receipt.failed_after), (0, 1))
+            self.assertNotIn('private-storage-context', str(receipt))
+            self.assertEqual(persistence.stats()['persisted_packets'], 0)
+        finally:
+            persistence.close()
+
     @patch("backend.app.services.sniffer_persistence.insert_batch")
     def test_flow_snapshots_use_the_central_batch_writer(self, mock_insert_batch):
         flow_batches = []

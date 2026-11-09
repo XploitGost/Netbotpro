@@ -4,6 +4,9 @@
 
 ### Added
 
+- Explicit persistence flush receipts distinguish completion, timeout, eviction
+  and unavailable workers. New write failures or drops prevent false success;
+  existing overflow/retry policies remain unchanged (ADR 0003).
 - Typed analysis-to-delivery handoff and explicit delivery ports, preserving
   existing destination order and redaction responsibilities (ADR 0001).
 - Regression coverage for later clean stability windows without erasing historical

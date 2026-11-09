@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.batch_persistence import BatchPersistenceWriter
+from backend.app.services.persistence_contracts import PersistenceFlushReceipt
 
 ensure_project_root_on_path()
 
@@ -309,9 +310,10 @@ class SnifferPersistence:
         self._batch_writer.close(timeout_sec=timeout_sec)
 
     def flush(self, timeout_sec: float = 10.0) -> bool:
-        failures = self._batch_writer.metrics()["events_failed_total"]
-        completed = self._batch_writer.flush(timeout_sec=timeout_sec)
-        return completed and self._batch_writer.metrics()["events_failed_total"] == failures
+        return self.flush_result(timeout_sec).succeeded
+
+    def flush_result(self, timeout_sec: float = 10.0) -> PersistenceFlushReceipt:
+        return self._batch_writer.flush_result(timeout_sec=timeout_sec)
 
     def _write_central_batch(
         self, grouped: dict[str, list[dict[str, Any]]]

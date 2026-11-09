@@ -32,6 +32,12 @@ introducing queues, skipping redaction or claiming durable acknowledgement.
 See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md). Capture lifecycle,
 batch ownership, transactional receipts and UI build unification remain open.
 
+`PersistenceFlushReceipt` now distinguishes writer-barrier completion from
+timeout/eviction and records observed failure/drop counters. Boolean flush callers
+use this explicit result instead of treating any wakeup as successful storage.
+See [ADR 0003](adr/0003-persistence-flush-receipts.md). This is not a downstream
+crash-atomic commit receipt or a change to capture acknowledgement.
+
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.
 2. Define batch schema, sequence, lifecycle, ownership, error and backpressure
