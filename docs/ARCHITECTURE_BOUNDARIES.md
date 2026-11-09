@@ -29,8 +29,13 @@ migration work.
 First implemented slice: `AnalyzedPacket`, `DeliveryPorts` and `PacketDelivery`
 separate the ordered delivery fan-out from the service's analysis step without
 introducing queues, skipping redaction or claiming durable acknowledgement.
-See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md). Capture lifecycle,
-batch ownership, transactional receipts and UI build unification remain open.
+See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md).
+
+Second slice: `JournalBatchDelivery` separates preparation/callback/ack ordering
+from process capture lifecycle, with stage-specific failures and an explicit
+acknowledgement receipt. It does not certify durable downstream writes or prevent
+replay of a completed prefix. See [ADR 0002](adr/0002-journal-batch-acknowledgement.md).
+Global sequencing, transactional receipts and UI build unification remain open.
 
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.

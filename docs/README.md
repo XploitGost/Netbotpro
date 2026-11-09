@@ -14,6 +14,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [Current architecture](ARCHITECTURE.md)
 - [Target boundaries](ARCHITECTURE_BOUNDARIES.md)
 - [ADR 0001: analysis-to-delivery handoff](adr/0001-packet-analysis-delivery-boundary.md)
+- [ADR 0002: journal batch acknowledgement](adr/0002-journal-batch-acknowledgement.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Screenshot provenance](SCREENSHOTS.md)
