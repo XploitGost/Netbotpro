@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import './FleetPanel.css';
 
 function formatDate(value) {
   if (!value) return "-";
@@ -8,6 +9,7 @@ function formatDate(value) {
 }
 
 function formatPercent(value) {
+  if (value === null || value === undefined || value === '') return '-';
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${Math.round(number)}%`;
@@ -23,6 +25,15 @@ function latestTelemetry(agent) {
   return agent?.last_telemetry && typeof agent.last_telemetry === "object"
     ? agent.last_telemetry
     : {};
+}
+
+export function agentAddress(agent) {
+  if (agent.ip_address || agent.ip) return agent.ip_address || agent.ip;
+  const network = latestTelemetry(agent).network || {};
+  const interfaces = Array.isArray(network.interfaces) ? network.interfaces : [];
+  const addresses = interfaces.flatMap(item => Array.isArray(item.addresses) ? item.addresses : []).filter(address => typeof address === 'string');
+  const ipv4 = addresses.filter(address => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(address) && address.split('.').every(part => Number(part) <= 255));
+  return ipv4.find(address => !address.startsWith('127.') && !address.startsWith('169.254.') && address !== '0.0.0.0') || addresses.find(address => address.includes(':') && !address.includes('-') && address !== '::1' && !address.toLowerCase().startsWith('fe80:') && address.split(':').length > 6) || '-';
 }
 
 function healthValue(agent, key) {
@@ -152,6 +163,8 @@ export function AgentsPanel({
   onSeedDemoFleet = () => {},
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
   const [focusFilter, setFocusFilter] = useState("all");
   const [osFilter, setOsFilter] = useState("all");
   const [sortBy, setSortBy] = useState("risk");
@@ -163,6 +176,7 @@ export function AgentsPanel({
   );
   const filteredAgents = useMemo(() => {
     const rows = agents.filter((agent) => {
+      if (![agent.agent_id, agent.hostname, agent.display_name, agentAddress(agent)].join(' ').toLowerCase().includes(search.toLowerCase().trim())) return false;
       if (statusFilter !== "all" && agent.status !== statusFilter) return false;
       if (osFilter !== "all" && (agent.os || agent.platform) !== osFilter) return false;
       if (focusFilter === "high-risk" && !["high", "critical"].includes(risk(agent).severity)) return false;
@@ -179,8 +193,9 @@ export function AgentsPanel({
       }
       return Number(risk(right).score || 0) - Number(risk(left).score || 0);
     });
-  }, [agents, focusFilter, osFilter, sortBy, statusFilter]);
+  }, [agents, focusFilter, osFilter, sortBy, statusFilter, search]);
   const hasAgents = agents.length > 0;
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(filteredAgents.length / 20) - 1));
 
   return (
     <div className="agents-panel">
@@ -245,6 +260,7 @@ export function AgentsPanel({
           <strong>{filteredAgents.length} visible host{filteredAgents.length === 1 ? "" : "s"}</strong>
         </div>
         <div className="agent-filter-row">
+          <input aria-label="Search agents" placeholder="Search agents, hosts, or IP addresses..." value={search} onChange={event => setSearch(event.target.value)} />
           {["all", "online", "offline"].map((item) => (
             <button
               key={item}
@@ -310,11 +326,11 @@ export function AgentsPanel({
         <table>
           <thead>
             <tr>
-              <th>Host</th>
+              <th>Agent / Host</th>
               <th>Status</th>
-              <th>OS</th>
-              <th>Health</th>
-              <th>Capture</th>
+              <th>IP Address</th>
+              <th>Version</th>
+              <th>Packets</th>
               <th>Alerts Today</th>
               <th>Risk</th>
               <th>Last Seen</th>
@@ -322,10 +338,10 @@ export function AgentsPanel({
           </thead>
           <tbody>
             {isLoading && !filteredAgents.length ? <AgentSkeletonRows /> : null}
-            {filteredAgents.map((agent) => (
-              <tr key={agent.agent_id} className={agent.agent_id === selectedAgentId ? "selected-row" : ""}>
+            {filteredAgents.slice(currentPage * 20, currentPage * 20 + 20).map((agent) => (
+              <tr key={agent.agent_id} tabIndex={0} onClick={() => onSelectAgent(agent.agent_id, historyRange)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelectAgent(agent.agent_id, historyRange); } }} className={agent.agent_id === selectedAgentId ? "selected-row" : ""}>
                 <td>
-                  <button type="button" className="table-link" onClick={() => onSelectAgent(agent.agent_id, historyRange)}>
+                  <button type="button" className="table-link" onClick={event => { event.stopPropagation(); onSelectAgent(agent.agent_id, historyRange); }}>
                     {agent.display_name || agent.hostname || agent.agent_id}
                   </button>
                   <div className="table-subline">{agent.agent_id}</div>
@@ -335,16 +351,9 @@ export function AgentsPanel({
                     {agent.status || "unknown"}
                   </span>
                 </td>
-                <td>{agent.os || agent.platform || "-"}</td>
-                <td>
-                  <HealthBars agent={agent} />
-                </td>
-                <td>
-                  <span className={captureRunning(agent) ? "agent-capture-on" : "agent-capture-off"}>
-                    {captureRunning(agent) ? "running" : "stopped"}
-                  </span>
-                  <div className="table-subline">{captureMode(agent)}</div>
-                </td>
+                <td>{agentAddress(agent)}</td>
+                <td>{agent.agent_version || agent.version || '-'}</td>
+                <td>{capture(agent).total_packets ?? capture(agent).packets_total ?? capture(agent).packet_count ?? '-'}</td>
                 <td>{alertTotal(agent)} / {criticalTotal(agent)} critical</td>
                 <td>
                   <RiskBadge value={risk(agent)} />
@@ -363,12 +372,13 @@ export function AgentsPanel({
         </table>
       </div>
 
+      <nav className="fleet-pagination" aria-label="Agent pages"><span>{filteredAgents.length ? currentPage * 20 + 1 : 0} - {Math.min(currentPage * 20 + 20, filteredAgents.length)} of {filteredAgents.length} agents</span><button disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>Previous</button><span>{currentPage + 1}</span><button disabled={(currentPage + 1) * 20 >= filteredAgents.length} onClick={() => setPage(currentPage + 1)}>Next</button></nav>
       {selectedAgent ? (
         <div className="agents-detail-grid">
           <div className="mini-panel agent-detail-hero">
             <div className="agent-detail-title">
               <div>
-                <p className="eyebrow">Agent Details</p>
+                <p className="eyebrow">Agent Inspector</p>
                 <h3>{selectedAgent.display_name || selectedAgent.hostname || selectedAgent.agent_id}</h3>
               </div>
               <RiskBadge value={risk(selectedAgent)} />

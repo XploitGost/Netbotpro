@@ -269,6 +269,9 @@ class SnifferPersistence:
         return {
             **metrics,
             "enabled": bool(is_persist_enabled()),
+            "packet_storage_enabled": bool(is_persist_enabled()),
+            "alert_storage_enabled": bool(is_persist_enabled()),
+            "flow_storage_enabled": bool(self._flow_writer is not None and metrics["persistence_enabled"]),
             "max_size": metrics["queue_max"],
             "current_depth": metrics["queue_depth"],
             "queue_size": metrics["queue_depth"],
@@ -280,7 +283,7 @@ class SnifferPersistence:
             "persisted_packets": self._persisted_packets,
             "persisted_alerts": self._persisted_alerts,
             "flush_batches": metrics["batches_written_total"],
-            "last_flush_ms": metrics["write_latency_avg_ms"],
+            "last_flush_ms": metrics["write_latency_last_ms"],
             "avg_flush_ms": metrics["write_latency_avg_ms"],
             "p95_flush_ms": metrics["write_latency_p95_ms"],
             "flush_errors": 1 if metrics["last_error"] else 0,
@@ -304,6 +307,11 @@ class SnifferPersistence:
 
     def close(self, timeout_sec: float = 10.0) -> None:
         self._batch_writer.close(timeout_sec=timeout_sec)
+
+    def flush(self, timeout_sec: float = 10.0) -> bool:
+        failures = self._batch_writer.metrics()["events_failed_total"]
+        completed = self._batch_writer.flush(timeout_sec=timeout_sec)
+        return completed and self._batch_writer.metrics()["events_failed_total"] == failures
 
     def _write_central_batch(
         self, grouped: dict[str, list[dict[str, Any]]]

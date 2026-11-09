@@ -19,6 +19,17 @@ ensure_project_root_on_path()
 from log_manager import LOG_DIR  # noqa: E402
 
 DEFAULT_AGENT_OFFLINE_AFTER_SECONDS = 90
+DEFAULT_INSECURE_AGENT_TOKENS = {
+    "changeme",
+    "change-me",
+    "default",
+    "secret",
+    "password",
+    "netbotpro",
+    "netbotpro-secret",
+    "dev-token",
+    "agent-token",
+}
 _MAX_HISTORY_LIMIT = 500
 SAFE_NODE_TYPES = {"server", "sensor", "agent"}
 SAFE_AGENT_CAPABILITIES = {
@@ -98,6 +109,27 @@ def _offline_after_seconds() -> int:
         return max(5, min(86400, int(raw)))
     except (TypeError, ValueError):
         return DEFAULT_AGENT_OFFLINE_AFTER_SECONDS
+
+
+def _env_bool(name: str) -> bool:
+    return str(os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _server_mode_enabled() -> bool:
+    return str(os.environ.get("NETBOT_PROFILE") or "").strip().lower() == "server" or _env_bool("NETBOT_SERVER_MODE")
+
+
+def _configured_agent_token() -> str:
+    return os.environ.get("NETBOT_AGENT_TOKEN", "").strip()
+
+
+def _require_server_agent_token(configured_token: str) -> None:
+    if not _server_mode_enabled():
+        return
+    if not configured_token:
+        raise PermissionError("agent token is required in server mode")
+    if configured_token.lower() in DEFAULT_INSECURE_AGENT_TOKENS:
+        raise PermissionError("secure agent token is required in server mode")
 
 
 def _range_start(range_name: str) -> str:
@@ -433,11 +465,28 @@ class AgentRegistry:
         agent_id = str(payload.get("agent_id") or "").strip()
         if not agent_id:
             raise ValueError("agent_id is required")
+        if agent_id.startswith("desktop-local-"):
+            raise PermissionError("local sensor identity is reserved")
         if not token:
             raise PermissionError("agent token is required")
-        configured_token = os.environ.get("NETBOT_AGENT_TOKEN", "").strip()
+        configured_token = _configured_agent_token()
+        _require_server_agent_token(configured_token)
         if configured_token and not hmac.compare_digest(configured_token, token):
             raise PermissionError("invalid agent token")
+        return self._register_record(payload, token)
+
+    def register_local_sensor(self, payload: dict[str, Any]) -> dict[str, Any]:
+        import secrets
+
+        if not str(payload.get("agent_id") or "").startswith("desktop-local-"):
+            raise ValueError("local sensor identity is required")
+        # Internal lifecycle registration only; remote API registration stays authenticated.
+        return self._register_record({**payload, "node_type": "sensor", "profile": "desktop",
+            "capabilities": ["telemetry", "health", "capture_status", "flows_summary"]},
+            secrets.token_urlsafe(32))
+
+    def _register_record(self, payload: dict[str, Any], token: str) -> dict[str, Any]:
+        agent_id = str(payload["agent_id"]).strip()
         node_type = normalize_node_type(payload.get("node_type") or payload.get("type"))
         capabilities = normalize_capabilities(payload.get("capabilities") or [])
         now = _now()
@@ -547,10 +596,16 @@ class AgentRegistry:
             )
 
     def verify(self, agent_id: str, token: str) -> bool:
+        if agent_id.startswith("desktop-local-"):
+            return False
         agent = self._agents.get(agent_id)
         if not agent or not token:
             return False
-        configured_token = os.environ.get("NETBOT_AGENT_TOKEN", "").strip()
+        configured_token = _configured_agent_token()
+        try:
+            _require_server_agent_token(configured_token)
+        except PermissionError:
+            return False
         if configured_token:
             return hmac.compare_digest(configured_token, token)
         expected_hash = str(agent.get("token_hash") or "")

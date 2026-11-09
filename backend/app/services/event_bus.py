@@ -22,6 +22,7 @@ class EventBus:
         self._dropped_for_slow_client = 0
         self._send_errors_total = 0
         self._send_latencies: list[float] = []
+        self._send_latency_times: list[float] = []
         self._last_drop_reason = ""
         self._aggregator = EventAggregator(self._publish_direct)
 
@@ -83,6 +84,10 @@ class EventBus:
 
     def websocket_stats(self) -> dict[str, Any]:
         with self._lock:
+            now = time.monotonic()
+            while self._send_latency_times and now - self._send_latency_times[0] > 60.0:
+                self._send_latency_times.pop(0)
+                self._send_latencies.pop(0)
             depths = [queue.qsize() for queue in self._subscribers]
             avg = (
                 round(float(mean(self._send_latencies)), 2)
@@ -134,6 +139,8 @@ class EventBus:
         with self._lock:
             self._send_latencies.append(elapsed_ms)
             self._send_latencies = self._send_latencies[-200:]
+            self._send_latency_times.append(time.monotonic())
+            self._send_latency_times = self._send_latency_times[-200:]
             if not ok:
                 self._send_errors_total += 1
 

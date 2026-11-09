@@ -53,7 +53,7 @@ class ProcessMappingTests(unittest.TestCase):
         self.assertEqual(info["process_name"], "agent.exe")
         self.assertEqual(info["attribution_source"], "psutil")
 
-    def test_lookup_refreshes_immediately_when_cache_misses(self):
+    def test_lookup_respects_scan_cooldown_then_refreshes(self):
         fake_info = {
             "pid": 4242,
             "process_name": "agent.exe",
@@ -69,8 +69,13 @@ class ProcessMappingTests(unittest.TestCase):
             process_mapping._CACHE[("192.168.1.77", 443, "TCP")] = dict(fake_info)
 
         process_mapping._LAST_SCAN = 9999999999.0
-        with patch.object(process_mapping, "_refresh_cache", side_effect=fake_refresh):
+        with patch.object(process_mapping, "_refresh_cache", side_effect=fake_refresh) as refresh:
+            missing = process_mapping.get_process_for_flow("192.168.1.77", 443, "TCP")
+            self.assertIsNone(missing["pid"])
+            refresh.assert_not_called()
+            process_mapping._LAST_SCAN = 0.0
             info = process_mapping.get_process_for_flow("192.168.1.77", 443, "TCP")
+            refresh.assert_called_once_with()
 
         self.assertEqual(info["pid"], 4242)
         self.assertEqual(info["process_name"], "agent.exe")

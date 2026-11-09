@@ -36,6 +36,36 @@ def signal(index: int = 1, **overrides):
 
 
 class IncidentCorrelationTests(unittest.TestCase):
+    def test_repeated_flow_metadata_is_coalesced_but_alerts_are_not(self):
+        engine = IncidentCorrelationEngine()
+        packet = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "src": "10.0.0.5", "dst": "203.0.113.20", "proto": "TCP",
+            "service_unknown": True, "service_encrypted": True,
+        }
+        flow = {
+            "flow_id": "flow-1", "app_protocol": "TLS", "risk_level": "low",
+            "risk_reasons": ["Periodic connection timing observed"],
+        }
+        for _ in range(10):
+            engine.correlate(packet=packet, flow=flow, alerts=[], expert_items=[])
+        incident = engine.list_incidents()["items"][0]
+        self.assertEqual(incident["signal_count"], 3)
+
+        engine.correlate(
+            packet=packet, flow=flow,
+            alerts=[{"id": "alert-1", "attack_type": "Possible Beaconing", "severity": "high"}],
+            expert_items=[],
+        )
+        self.assertEqual(engine.list_incidents()["items"][0]["signal_count"], 4)
+        with engine._lock:
+            key, (last, count) = next(iter(engine._repeated_signals.items()))
+            engine._repeated_signals[key] = (last - 6.0, count)
+        engine.correlate(packet=packet, flow=flow, alerts=[], expert_items=[])
+        self.assertEqual(engine.list_incidents()["items"][0]["signal_count"], 5)
+        engine.reset()
+        self.assertFalse(engine._repeated_signals)
+
     def test_single_weak_signal_does_not_create_incident(self):
         engine = IncidentCorrelationEngine()
         self.assertIsNone(engine.ingest_signal(signal()))

@@ -4,13 +4,15 @@ import os
 import threading
 import time
 import uuid
-from collections import OrderedDict, deque
+from collections import Counter, OrderedDict, deque
+from bisect import bisect_right
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from statistics import mean
 from typing import Any
 
 from backend.app.services.redaction import redact_sensitive_data, redact_sensitive_text
+from core.netbotpro_sniffer_core.ip_utils import is_remote_ip
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 INCIDENT_TYPES = {
@@ -187,8 +189,13 @@ class IncidentCorrelationEngine:
             self.high_signal_threshold + 1, int(critical_signal_threshold)
         )
         self._lock = threading.RLock()
+        self._last_cleanup_at: datetime | None = None
         self._incidents: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._timeline_severities: dict[str, Counter[str]] = {}
         self._pending: OrderedDict[str, deque[dict[str, Any]]] = OrderedDict()
+        self._repeated_signals: OrderedDict[tuple[str, str, str, str], tuple[float, int]] = OrderedDict()
+        self._seen_signal_ids: OrderedDict[str, None] = OrderedDict()
+        self._duplicate_signals = 0
         self._latencies: deque[float] = deque(maxlen=512)
         self._created_total = 0
         self._updated_total = 0
@@ -229,27 +236,63 @@ class IncidentCorrelationEngine:
         flow: dict[str, Any] | None,
         alerts: list[dict[str, Any]],
         expert_items: list[dict[str, Any]],
+        compact: bool = False,
     ) -> list[dict[str, Any]]:
         if not self.enabled:
             return []
         signals = self._derive_signals(packet, flow or {}, alerts, expert_items)
         updated: OrderedDict[str, dict[str, Any]] = OrderedDict()
-        for signal in signals:
-            incident = self.ingest_signal(signal)
-            if incident:
-                updated[incident["incident_id"]] = incident
-        return list(updated.values())
+        with self._lock:
+            for signal in signals:
+                if self._suppress_repeated_signal_locked(signal):
+                    continue
+                incident = self.ingest_signal(signal, _public_result=False)
+                if incident:
+                    updated[incident["incident_id"]] = incident
+            return [self._public(incident, compact=compact) for incident in updated.values()]
 
-    def ingest_signal(self, signal: dict[str, Any]) -> dict[str, Any] | None:
+    def _suppress_repeated_signal_locked(self, signal: dict[str, Any]) -> bool:
+        source = str(signal.get("source") or "")
+        if source not in {"flow", "expert_info"}:
+            return False
+        flow_key = str(signal.get("flow_key") or "")
+        if not flow_key:
+            return False
+        key = (
+            source,
+            flow_key,
+            str(signal.get("incident_type") or ""),
+            str(signal.get("severity") or ""),
+        )
+        now = time.monotonic()
+        last_emitted, count = self._repeated_signals.get(key, (0.0, 0))
+        if count >= 3 and now - last_emitted < 5.0:
+            return True
+        self._repeated_signals[key] = (now, min(3, count + 1))
+        self._repeated_signals.move_to_end(key)
+        if len(self._repeated_signals) > 20_000:
+            self._repeated_signals.popitem(last=False)
+        return False
+
+    def ingest_signal(self, signal: dict[str, Any], *, _public_result: bool = True) -> dict[str, Any] | None:
         started = time.perf_counter()
         with self._lock:
             self._signals_received += 1
+            identifier = None
             try:
                 normalized = self._normalize_signal(signal)
                 if not self.enabled or not normalized:
                     self._signals_ignored += 1
                     return None
                 self._cleanup_locked(normalized["timestamp_dt"])
+                identifier = normalized['signal_id']
+                if identifier in self._seen_signal_ids:
+                    self._duplicate_signals += 1
+                    self._signals_ignored += 1
+                    return None
+                self._seen_signal_ids[identifier] = None
+                while len(self._seen_signal_ids) > 20000:
+                    self._seen_signal_ids.popitem(last=False)
                 incident = self._matching_incident_locked(normalized)
                 if incident is None:
                     pending = self._pending_for_locked(normalized)
@@ -265,8 +308,10 @@ class IncidentCorrelationEngine:
                 else:
                     self._update_locked(incident, normalized)
                 self._signals_correlated += 1
-                return self._public(incident)
+                return self._public(incident) if _public_result else incident
             except Exception as exc:  # pragma: no cover - defensive hot path
+                if identifier is not None:
+                    self._seen_signal_ids.pop(identifier, None)
                 self._errors += 1
                 self._last_error = type(exc).__name__
                 self._signals_ignored += 1
@@ -283,9 +328,11 @@ class IncidentCorrelationEngine:
         since: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            self._cleanup_locked(datetime.now(timezone.utc))
+            self._cleanup_locked(datetime.now(timezone.utc), force=True)
             since_dt = _parse_time(since) if since else None
             items = []
+            total = 0
+            totals = Counter()
             for incident in reversed(self._incidents.values()):
                 if status != "all" and incident["status"] != status:
                     continue
@@ -293,12 +340,17 @@ class IncidentCorrelationEngine:
                     continue
                 if since_dt and _parse_time(incident["last_seen"]) < since_dt:
                     continue
-                items.append(self._public(incident))
-                if len(items) >= max(1, min(int(limit), 1000)):
-                    break
+                total += 1
+                totals[incident["severity"]] += 1
+                if incident["status"] == "open":
+                    totals["open"] += 1
+                if len(items) < max(1, min(int(limit), 1000)):
+                    items.append(self._public(incident))
             return {
                 "items": items,
                 "count": len(items),
+                "total": total,
+                "summary": dict(totals),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -310,7 +362,11 @@ class IncidentCorrelationEngine:
     def reset(self) -> None:
         with self._lock:
             self._incidents.clear()
+            self._timeline_severities.clear()
             self._pending.clear()
+            self._repeated_signals.clear()
+            self._seen_signal_ids.clear()
+            self._duplicate_signals = 0
 
     def metrics(self) -> dict[str, Any]:
         with self._lock:
@@ -354,6 +410,7 @@ class IncidentCorrelationEngine:
                     "signals_correlated_total": self._signals_correlated,
                     "signals_ignored_total": self._signals_ignored,
                     "signals_dropped_total": self._signals_dropped,
+                    "duplicate_signals_total": self._duplicate_signals,
                     "high_severity_total": high_total,
                     "critical_severity_total": critical_total,
                     "avg_correlation_latency_ms": avg_latency,
@@ -473,20 +530,22 @@ class IncidentCorrelationEngine:
             )
         ):
             return "suspicious_dns"
-        encrypted = bool(packet.get("service_encrypted")) or str(
-            flow.get("app_protocol") or ""
-        ).upper() in {"TLS", "QUIC"}
-        unknown = bool(packet.get("service_unknown")) or "unknown encrypted" in lowered
-        if encrypted and unknown:
+        if any(word in lowered for word in ('possible beaconing', 'beacon pattern', 'beaconing detected', 'periodic connection', 'periodic session')):
             return "possible_beaconing"
-        if unknown or any(
+        direction = str(packet.get('direction') or flow.get('direction') or '').lower()
+        external = direction not in {'local', 'internal'} and any(
+            is_remote_ip(str(value or '')) for value in (
+                packet.get('remote_ip'), packet.get('src'), packet.get('dst'),
+                flow.get('src_ip'), flow.get('dst_ip')))
+        unknown = bool(packet.get("service_unknown")) or "unknown encrypted" in lowered
+        if external and (unknown or any(
             word in lowered
             for word in (
                 "unusual destination",
                 "rare external",
                 "low confidence attribution",
             )
-        ):
+        )):
             return "unusual_external_service"
         return ""
 
@@ -501,7 +560,7 @@ class IncidentCorrelationEngine:
             or value.get("incident_type") not in INCIDENT_TYPES
         ):
             return None
-        safe = redact_sensitive_data(deepcopy(value))
+        safe = redact_sensitive_data(value)
         timestamp_dt = _parse_time(safe.get("timestamp"))
         severity = str(safe.get("severity") or "low").lower()
         if severity not in SEVERITIES:
@@ -529,6 +588,8 @@ class IncidentCorrelationEngine:
 
     def _pending_for_locked(self, signal: dict[str, Any]) -> deque[dict[str, Any]]:
         key = f"{signal['incident_type']}|{signal['source_host'] or signal['flow_key'] or signal['destination_host']}"
+        if signal['incident_type'] not in {'possible_port_scan', 'suspicious_dns'}:
+            key = repr((key, signal['destination_host'], signal['application'], signal['domain']))
         pending = self._pending.setdefault(key, deque())
         cutoff = signal["timestamp_dt"] - timedelta(seconds=self.correlation_window_sec)
         while pending and pending[0]["timestamp_dt"] < cutoff:
@@ -572,23 +633,19 @@ class IncidentCorrelationEngine:
                 signal["source_host"]
                 and signal["source_host"] in incident["source_hosts"]
             )
-            context_match = any(
-                [
-                    signal["flow_key"]
-                    and signal["flow_key"] in incident["related_flows"],
-                    signal["domain"] and signal["domain"] in incident["domains"],
-                    signal["service"] and signal["service"] in incident["services"],
-                    signal["destination_host"]
-                    and signal["destination_host"] in incident["destination_hosts"],
-                ]
-            )
-            if source_match and (context_match or incident["signal_count"] >= 2):
+            host_scope = signal['incident_type'] in {'possible_port_scan', 'suspicious_dns'}
+            flow_match = signal['flow_key'] and signal['flow_key'] in incident['related_flows']
+            peer_match = signal['destination_host'] and signal['destination_host'] in incident['destination_hosts']
+            app_match = not signal['application'] or not incident['applications'] or signal['application'] in incident['applications']
+            domain_match = not signal['domain'] or not incident['domains'] or signal['domain'] in incident['domains']
+            if source_match and (host_scope or flow_match or (peer_match and app_match and domain_match)):
                 return incident
         return None
 
     def _create_locked(self, signals: list[dict[str, Any]]) -> dict[str, Any]:
         while len(self._incidents) >= self.max_open:
-            self._incidents.popitem(last=False)
+            removed_id, _ = self._incidents.popitem(last=False)
+            self._timeline_severities.pop(removed_id, None)
             self._signals_dropped += 1
         now = datetime.now(timezone.utc).isoformat()
         first = signals[0]
@@ -637,6 +694,7 @@ class IncidentCorrelationEngine:
 
     def _apply_signal(self, incident: dict[str, Any], signal: dict[str, Any]) -> None:
         incident["signal_count"] += 1
+        incident["first_seen"] = min(incident["first_seen"], signal["timestamp"])
         incident["last_seen"] = max(incident["last_seen"], signal["timestamp"])
         mappings = (
             ("source_hosts", "source_host"),
@@ -662,8 +720,7 @@ class IncidentCorrelationEngine:
             incident["evidence"] = incident["evidence"][
                 -self.max_signals_per_incident :
             ]
-        incident["timeline"].append(
-            {
+        event = {
                 "timestamp": signal["timestamp"],
                 "event_type": "signal_correlated",
                 "summary": signal["summary"],
@@ -674,21 +731,34 @@ class IncidentCorrelationEngine:
                 "domain": signal["domain"],
                 "severity": signal["severity"],
             }
-        )
-        incident["timeline"] = sorted(
-            incident["timeline"], key=lambda row: row["timestamp"]
-        )[-self.max_signals_per_incident :]
+        timeline = incident["timeline"]
+        identifier = incident["incident_id"]
+        counts = self._timeline_severities.get(identifier)
+        if counts is None:
+            counts = Counter(row["severity"] for row in timeline)
+            self._timeline_severities[identifier] = counts
+        if not timeline or event["timestamp"] >= timeline[-1]["timestamp"]:
+            timeline.append(event)
+        else:
+            position = bisect_right(timeline, event["timestamp"], key=lambda row: row["timestamp"])
+            timeline.insert(position, event)
+        counts[event["severity"]] += 1
+        overflow = len(timeline) - self.max_signals_per_incident
+        if overflow > 0:
+            for removed in timeline[:overflow]:
+                counts[removed["severity"]] -= 1
+            del timeline[:overflow]
         self._score(incident)
 
     def _score(self, incident: dict[str, Any]) -> None:
         count = incident["signal_count"]
-        max_signal = max(
-            (SEVERITIES.index(row["severity"]) for row in incident["timeline"]),
-            default=1,
-        )
-        if count >= self.critical_signal_threshold or max_signal >= 4:
+        counts = self._timeline_severities.get(incident["incident_id"])
+        if counts is None:
+            counts = Counter(row["severity"] for row in incident["timeline"])
+        max_signal = max((index for index, severity in enumerate(SEVERITIES) if counts[severity] > 0), default=1)
+        if max_signal >= 4 or (count >= self.critical_signal_threshold and max_signal >= 3):
             severity = "critical"
-        elif count >= self.high_signal_threshold or max_signal >= 3:
+        elif max_signal >= 3 or (count >= self.high_signal_threshold and max_signal >= 2):
             severity = "high"
         elif count >= 3 or max_signal >= 2:
             severity = "medium"
@@ -724,11 +794,17 @@ class IncidentCorrelationEngine:
             reasons.append("Related flow metadata")
         incident["correlation_reasons"] = reasons
 
-    def _cleanup_locked(self, now: datetime) -> None:
+    def _cleanup_locked(self, now: datetime, *, force: bool = False) -> None:
+        if not force and self._last_cleanup_at is not None:
+            elapsed = (now - self._last_cleanup_at).total_seconds()
+            if 0 <= elapsed < 5:
+                return
+        self._last_cleanup_at = now
         cutoff = now - timedelta(hours=self.retention_hours)
         for incident_id in list(self._incidents):
             if _parse_time(self._incidents[incident_id]["last_seen"]) < cutoff:
                 del self._incidents[incident_id]
+                self._timeline_severities.pop(incident_id, None)
         pending_cutoff = now - timedelta(seconds=self.correlation_window_sec)
         for key in list(self._pending):
             pending = self._pending[key]
@@ -738,8 +814,20 @@ class IncidentCorrelationEngine:
                 del self._pending[key]
 
     @staticmethod
-    def _public(incident: dict[str, Any]) -> dict[str, Any]:
-        return redact_sensitive_data(deepcopy(incident))
+    def _public(incident: dict[str, Any], *, compact: bool = False) -> dict[str, Any]:
+        snapshot = incident
+        if compact:
+            snapshot = dict(incident)
+            for field in (
+                "timeline", "evidence", "related_alerts", "related_flows", "related_agents",
+                "source_hosts", "destination_hosts", "applications", "services", "domains",
+                "categories", "risk_reasons",
+            ):
+                values = incident.get(field) or []
+                snapshot[field] = values[-20:]
+                snapshot[f"{field}_total"] = len(values)
+                snapshot[f"{field}_truncated"] = len(values) > 20
+        return redact_sensitive_data(snapshot)
 
 
 __all__ = [

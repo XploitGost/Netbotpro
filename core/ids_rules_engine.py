@@ -1,7 +1,9 @@
 # ids_rules_engine.py
 # -*- coding: utf-8 -*-
 import json
+from core.detection_clock import detection_time
 import os
+import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Tuple
@@ -28,10 +30,16 @@ class RuleEngine:
         self.rules_path = path or os.path.join(base, "rules.json")
         self.rules: List[Dict[str, Any]] = []
         self.state: Dict[Tuple[int, str, int], List[datetime]] = defaultdict(list)
+        self._state_lock = threading.RLock()
+        self._last_cleanup_at = 0.0
         self.load()
 
     # ----------------- فایل -----------------
     def load(self):
+        with self._state_lock:
+            self._load_locked()
+
+    def _load_locked(self):
         try:
             if os.path.exists(self.rules_path):
                 with open(self.rules_path, "r", encoding="utf-8") as f:
@@ -52,21 +60,48 @@ class RuleEngine:
 
     # ----------------- API برای UI -----------------
     def get_rules(self) -> List[Dict[str, Any]]:
-        return list(self.rules)
+        with self._state_lock:
+            return list(self.rules)
 
     def set_rules(self, rules: List[Dict[str, Any]]):
-        self.rules = list(rules or [])
-        self.state.clear()
-        self.save()
+        with self._state_lock:
+            self.rules = list(rules or [])
+            self.state.clear()
+            self._last_cleanup_at = 0.0
+            self.save()
 
     # ----------------- آنالیز بسته -----------------
     def analyze(self, meta: Dict[str, Any]) -> Dict[str, Any] | None:
+        with self._state_lock:
+            return self._analyze_locked(meta)
+
+    def _cleanup_expired(self, now: datetime) -> None:
+        timestamp = now.timestamp()
+        if self._last_cleanup_at <= timestamp < self._last_cleanup_at + 1.0:
+            return
+        self._last_cleanup_at = timestamp
+        for key, items in list(self.state.items()):
+            index = key[0]
+            if index >= len(self.rules) or not self.rules[index] or not self.rules[index].get("enabled", True):
+                del self.state[key]
+                continue
+            try:
+                cutoff = now - timedelta(seconds=int(self.rules[index].get("window_sec") or 30))
+            except (TypeError, ValueError, OverflowError):
+                del self.state[key]
+                continue
+            items[:] = [value for value in items if value >= cutoff]
+            if not items:
+                del self.state[key]
+
+    def _analyze_locked(self, meta: Dict[str, Any]) -> Dict[str, Any] | None:
         if not self.rules:
             return None
 
         src = meta.get("src")
         dport = int(meta.get("dport") or 0)
-        now = datetime.now(timezone.utc)
+        now = detection_time(meta, datetime.now(timezone.utc))
+        self._cleanup_expired(now)
 
         for idx, rule in enumerate(self.rules):
             if not rule or not rule.get("enabled", True):

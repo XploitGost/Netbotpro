@@ -78,6 +78,8 @@ def _pure_pcap_metadata(path: str) -> list[dict[str, Any]]:
         offset += 16
         frame = data[offset : offset + captured_len]
         offset += captured_len
+        if len(frame) >= 14 and frame[12:14] in {b"\x86\xdd", b"\x08\x06", b"\x81\x00"}:
+            raise ValueError("Pure offline reader requires Ethernet link with IPv4; use layered decoding")
         if len(frame) < 34 or frame[12:14] != b"\x08\x00":
             continue
         ip = frame[14:]
@@ -160,10 +162,10 @@ def _packet_layers() -> PacketLayers:
     # Offline decoding does not need the native Npcap/libpcap socket backend.
     # Keeping it disabled prevents a broken Windows Npcap installation from
     # blocking PCAP file analysis while Scapy imports protocol layers.
-    conf.use_pcap = False
     from scapy.layers.dns import DNS, DNSQR  # type: ignore
     from scapy.layers.inet import ICMP, IP, TCP, UDP  # type: ignore
-    from scapy.layers.l2 import Ether  # type: ignore
+    from scapy.layers.inet6 import IPv6, _ICMPv6
+    from scapy.layers.l2 import Ether, ARP  # type: ignore
 
     return PacketLayers(
         Ether=Ether,
@@ -173,6 +175,7 @@ def _packet_layers() -> PacketLayers:
         ICMP=ICMP,
         DNS=DNS,
         DNSQR=DNSQR,
+        IPv6=IPv6, ARP=ARP, ICMPv6=_ICMPv6,
     )
 
 
@@ -203,11 +206,13 @@ def _top_pairs(
 
 
 def analyze_pcap_file(path: str, ml_threshold: float | None = None) -> dict[str, Any]:
-    pure_metadata = (
-        _pure_pcap_metadata(path)
-        if platform.system() == "Windows" and Path(path).is_file()
-        else None
-    )
+    pure_metadata = None
+    if platform.system() == "Windows" and Path(path).is_file():
+        try:
+            pure_metadata = _pure_pcap_metadata(path)
+        except ValueError as exc:
+            if "currently supports classic PCAP" not in str(exc) and "requires Ethernet link" not in str(exc):
+                raise
     layers = None if pure_metadata is not None else _packet_layers()
     packets = pure_metadata if pure_metadata is not None else _read_pcap(path)
     settings = _load_offline_settings()

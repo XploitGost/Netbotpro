@@ -12,6 +12,8 @@ from backend.app.services.app_protocols import infer_app_protocol
 
 ensure_project_root_on_path()
 
+from core.detection_clock import detection_time
+
 from core.firewall_tools import block_ip  # noqa: E402
 from core.ids_ml import MLIDS  # noqa: E402
 from core.ids_rules_engine import RuleEngine  # noqa: E402
@@ -44,11 +46,17 @@ class SnifferDetectionPipeline:
     ) -> None:
         self._settings_provider = settings_provider or (lambda: {})
         self._ids_sig = ids_sig or SignatureIDS()
-        self._ids_ml = ids_ml or MLIDS()
+        self._ids_ml = ids_ml or MLIDS(background_training=True, min_retrain_seconds=60)
         self._rule_engine = rule_engine or RuleEngine()
         self._scorer = scorer or AlertScorer()
         self._incidents = incidents or IncidentCorrelator(window_sec=300)
         self._auto_block_lock = threading.Lock()
+        self._health_lock = threading.Lock()
+        self._app_state_lock = threading.RLock()
+        self._last_app_cleanup: float | None = None
+        self._packets_analyzed = 0
+        self._alerts_generated = 0
+        self._detector_errors: dict[str, int] = defaultdict(int)
         self._auto_block_recent: dict[str, float] = {}
         self._dns_tunnel_state: dict[tuple[str, str], list[datetime]] = defaultdict(
             list
@@ -83,6 +91,7 @@ class SnifferDetectionPipeline:
                     alert["engine"] = "SIG"
                     raw_alerts.append(alert)
             except Exception:
+                self._record_detector_error("signature")
                 logger.exception("Signature IDS failed for packet")
 
         try:
@@ -91,6 +100,7 @@ class SnifferDetectionPipeline:
                 alert["engine"] = "RULE"
                 raw_alerts.append(alert)
         except Exception:
+            self._record_detector_error("rules")
             logger.exception("Rule engine failed for packet")
 
         if settings.get("ids_ml_enabled", True):
@@ -101,16 +111,63 @@ class SnifferDetectionPipeline:
                     alert["engine"] = "ML"
                     raw_alerts.append(alert)
             except Exception:
+                self._record_detector_error("ml")
                 logger.exception("ML IDS failed for packet")
 
         try:
             raw_alerts.extend(self._detect_application_alerts(packet))
         except Exception:
+            self._record_detector_error("application")
             logger.exception("App-aware detection failed for packet")
 
         alerts = [self._build_alert_payload(packet, alert) for alert in raw_alerts]
         self._maybe_auto_block(settings, alerts)
+        with self._health_lock:
+            self._packets_analyzed += 1
+            self._alerts_generated += len(alerts)
         return alerts
+
+    def _record_detector_error(self, detector: str) -> None:
+        with self._health_lock:
+            self._detector_errors[detector] += 1
+
+    def prepare_batch(self, packets: list[dict[str, Any]]) -> None:
+        try:
+            if isinstance(self._ids_ml, MLIDS) and self._settings_provider().get('ids_ml_enabled', True):
+                self._ids_ml.prime_scores(packets)
+        except Exception:
+            logger.debug('Optional ML score priming failed; retaining scalar analysis', exc_info=True)
+
+    def error_count(self) -> int:
+        with self._health_lock:
+            return sum(self._detector_errors.values())
+
+    def health_stats(self) -> dict[str, Any]:
+        settings = self._settings_provider()
+        with self._health_lock:
+            count = self._packets_analyzed
+            errors = dict(self._detector_errors)
+            alerts = self._alerts_generated
+        ml_enabled = bool(settings.get("ids_ml_enabled", True))
+        ml_available = bool(getattr(self._ids_ml, "_ml_available", True))
+        return {
+            "health": "degraded" if errors or (ml_enabled and not ml_available) else "healthy" if count else "idle",
+            "packets_analyzed_total": count,
+            "alerts_generated_total": alerts,
+            "errors_total": sum(errors.values()),
+            "errors_by_detector": errors,
+            "signature_enabled": bool(settings.get("ids_signature_enabled", True)),
+            "ml_enabled": ml_enabled,
+            "ml_available": ml_available,
+            "ml_training": self._ids_ml.training_stats() if isinstance(self._ids_ml, MLIDS) else None,
+            "port_scan_context": self._ids_sig.port_scan_stats() if isinstance(self._ids_sig, SignatureIDS) else None,
+            "rules_enabled": True,
+            "application_enabled": True,
+        }
+
+    def reset_signature_context(self) -> None:
+        if isinstance(self._ids_sig, SignatureIDS):
+            self._ids_sig.reset_runtime()
 
     def _build_alert_payload(
         self, packet: dict[str, Any], alert: dict[str, Any]
@@ -119,9 +176,10 @@ class SnifferDetectionPipeline:
             self._scorer.enrich_alert(packet, alert, sig_engine=self._ids_sig)
             self._incidents.enrich_alert(packet, alert)
         except Exception:
+            self._record_detector_error("enrichment")
             logger.exception("Failed to enrich alert")
 
-        return {
+        payload = {
             "ts": packet.get("ts"),
             "src": packet.get("src"),
             "dst": packet.get("dst"),
@@ -228,13 +286,26 @@ class SnifferDetectionPipeline:
             "attribution_source": alert.get("attribution_source")
             or packet.get("attribution_source"),
         }
+        if "coalesced_occurrences" in alert:
+            payload["coalesced_occurrences"] = int(alert["coalesced_occurrences"])
+        return payload
 
     def _detect_application_alerts(
         self, packet: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        with self._app_state_lock:
+            return self._detect_application_alerts_locked(packet)
+
+    def _detect_application_alerts_locked(
+        self, packet: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         alerts: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc)
-        self._cleanup_app_state(now)
+        now = detection_time(packet, datetime.now(timezone.utc))
+        clock = time.monotonic()
+        # Individual active keys retain exact window filtering in each detector.
+        if self._last_app_cleanup is None or clock - self._last_app_cleanup >= 1.0:
+            self._cleanup_app_state(now)
+            self._last_app_cleanup = clock
 
         dns_alert = self._detect_dns_tunneling(packet, now)
         if dns_alert:

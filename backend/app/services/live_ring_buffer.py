@@ -95,15 +95,23 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 
 
 def _safe_payload(value: Any) -> Any:
-    redacted = redact_sensitive_data(deepcopy(value))
-    if isinstance(redacted, dict):
+    return redact_sensitive_data(value, empty_fields=RAW_PAYLOAD_KEYS)
+
+
+def _without_raw_payload(value: Any) -> Any:
+    if isinstance(value, dict):
         return {
-            key: "" if str(key).lower() in RAW_PAYLOAD_KEYS else _safe_payload(item)
-            for key, item in redacted.items()
+            key: "" if str(key).lower() in RAW_PAYLOAD_KEYS else (
+                _without_raw_payload(item) if isinstance(item, (dict, list, tuple)) else item
+            )
+            for key, item in value.items()
         }
-    if isinstance(redacted, list):
-        return [_safe_payload(item) for item in redacted]
-    return redacted
+    if isinstance(value, (list, tuple)):
+        return [
+            _without_raw_payload(item) if isinstance(item, (dict, list, tuple)) else item
+            for item in value
+        ]
+    return value
 
 
 @dataclass(frozen=True)
@@ -196,6 +204,8 @@ class LiveRingBuffer:
         flow_key: str = "",
         timestamp: str | None = None,
         source: str = "live_capture",
+        return_record: bool = True,
+        _redacted_payload: bool = False,
     ) -> dict[str, Any] | None:
         if not self.enabled:
             return None
@@ -210,7 +220,7 @@ class LiveRingBuffer:
                 type=category,
                 timestamp=_iso_timestamp(timestamp),
                 flow_key=redact_sensitive_text(str(flow_key or ""))[:256],
-                payload=_safe_payload(payload),
+                payload=_without_raw_payload(payload) if _redacted_payload else _safe_payload(payload),
                 source=redact_sensitive_text(str(source or "live_capture"))[:80],
             )
             with self._lock:
@@ -224,12 +234,45 @@ class LiveRingBuffer:
                 buffer.append(record)
                 self._records_added_total += 1
                 self._last_added_at = record.timestamp
-            return record.to_dict()
+            return record.to_dict() if return_record else None
         except Exception as exc:  # pragma: no cover - defensive guard
             with self._lock:
                 self._records_dropped_total += 1
                 self._last_error = type(exc).__name__
             return None
+
+    def append_redacted(self, category: str, payload: Any, **kwargs) -> dict[str, Any] | None:
+        """Copy trusted internal redaction output, still removing raw payload fields."""
+        return self.append(category, payload, _redacted_payload=True, **kwargs)
+
+    def get_payload(self, category: str, record_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            self._prune_expired_locked()
+            for record in reversed(self._buffers.get(category, ())):
+                if isinstance(record.payload, dict) and str(record.payload.get("id") or "") == str(record_id):
+                    return record.to_dict()["payload"]
+        return None
+
+    def recent_payloads(self, category: str) -> list[dict[str, Any]]:
+        """Return all retained records for internal history pagination."""
+        if not self.enabled:
+            return []
+        with self._lock:
+            if category not in self._buffers:
+                raise ValueError("Unsupported live ring buffer category")
+            self._prune_expired_locked()
+            records = list(reversed(self._buffers[category]))
+        return [deepcopy(record.payload) for record in records if isinstance(record.payload, dict)]
+
+    def recent_payload_refs(self, category: str) -> list[dict[str, Any]]:
+        """Internal read-only scan; callers must copy selected rows before returning them."""
+        if not self.enabled:
+            return []
+        with self._lock:
+            if category not in self._buffers:
+                raise ValueError("Unsupported live ring buffer category")
+            self._prune_expired_locked()
+            return [record.payload for record in reversed(self._buffers[category]) if isinstance(record.payload, dict)]
 
     def query(
         self,
@@ -356,15 +399,6 @@ class LiveRingBuffer:
 
     def _pressure_reasons(self, categories: dict[str, dict[str, Any]]) -> list[str]:
         reasons: list[str] = []
-        if any(item["utilization_percent"] >= 90.0 for item in categories.values()):
-            reasons.append("live_ring_high_utilization")
-        frequent_evictions = any(
-            self._evicted_by_category[category]
-            >= max(10, self.capacities[category] // 10)
-            for category in SUPPORTED_CATEGORIES
-        )
-        if frequent_evictions:
-            reasons.append("live_ring_frequent_evictions")
         if self._query_limit_rejected_total:
             reasons.append("live_ring_query_limit_rejections")
         if self._last_error:

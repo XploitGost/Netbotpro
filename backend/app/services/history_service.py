@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
 import threading
 import time
 from typing import Any
@@ -30,6 +31,7 @@ class HistoryService:
         self._memory_repository = memory_repository or MemoryHistoryRepository(sniffer_service)
         self._metrics_lock = threading.Lock()
         self._cache_lock = threading.Lock()
+        self._cache_generation = 0
         self._list_cache: "OrderedDict[tuple[str, str, str], tuple[float, dict[str, Any] | None]]" = OrderedDict()
         self._detail_cache: "OrderedDict[tuple[str, str, str], tuple[float, dict[str, Any] | None]]" = OrderedDict()
         self._metrics: dict[str, dict[str, float | int]] = {
@@ -266,7 +268,13 @@ class HistoryService:
         return "sqlite" if is_persist_enabled() else "memory"
 
     def _make_cache_key(self, operation: str, payload: Any) -> tuple[str, str, str]:
-        return (self._cache_mode(), operation, repr(payload))
+        return (self._cache_mode(), operation, repr((self._cache_generation, payload)))
+
+    def invalidate(self) -> None:
+        with self._cache_lock:
+            self._cache_generation += 1
+            self._list_cache.clear()
+            self._detail_cache.clear()
 
     def _read_cache(
         self,
@@ -287,7 +295,7 @@ class HistoryService:
             cache.move_to_end(key)
         if value is None:
             return None
-        return dict(value)
+        return deepcopy(value)
 
     def _write_cache(
         self,
@@ -300,7 +308,7 @@ class HistoryService:
     ) -> None:
         expires_at = time.monotonic() + ttl_sec
         with self._cache_lock:
-            cache[key] = (expires_at, dict(value) if value is not None else None)
+            cache[key] = (expires_at, deepcopy(value) if value is not None else None)
             cache.move_to_end(key)
             while len(cache) > max_entries:
                 cache.popitem(last=False)

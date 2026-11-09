@@ -85,35 +85,43 @@ def is_remote_ip(value: str | None | ipaddress._BaseAddress, *, local_ips: Itera
 
 
 def preferred_remote_ip(*candidates: str | None, local_ips: Iterable[str | None] | None = None) -> str | None:
+    first = None
     for candidate in candidates:
-        normalized = normalize_ip(candidate)
-        if normalized and is_remote_ip(normalized, local_ips=local_ips):
+        parsed = parse_ip(candidate)
+        normalized = str(parsed) if parsed is not None else clean_ip_text(str(candidate) if candidate is not None else None)
+        if first is None and normalized:
+            first = normalized
+        remote = is_remote_ip(normalized, local_ips=local_ips) if normalized and '%' in normalized else parsed is not None and not is_local_ip(parsed, local_ips=local_ips)
+        if remote:
             return normalized
-    for candidate in candidates:
-        normalized = normalize_ip(candidate)
-        if normalized:
-            return normalized
-    return None
+    return first
 
 
 def infer_flow(src: str | None, dst: str | None, *, local_ips: Iterable[str | None] | None = None) -> dict[str, str | None]:
-    src_local = is_local_ip(src, local_ips=local_ips)
-    dst_local = is_local_ip(dst, local_ips=local_ips)
-    src_remote = is_remote_ip(src, local_ips=local_ips)
-    dst_remote = is_remote_ip(dst, local_ips=local_ips)
+    # Parse each endpoint once; no process-wide address cache or retained keys.
+    source, destination = parse_ip(src), parse_ip(dst)
+    local_ips = _normalized_local_ips(local_ips)
+    src_local = is_local_ip(source, local_ips=local_ips)
+    dst_local = is_local_ip(destination, local_ips=local_ips)
+    src_remote = source is not None and not src_local
+    dst_remote = destination is not None and not dst_local
+    src_text = str(source) if source is not None else clean_ip_text(str(src) if src is not None else None)
+    dst_text = str(destination) if destination is not None else clean_ip_text(str(dst) if dst is not None else None)
 
     direction = "OTHER"
-    remote_ip = preferred_remote_ip(dst, src, local_ips=local_ips)
+    remote_ip = dst_text if dst_remote else src_text if src_remote else dst_text or src_text
+    scoped = '%' in (src_text or '') or '%' in (dst_text or '')
+    if scoped:
+        remote_ip = preferred_remote_ip(dst, src, local_ips=local_ips)
 
     if src_local and dst_remote:
         direction = "OUTGOING"
-        remote_ip = preferred_remote_ip(dst, src, local_ips=local_ips)
     elif src_remote and dst_local:
         direction = "INCOMING"
-        remote_ip = preferred_remote_ip(src, dst, local_ips=local_ips)
+        remote_ip = preferred_remote_ip(src, dst, local_ips=local_ips) if scoped else src_text
     elif src_local and dst_local:
         direction = "LOCAL"
-        remote_ip = normalize_ip(dst) or normalize_ip(src)
+        remote_ip = dst_text or src_text
 
     return {
         "direction": direction,

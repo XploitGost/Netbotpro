@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
+const { prepareBackendExit, stopChild, createExitCoordinator } = require("./backend-shutdown.cjs");
 
 const BACKEND_PORT = Number(process.env.NETBOT_PORT || 8765);
 const BACKEND_HOST = process.env.NETBOT_HOST || "127.0.0.1";
@@ -12,10 +13,17 @@ let mainWindow = null;
 let backendProcess = null;
 let shuttingDown = false;
 let desktopLocalToken = "";
-let backendKillTimer = null;
+let exitCoordinator = null;
 
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch("disable-gpu");
+function shouldDisableGpu() {
+  return String(process.env.NETBOT_DISABLE_GPU || "").trim().toLowerCase() === "true"
+    || String(process.env.NETBOT_DISABLE_GPU || "").trim() === "1";
+}
+
+if (shouldDisableGpu()) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+}
 
 function appendDesktopLog(paths, channel, text) {
   if (!paths?.logDir || !text) return;
@@ -96,6 +104,15 @@ function desktopPaths() {
 }
 
 function createMenu() {
+  const viewSubmenu = [
+    { role: "resetZoom" },
+    { role: "zoomIn" },
+    { role: "zoomOut" },
+    { role: "togglefullscreen" },
+  ];
+  if (!isPackagedApp()) {
+    viewSubmenu.unshift({ role: "toggleDevTools" });
+  }
   const template = [
     {
       label: "Netbotpro",
@@ -112,13 +129,7 @@ function createMenu() {
     },
     {
       label: "View",
-      submenu: [
-        { role: "toggleDevTools" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { role: "togglefullscreen" },
-      ],
+      submenu: viewSubmenu,
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -264,7 +275,7 @@ async function waitForBackend(timeoutMs = 20000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
-      const response = await fetch(`${BACKEND_BASE_URL}/api/status`);
+      const response = await fetch(`${BACKEND_BASE_URL}/api/health`);
       if (response.ok) {
         return true;
       }
@@ -292,10 +303,6 @@ async function startBackend(paths) {
   backendProcess.stderr?.on("data", (chunk) => appendDesktopLog(paths, "stderr", chunk));
 
   backendProcess.on("exit", async (code) => {
-    if (backendKillTimer) {
-      clearTimeout(backendKillTimer);
-      backendKillTimer = null;
-    }
     const crashed = !shuttingDown && code !== 0;
     appendDesktopLog(paths, "exit", `code=${code}`);
     backendProcess = null;
@@ -310,23 +317,7 @@ async function stopBackend() {
     return;
   }
   const child = backendProcess;
-  backendProcess = null;
-  if (backendKillTimer) {
-    clearTimeout(backendKillTimer);
-    backendKillTimer = null;
-  }
-  try {
-    child.kill("SIGTERM");
-  } catch (_error) {
-    return;
-  }
-  backendKillTimer = setTimeout(() => {
-    try {
-      child.kill("SIGKILL");
-    } catch (_error) {
-    }
-    backendKillTimer = null;
-  }, 4000);
+  await stopChild(child);
 }
 
 async function createWindow() {
@@ -357,6 +348,12 @@ async function createWindow() {
     },
   });
   hardenWindow(mainWindow);
+  if (process.platform !== "darwin") {
+    mainWindow.on("close", (event) => exitCoordinator.request(event));
+  }
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
 
   const devUrl = process.env.NETBOT_DESKTOP_DEV_SERVER_URL;
   if (!isPackagedApp() && devUrl) {
@@ -367,9 +364,6 @@ async function createWindow() {
   } else {
     await mainWindow.loadFile(path.join(isPackagedApp() ? process.resourcesPath : repoRoot(), isPackagedApp() ? "frontend" : path.join("frontend", "dist"), "app.html"));
   }
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-  });
 
   mainWindow.on("closed", () => {
     appendDesktopLog(paths, "window", "main window closed");
@@ -378,18 +372,36 @@ async function createWindow() {
 }
 
 function setupAppLifecycle() {
-  app.on("window-all-closed", async () => {
-    if (process.platform !== "darwin") {
+  exitCoordinator = createExitCoordinator({
+    prepare: async () => {
+      if (backendProcess) {
+        await prepareBackendExit({ baseUrl: BACKEND_BASE_URL, token: managedLocalToken() });
+        appendDesktopLog(desktopPaths(), "shutdown", "capture and history drain confirmed");
+      }
+    },
+    terminate: async () => {
       shuttingDown = true;
       await stopBackend();
+    },
+    finish: () => app.quit(),
+    onBegin: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle("NetBotPro - Closing...");
+    },
+    onError: (error) => {
+      shuttingDown = false;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle("NetBotPro");
+      appendDesktopLog(desktopPaths(), "shutdown", String(error.message || error));
+      dialog.showErrorBox("NetBotPro could not close safely",
+        "Safe shutdown could not be confirmed. The application is staying open. Please try closing again.");
+    },
+  });
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
       app.quit();
     }
   });
 
-  app.on("before-quit", async () => {
-    shuttingDown = true;
-    await stopBackend();
-  });
+  app.on("before-quit", (event) => exitCoordinator.request(event));
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

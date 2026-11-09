@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.app.services.event_bus import EventBus
+from backend.app.repositories.history_repository import MemoryHistoryRepository, PacketListQuery
 from backend.app.services.live_ring_buffer import DEFAULT_CAPACITIES, LiveRingBuffer
 from backend.app.services.sniffer_service import (
     CaptureStartUnavailableError,
@@ -113,6 +114,22 @@ class _FakeFlowService:
 
 
 class SnifferServiceTests(unittest.TestCase):
+    def test_runtime_handover_updates_display_interface(self):
+        from unittest.mock import Mock
+        provider = _FakeCaptureProvider()
+        service = SnifferService(EventBus(), capture_provider=provider)
+        engine = Mock()
+        engine.capture_status.return_value = dict(running=True, selected_iface='ras:amir')
+        service._engine = engine
+        provider.describe_interface = Mock(return_value='amir')
+        try:
+            self.assertEqual(service._capture_runtime_state()['iface'], 'amir')
+            self.assertEqual(service._capture_runtime_state()['iface'], 'amir')
+            provider.describe_interface.assert_called_once_with('ras:amir')
+        finally:
+            service._engine = None
+            service.close()
+
     def test_start_uses_injected_capture_provider(self):
         provider = _FakeCaptureProvider()
         service = SnifferService(EventBus(), capture_provider=provider)
@@ -124,14 +141,14 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertEqual(state["iface"], "Ethernet")
         service.close()
 
-    def test_start_without_iface_uses_preflight_recommended_interface(self):
+    def test_start_without_iface_preserves_auto_selection(self):
         provider = _FakeCaptureProvider()
         service = SnifferService(EventBus(), capture_provider=provider)
 
         state = service.start()
 
         self.assertTrue(state["running"])
-        self.assertEqual(provider.session.started_with, "eth0")
+        self.assertIsNone(provider.session.started_with)
         service.close()
 
     def test_capture_interfaces_include_preflight(self):
@@ -267,6 +284,30 @@ class SnifferServiceTests(unittest.TestCase):
             self.assertTrue(service.drain_packet_queue(timeout_sec=1.0))
             self.assertEqual(len(service.recent_packets()), 1)
             self.assertFalse(service.flow_worker_pool_stats()["enabled"])
+        finally:
+            service.close()
+
+    def test_recent_history_uses_ring_beyond_dashboard_window(self):
+        ring = LiveRingBuffer(
+            capacities={**DEFAULT_CAPACITIES, "packet": 350, "alert": 350},
+            max_query_limit=25,
+        )
+        service = SnifferService(
+            EventBus(),
+            capture_provider=_FakeCaptureProvider(),
+            flow_service=_FakeFlowService(),
+            live_ring_buffer=ring,
+        )
+        try:
+            for index in range(325):
+                ring.append("packet", {"id": index})
+                ring.append("alert", {"id": index})
+            self.assertEqual(len(service.recent_packets()), 325)
+            self.assertEqual(len(service.recent_alerts()), 325)
+            self.assertEqual(service.recent_packets()[300]["id"], 24)
+            page = MemoryHistoryRepository(service).list_packets(PacketListQuery(limit=25, offset=300))
+            self.assertEqual(page["total"], 325)
+            self.assertEqual(len(page["items"]), 25)
         finally:
             service.close()
 

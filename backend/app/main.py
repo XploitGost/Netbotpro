@@ -59,6 +59,7 @@ from backend.app.security import (
 )
 from backend.app.services.agent_demo import seed_demo_data
 from backend.app.services.agent_registry import AgentRegistry
+from backend.app.services.local_sensor import LocalSensorReporter
 from backend.app.services.audit_service import audit_event
 from backend.app.services.capture_policy import (
     current_capture_policy,
@@ -75,6 +76,8 @@ from backend.app.services.report_service import ReportService
 from backend.app.services.saved_filter_service import SavedFilterService
 from backend.app.services.settings_service import get_settings, update_settings
 from backend.app.services.sniffer_service import (
+    CaptureStopUnavailableError,
+    SessionResetUnavailableError,
     CaptureStartUnavailableError,
     SnifferService,
 )
@@ -93,7 +96,7 @@ from log_manager import LOG_DIR  # noqa: E402
 
 event_bus = EventBus()
 capture_provider = SystemCaptureProvider()
-flow_service = FlowService()
+flow_service = FlowService(persistent_writer=True)
 sniffer_service = SnifferService(
     event_bus,
     capture_provider=capture_provider,
@@ -123,19 +126,13 @@ RUNTIME_CONFIG = load_runtime_profile_config()
 require_valid_runtime_config(RUNTIME_CONFIG)
 
 
-def _observability_snapshot() -> dict[str, Any]:
+def _observability_snapshot(sniffer_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
+        **(sniffer_service.observability() if sniffer_snapshot is None else sniffer_snapshot),
         "event_bus": event_bus.stats(),
         "event_aggregator": event_bus.event_aggregator_stats(),
         "websocket": event_bus.websocket_stats(),
         "history": history_service.metrics(),
-        "packet_queue": sniffer_service.packet_queue_stats(),
-        "flow_worker_pool": sniffer_service.flow_worker_pool_stats(),
-        "live_ring_buffer": sniffer_service.live_ring_buffer_stats(),
-        "service_attribution": sniffer_service.service_attribution_stats(),
-        "incidents": sniffer_service.incident_correlation_stats(),
-        "persistence": sniffer_service.persistence_stats(),
-        "auto_block": sniffer_service.auto_block_stats(),
     }
 
 
@@ -174,6 +171,8 @@ def _readiness_snapshot() -> dict[str, Any]:
         reasons.append("runtime_dir_not_writable")
 
     service_map = {
+        "alert_engine": dict(observability.get("alert_engine") or {}),
+        "threat_intelligence": dict(observability.get("threat_intelligence") or {}),
         "persistence": dict(observability.get("persistence") or {}),
         "event_aggregator": dict(observability.get("event_aggregator") or {}),
         "live_ring_buffer": dict(observability.get("live_ring_buffer") or {}),
@@ -182,7 +181,7 @@ def _readiness_snapshot() -> dict[str, Any]:
         "monitoring": build_monitoring_metrics(
             sniffer_state=sniffer_service.get_state(),
             observability=observability,
-            flow_summary=flow_service.summary(),
+            flow_summary=flow_service.monitoring_summary(),
         ),
     }
     for name, metrics in service_map.items():
@@ -242,9 +241,15 @@ def _actor_from_request(request: Request | None) -> str:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    yield
-    event_bus.close()
-    sniffer_service.close()
+    local_sensor = LocalSensorReporter(agent_registry, sniffer_service, flow_service)
+    if RUNTIME_CONFIG.profile == "desktop":
+        local_sensor.start()
+    try:
+        yield
+    finally:
+        local_sensor.close()
+        event_bus.close()
+        sniffer_service.close()
 
 
 app = FastAPI(
@@ -300,10 +305,11 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/api/status")
 def api_status(_: None = Depends(require_trusted_client)) -> dict[str, Any]:
+    state = sniffer_service.get_state()
     return {
         "ok": True,
-        "sniffer": sniffer_service.get_state(),
-        "observability": _observability_snapshot(),
+        "sniffer": state,
+        "observability": _observability_snapshot(state.get("observability")),
         "local_token_required": is_local_token_enabled(),
         "capture_policy": current_capture_policy().to_public_dict(),
     }
@@ -336,10 +342,11 @@ def api_monitoring_metrics(
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
+    state = sniffer_service.get_state()
     metrics = build_monitoring_metrics(
-        sniffer_state=sniffer_service.get_state(),
-        observability=_observability_snapshot(),
-        flow_summary=flow_service.summary(),
+        sniffer_state=state,
+        observability=_observability_snapshot(state.get("observability")),
+        flow_summary=flow_service.monitoring_summary(),
     )
     metrics["profile"] = profile_metadata(load_runtime_profile_config(validate_paths=False))
     return metrics
@@ -779,7 +786,7 @@ def api_flows_summary(
     _: None = Depends(require_trusted_client),
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
-    return flow_service.summary()
+    return {**flow_service.summary(), "endpoint_risk": sniffer_service.endpoint_risk_summary()}
 
 
 @app.get("/api/flows/top")
@@ -1107,7 +1114,10 @@ def api_stop_sniffer(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "sniffer_stop", limit=20, window_sec=60)
-    state = sniffer_service.stop()
+    try:
+        state = sniffer_service.stop()
+    except CaptureStopUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     policy = current_capture_policy()
     audit_event(
         "forensic_capture_stopped" if policy.mode == "forensic" else "sniffer_stopped",
@@ -1117,6 +1127,19 @@ def api_stop_sniffer(
     return state
 
 
+@app.post("/api/runtime/prepare-exit")
+def api_prepare_exit(
+    request: Request,
+    _: None = Depends(require_trusted_client),
+    __: None = Depends(require_local_token),
+) -> dict[str, Any]:
+    enforce_rate_limit(request, "runtime_prepare_exit", limit=20, window_sec=60)
+    try:
+        return sniffer_service.prepare_exit()
+    except CaptureStopUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.post("/api/session/reset")
 def api_reset_session(
     request: Request,
@@ -1124,7 +1147,12 @@ def api_reset_session(
     __: None = Depends(require_local_token),
 ) -> dict[str, Any]:
     enforce_rate_limit(request, "session_reset", limit=20, window_sec=60)
-    return sniffer_service.reset_session()
+    try:
+        state = sniffer_service.reset_session()
+        history_service.invalidate()
+        return state
+    except SessionResetUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/sniffer/state")
@@ -1164,13 +1192,11 @@ async def api_recent_packets(
                 "text": text,
                 "only_alerts": only_alerts,
                 "only_remote": only_remote,
+                "display_filter": filter,
                 "limit": limit,
                 "offset": offset,
             }
         )
-        if filter:
-            result["items"] = apply_display_filter(result.get("items", []), filter)
-            result["total"] = len(result["items"])
         return result
     except DisplayFilterError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

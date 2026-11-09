@@ -22,6 +22,12 @@ def _remote_ip(packet: dict[str, Any]) -> str:
     remote_ip = str(packet.get("remote_ip") or "").strip()
     src = str(packet.get("src") or "").strip()
     dst = str(packet.get("dst") or "").strip()
+    direction = str(packet.get("direction") or "").upper()
+    # Capture already inferred direction using the selected adapter's addresses,
+    # including public VPN-local IPs that generic private-IP checks cannot know.
+    if remote_ip and ((direction == 'INCOMING' and remote_ip == src) or
+                      (direction in ('OUTGOING', 'LOCAL') and remote_ip == dst)):
+        return remote_ip
     preferred = _preferred_remote_ip(dst, src, remote_ip)
     if preferred:
         return preferred

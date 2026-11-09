@@ -90,6 +90,9 @@ class AlertScorer:
         # Map raw counts to 0..1 where threshold ~= 0.70
         # score = 0.70 * (raw / thr)
         s = 0.70 * (raw / thr) if thr > 0 else 0.0
+        # Throughput alone is not evidence of an attack or a reason to auto-block.
+        if "generic flood" in atk or "high rate" in atk:
+            s = min(s, 0.69)
         return self._clamp01(s)
 
     def normalize(

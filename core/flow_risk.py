@@ -27,7 +27,11 @@ def score_flow(flow: dict[str, Any]) -> dict[str, Any]:
             score += min(weight * count, weight * 2)
     if int(alerts.get("critical", 0) or 0) or int(alerts.get("high", 0) or 0):
         score += 10
-        reasons.append("High alert density on this flow")
+        reasons.append("High-severity detection on this flow")
+    if int(alerts.get("critical", 0) or 0):
+        score = max(score, 80)
+    elif int(alerts.get("high", 0) or 0):
+        score = max(score, 60)
 
     protocol = str(flow.get("app_protocol") or "UNKNOWN").upper()
     direction = str(flow.get("direction") or "").lower()
@@ -44,7 +48,7 @@ def score_flow(flow: dict[str, Any]) -> dict[str, Any]:
         reasons.append("Protocol observed on an unusual port")
     if int(flow.get("packets_count", 0) or 0) >= 1000:
         score += 12
-        reasons.append("High packet rate")
+        reasons.append("High packet volume")
     if int(flow.get("bytes_total", 0) or 0) >= 50 * 1024 * 1024:
         score += 12
         reasons.append("High byte volume")

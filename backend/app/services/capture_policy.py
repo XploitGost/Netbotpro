@@ -59,6 +59,20 @@ class CapturePolicy:
         }
 
 
+def current_payload_capture_settings() -> dict[str, Any]:
+    """Read the live payload decision without rebuilding unrelated API policy."""
+    settings = get_settings_snapshot()
+    mode = _normalized_mode(os.environ.get("NETBOT_CAPTURE_MODE") or settings.get("capture_mode"))
+    return {
+        "capture_mode": mode,
+        "payload_capture_enabled": mode != "metadata" and (
+            _truthy(os.environ.get("NETBOT_PAYLOAD_CAPTURE"))
+            or bool(settings.get("payload_capture_enabled"))
+        ),
+        "alert_only_mode": bool(settings.get("alert_only_mode")),
+    }
+
+
 def current_capture_policy(payload: dict[str, Any] | None = None) -> CapturePolicy:
     payload = payload or {}
     settings = get_settings_snapshot()

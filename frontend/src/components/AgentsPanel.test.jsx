@@ -3,13 +3,24 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentsPanel } from "./AgentsPanel";
+import { AgentsPanel, agentAddress } from "./AgentsPanel";
 
 afterEach(() => {
   cleanup();
 });
 
 describe("AgentsPanel", () => {
+  it('reads real telemetry addresses without selecting loopback or MAC addresses', () => {
+    expect(agentAddress({last_telemetry:{network:{interfaces:[{addresses:['127.0.0.1','00:11:22:33:44:55','192.168.1.8']}]}}})).toBe('192.168.1.8');
+    expect(agentAddress({})).toBe('-');
+    expect(agentAddress({ip_address:'10.0.0.2'})).toBe('10.0.0.2');
+  });
+  it('renders capture packet_count and preserves zero', () => {
+    render(<AgentsPanel agents={[{agent_id:'real-agent',last_telemetry:{capture:{packet_count:0}}}]} onSelectAgent={vi.fn()} />);
+    expect(screen.getByRole('columnheader',{name:'Packets'})).toBeTruthy();
+    const row=screen.getByText('real-agent',{selector:'button'}).closest('tr');
+    expect(row.cells[4].textContent).toBe('0');
+  });
   it("renders a useful empty state without token or raw payload fields", () => {
     const seedDemoFleet = vi.fn();
     render(

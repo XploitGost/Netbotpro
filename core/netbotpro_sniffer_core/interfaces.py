@@ -4,6 +4,7 @@ import logging
 import ipaddress
 import platform
 import socket
+import threading
 from typing import Any
 
 try:
@@ -12,6 +13,7 @@ except Exception:  # pragma: no cover
     psutil = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+_discovery_lock = threading.RLock()
 
 
 def ensure_capture_backend() -> None:
@@ -168,10 +170,18 @@ def _friendly_label(name: str, description: str, ip_addr: str | None) -> str:
 
 
 def _scapy_interfaces() -> list[dict[str, Any]]:
-    if platform.system().lower() == "windows":
-        return _windows_interfaces()
+    # Scapy reload replaces its global adapter registry. Do not enumerate it
+    # concurrently from route discovery and metadata initialization.
+    with _discovery_lock:
+        return _enumerate_scapy_interfaces()
+
+
+def _enumerate_scapy_interfaces() -> list[dict[str, Any]]:
     ensure_capture_backend()
     try:
+        if platform.system().lower() == "windows":
+            from scapy.all import conf
+            conf.ifaces.reload()
         from scapy.interfaces import IFACES  # type: ignore
     except Exception:
         logger.debug("scapy interface enumeration unavailable", exc_info=True)
@@ -195,15 +205,51 @@ def _scapy_interfaces() -> list[dict[str, Any]]:
                 "label": _friendly_label(name, description, ip_addr),
             }
         )
+    if platform.system().lower() == "windows":
+        try:
+            from scapy.arch.windows import get_windows_if_list
+            wan = next((item for item in items if item["description"].lower() == "wan miniport (ip)"), None)
+            wan6 = next((item for item in items if item["description"].lower() == "wan miniport (ipv6)"), None)
+            if wan:
+                for raw in get_windows_if_list():
+                    if raw.get("type") != 23:
+                        continue
+                    ips = [str(ip).split("%", 1)[0] for ip in raw.get("ips", []) if _ip_quality(str(ip)) >= 2]
+                    if not ips:
+                        continue
+                    name = str(raw["name"])
+                    items.append({"value": "ras:" + name, "name": name,
+                                  "description": "PPP VPN via WAN Miniport (IP)", "ip": ips[0],
+                                  "network_name": "ras:" + name, "capture_device": wan["value"],
+                                  "capture_ips": ips, "capture_device_ipv6": wan6["value"] if wan6 else None,
+                                  "label": _friendly_label(name, "PPP VPN", ips[0])})
+        except Exception:
+            logger.debug("RAS interface enumeration failed", exc_info=True)
     return items
 
 
-def resolve_capture_interface(candidate: str | None) -> str | None:
+def capture_target(candidate: str | None) -> tuple[str | list[str] | None, str | None]:
+    if str(candidate or "").startswith("ras:"):
+        for item in _scapy_interfaces():
+            if item["value"] == candidate and item.get("capture_device"):
+                ips = [ipaddress.ip_address(ip) for ip in item["capture_ips"]]
+                devices = [str(item["capture_device"])] if any(ip.version == 4 for ip in ips) else []
+                if any(ip.version == 6 for ip in ips):
+                    if not item.get("capture_device_ipv6"):
+                        raise ValueError("PPP VPN has IPv6 addresses but Npcap WAN IPv6 capture is unavailable")
+                    devices.append(str(item["capture_device_ipv6"]))
+                target = devices[0] if len(devices) == 1 else devices
+                return target, " or ".join("host " + str(ip) for ip in ips)
+        raise ValueError("Selected PPP VPN is disconnected or its Npcap WAN capture device is unavailable")
+    return candidate, None
+
+
+def resolve_capture_interface(candidate: str | None, *, _items: list[dict[str, Any]] | None = None) -> str | None:
     text = str(candidate or "").strip()
     if not text or text in {"iface=default", "default"}:
         return None
 
-    for item in _scapy_interfaces():
+    for item in (_scapy_interfaces() if _items is None else _items):
         aliases = {
             item.get("value"),
             item.get("name"),
@@ -215,18 +261,21 @@ def resolve_capture_interface(candidate: str | None) -> str | None:
     return None
 
 
-def describe_capture_interface(candidate: str | None) -> str | None:
-    resolved = resolve_capture_interface(candidate) or str(candidate or "").strip() or None
+def describe_capture_interface(candidate: str | None, *, _items: list[dict[str, Any]] | None = None) -> str | None:
+    if not str(candidate or '').strip():
+        return None
+    items = _scapy_interfaces() if _items is None else _items
+    resolved = resolve_capture_interface(candidate, _items=items) or str(candidate or "").strip() or None
     if not resolved:
         return None
-    for item in _scapy_interfaces():
+    for item in items:
         if item.get("value") == resolved:
             return str(item.get("name") or resolved)
     return resolved
 
 
-def recommended_interface_name() -> str | None:
-    items = _scapy_interfaces()
+def recommended_interface_name(*, _items: list[dict[str, Any]] | None = None) -> str | None:
+    items = _scapy_interfaces() if _items is None else _items
     if not items:
         return None
 
@@ -236,7 +285,7 @@ def recommended_interface_name() -> str | None:
         for item in items:
             iface_name = str(item.get("name") or "")
             description = str(item.get("description") or "")
-            if item.get("ip") == target_ip and not _is_virtual_or_tunnel_name(iface_name, description):
+            if item.get("ip") == target_ip:
                 return str(item["value"])
 
     if system_name != "windows":
@@ -245,18 +294,18 @@ def recommended_interface_name() -> str | None:
             from scapy.interfaces import get_working_if  # type: ignore
 
             working = get_working_if()
-            resolved = resolve_capture_interface(_iface_value_from_obj(working))
+            resolved = resolve_capture_interface(_iface_value_from_obj(working), _items=items)
             if resolved:
                 return resolved
-            resolved = resolve_capture_interface(getattr(working, "name", None))
+            resolved = resolve_capture_interface(getattr(working, "name", None), _items=items)
             if resolved:
                 return resolved
 
             conf_iface = getattr(conf, "iface", None)
-            resolved = resolve_capture_interface(_iface_value_from_obj(conf_iface))
+            resolved = resolve_capture_interface(_iface_value_from_obj(conf_iface), _items=items)
             if resolved:
                 return resolved
-            resolved = resolve_capture_interface(getattr(conf_iface, "name", None))
+            resolved = resolve_capture_interface(getattr(conf_iface, "name", None), _items=items)
             if resolved:
                 return resolved
         except Exception:
@@ -276,9 +325,9 @@ def recommended_interface_name() -> str | None:
         is_up = bool(getattr(iface_stats, "isup", False)) if iface_stats is not None else bool(item.get("ip"))
         physical_bonus = 0 if _is_virtual_or_tunnel_name(iface_name, description) else 1
         return (
+            physical_bonus,
             1 if is_up and not _is_loopback_name(iface_name) else 0,
             _ip_quality(str(item.get("ip") or "").strip() or None),
-            physical_bonus,
             iface_name.lower(),
         )
 
@@ -288,10 +337,51 @@ def recommended_interface_name() -> str | None:
     return str(items[0]["value"])
 
 
+def _active_openvpn_provider() -> str | None:
+    if psutil is None or platform.system().lower() != "windows":
+        return None
+    try:
+        parents = set()
+        for process in psutil.process_iter(["name"]):
+            if str(process.info.get("name") or "").lower() == "openvpn.exe":
+                try:
+                    parents.add(process.ppid())
+                except (psutil.Error, OSError):
+                    continue
+        if not parents:
+            return None
+        providers = set()
+        for service in psutil.win_service_iter():
+            try:
+                if service.pid() not in parents:
+                    continue
+                path = service.binpath().lower().replace("/", "\\")
+                for vendor in ("Ivacy", "Surfshark", "NordVPN", "ProtonVPN", "ExpressVPN"):
+                    if "\\" + vendor.lower() + "\\" in path:
+                        providers.add(vendor)
+            except (psutil.Error, OSError):
+                continue
+        return next(iter(providers)) if len(providers) == 1 else None
+    except Exception:
+        logger.debug("VPN engine ownership unavailable", exc_info=True)
+        return None
+
+
+def _label_active_connection(items: list[dict[str, Any]], recommended: str | None,
+                             provider: str | None) -> None:
+    # A client process alone cannot brand an adapter: require one active tunnel
+    # on the selected route, plus a running engine owned by the vendor service.
+    tunnels = [item for item in items if item.get("is_up") and
+               "tap-windows" in str(item.get("description") or "").lower()]
+    if provider and len(tunnels) == 1 and tunnels[0].get("value") == recommended:
+        tunnels[0]["connection_name"] = provider
+        tunnels[0]["connection_name_source"] = "active_engine_service_and_unique_routed_tap"
+
+
 def list_capture_interfaces() -> dict[str, Any]:
     items = _scapy_interfaces()
-    recommended = recommended_interface_name()
-    recommended_label = describe_capture_interface(recommended)
+    recommended = recommended_interface_name(_items=items)
+    recommended_label = describe_capture_interface(recommended, _items=items)
 
     stats_map: dict[str, Any] = {}
     if psutil is not None:
@@ -305,6 +395,8 @@ def list_capture_interfaces() -> dict[str, Any]:
         iface_stats = stats_map.get(iface_name)
         item["is_up"] = bool(getattr(iface_stats, "isup", False)) if iface_stats is not None else bool(item.get("ip"))
         item["recommended"] = item.get("value") == recommended
+
+    _label_active_connection(items, recommended, _active_openvpn_provider())
 
     items.sort(
         key=lambda item: (
@@ -322,14 +414,17 @@ def list_capture_interfaces() -> dict[str, Any]:
 
 
 def interface_local_ips(candidate: str | None) -> set[str]:
-    resolved = resolve_capture_interface(candidate) or str(candidate or "").strip() or None
+    if str(candidate or '').strip() in ('', 'default', 'iface=default'):
+        return set()
+    items = _scapy_interfaces()
+    resolved = resolve_capture_interface(candidate, _items=items) or str(candidate or "").strip() or None
     if not resolved:
         return set()
 
     ips: set[str] = set()
     interface_names: set[str] = set()
 
-    for item in _scapy_interfaces():
+    for item in items:
         if item.get("value") != resolved:
             continue
         ip_addr = str(item.get("ip") or "").split("%", 1)[0].strip()

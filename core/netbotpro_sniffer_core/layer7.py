@@ -53,6 +53,8 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
         "dns_qname": None,
         "dns_qtype": None,
         "dns_rcode": None,
+        "dns_answer_ips": [],
+        "dns_answers": [],
         "http_method": None,
         "http_status": None,
         "http_reason": None,
@@ -86,6 +88,13 @@ def extract_layer7(pkt: Any, payload: bytes, layers: Any) -> dict[str, Any]:
                     "l7": f"DNS {qname}",
                 }
             )
+            dns = pkt[layers.DNS]
+            if int(getattr(dns, "qr", 0) or 0) == 1 and int(getattr(dns, "rcode", 0) or 0) == 0:
+                answers = getattr(dns, "an", None) or []
+                for answer in list(answers)[:8]:
+                    if int(getattr(answer, "type", 0) or 0) in (1, 28):
+                        data["dns_answer_ips"].append(str(answer.rdata))
+                        data['dns_answers'].append({'ip': str(answer.rdata), 'ttl': max(0, int(getattr(answer, 'ttl', 0) or 0))})
         except Exception:
             logger.debug("DNS extraction failed", exc_info=True)
 

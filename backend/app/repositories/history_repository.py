@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -66,6 +67,7 @@ from backend.app.bootstrap import ensure_project_root_on_path
 ensure_project_root_on_path()
 
 from backend.app.services.app_protocols import infer_app_protocol
+from core.display_filter import compile_display_filter
 from core.netbotpro_sniffer_core.ip_utils import is_local_ip, is_public_ip, is_remote_ip, preferred_remote_ip
 from log_manager import DB_PATH  # noqa: E402
 
@@ -2216,6 +2218,7 @@ class PacketListQuery:
     only_remote: bool = False
     limit: int = 50
     offset: int = 0
+    display_filter: str = ""
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "PacketListQuery":
@@ -2223,6 +2226,7 @@ class PacketListQuery:
             src=str(raw.get("src") or "").strip(),
             dst=str(raw.get("dst") or "").strip(),
             proto=str(raw.get("proto") or "").strip(),
+            display_filter=str(raw.get("display_filter") or "").strip(),
             process=str(raw.get("process") or "").strip(),
             pid=str(raw.get("pid") or "").strip(),
             text=str(raw.get("text") or "").strip(),
@@ -2327,14 +2331,16 @@ class MemoryHistoryRepository(BaseHistoryRepository):
         self._sniffer_service = sniffer_service
 
     def list_packets(self, query: PacketListQuery) -> dict[str, Any]:
-        rows = list(self._sniffer_service.recent_packets())
+        predicate = compile_display_filter(query.display_filter)
+        reader = getattr(self._sniffer_service, "recent_packet_refs", self._sniffer_service.recent_packets)
+        rows = reader()
 
         def match(row: dict[str, Any]) -> bool:
             if query.src and query.src.lower() not in str(row.get("src") or "").lower():
                 return False
             if query.dst and query.dst.lower() not in str(row.get("dst") or "").lower():
                 return False
-            if query.proto and query.proto.lower() not in str(row.get("proto") or "").lower():
+            if query.proto and query.proto.lower() not in ' '.join(str(row.get(key) or '') for key in ('proto', 'app_protocol')).lower():
                 return False
             if query.process:
                 process_hay = " ".join(
@@ -2353,12 +2359,16 @@ class MemoryHistoryRepository(BaseHistoryRepository):
                 hay = " ".join(
                     [
                         str(row.get("summary") or ""),
+                        str(row.get("src") or ""),
+                        str(row.get("dst") or ""),
                         str(row.get("org") or ""),
                         str(row.get("country") or row.get("country_code") or ""),
                         str(row.get("remote_ip") or ""),
                         str(row.get("app_protocol") or ""),
                         str(row.get("l7") or ""),
                         str(row.get("dns_qname") or ""),
+                        str(row.get("destination_domain") or ""),
+                        " ".join(row.get("destination_domain_candidates") or []),
                         str(row.get("http_host") or ""),
                         str(row.get("http_path") or ""),
                         str(row.get("sni") or ""),
@@ -2375,11 +2385,11 @@ class MemoryHistoryRepository(BaseHistoryRepository):
                 return False
             if query.only_remote and not _is_remote_traffic(row):
                 return False
-            return True
+            return predicate(row)
 
-        filtered = [dict(row) for row in rows if match(row)]
+        filtered = [row for row in rows if match(row)]
         total = len(filtered)
-        items = filtered[query.offset : query.offset + query.limit]
+        items = deepcopy(filtered[query.offset : query.offset + query.limit])
         return {"items": items, "total": total, "limit": query.limit, "offset": query.offset, "source": "memory"}
 
     def list_alerts(self, query: AlertListQuery) -> dict[str, Any]:
@@ -2447,7 +2457,8 @@ class MemoryHistoryRepository(BaseHistoryRepository):
         for row in rows:
             if str(row.get("id") or "") == str(packet_id):
                 return dict(row)
-        return None
+        retained = getattr(self._sniffer_service, "retained_record", None)
+        return retained("packet", packet_id) if retained else None
 
     def get_packet_flow_context(self, packet_id: str) -> dict[str, Any] | None:
         packet = self.get_packet_detail(packet_id)
@@ -2462,7 +2473,8 @@ class MemoryHistoryRepository(BaseHistoryRepository):
         for row in rows:
             if str(row.get("id") or "") == str(alert_id):
                 return dict(row)
-        return None
+        retained = getattr(self._sniffer_service, "retained_record", None)
+        return retained("alert", alert_id) if retained else None
 
     def get_alert_context(self, alert_id: str) -> dict[str, Any] | None:
         alert = self.get_alert_detail(alert_id)
@@ -2503,7 +2515,10 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         except sqlite3.Error as exc:
             raise HistoryRepositoryError("History database is unavailable") from exc
         try:
-            where, params = self._build_packet_where(query, self._table_columns(conn, "packets"))
+            columns = self._table_columns(conn, "packets")
+            if query.display_filter:
+                conn.create_function(*self._display_filter_function(query, columns))
+            where, params = self._build_packet_where(query, columns)
             cur = conn.cursor()
             cur.execute(f"SELECT COUNT(*) FROM packets{where}", params)
             total = int(cur.fetchone()[0])
@@ -2543,7 +2558,10 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         try:
             async with aiosqlite.connect(self._db_path) as conn:
                 await self._configure_async_connection(conn)
-                where, params = self._build_packet_where(query, await self._table_columns_async(conn, "packets"))
+                columns = await self._table_columns_async(conn, "packets")
+                if query.display_filter:
+                    await conn.create_function(*self._display_filter_function(query, columns))
+                where, params = self._build_packet_where(query, columns)
                 total = int(await self._fetch_scalar_async(conn, f"SELECT COUNT(*) FROM packets{where}", params))
                 rows = await self._fetch_rows_async(
                     conn,
@@ -2724,6 +2742,13 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
         return _build_alert_investigation_context(alert, packet_rows, alert_rows, source="sqlite")
 
     @staticmethod
+    def _display_filter_function(query, columns):
+        fields = sorted(columns)
+        predicate = compile_display_filter(query.display_filter)
+        return ('netbot_packet_filter', len(fields),
+                lambda *values: int(predicate(SQLiteHistoryRepository._normalize_packet_row(dict(zip(fields, values))))))
+
+    @staticmethod
     def _build_packet_where(query: PacketListQuery, available_columns: set[str] | None = None) -> tuple[str, list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -2734,8 +2759,9 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
             clauses.append("dst LIKE ?")
             params.append(f"%{query.dst}%")
         if query.proto:
-            clauses.append("proto LIKE ?")
-            params.append(f"%{query.proto}%")
+            protocol_columns = [column for column in ('proto', 'app_protocol') if available_columns is None or column in available_columns]
+            clauses.append('(' + ' OR '.join(f'{column} LIKE ?' for column in protocol_columns) + ')')
+            params.extend([f"%{query.proto}%"] * len(protocol_columns))
         if query.process:
             process_columns = [column for column in ("process_name", "parent_process_name", "executable_path") if available_columns is None or column in available_columns]
             if process_columns:
@@ -2782,6 +2808,9 @@ class SQLiteHistoryRepository(BaseHistoryRepository):
                 clauses.append("1 = 0")
         if query.only_alerts:
             clauses.append("is_alert = 1")
+        if query.display_filter:
+            fields = ','.join('"' + column.replace('"', '""') + '"' for column in sorted(available_columns or []))
+            clauses.append(f'netbot_packet_filter({fields}) = 1')
         if query.only_remote:
             clauses.append(_sqlite_remote_clause())
         return (f" WHERE {' AND '.join(clauses)}" if clauses else "", params)

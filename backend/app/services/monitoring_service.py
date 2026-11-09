@@ -186,6 +186,8 @@ def build_monitoring_metrics(
     event_bus = dict(observability.get("event_bus") or {})
     packet_queue = dict(observability.get("packet_queue") or {})
     flow_worker_pool = dict(observability.get("flow_worker_pool") or {})
+    flow_views = dict(observability.get("flow_views") or {})
+    flow_memory = dict(observability.get("flow_memory") or {})
     live_ring_buffer = dict(observability.get("live_ring_buffer") or {})
     service_attribution = dict(observability.get("service_attribution") or {})
     incidents = dict(observability.get("incidents") or {})
@@ -278,6 +280,16 @@ def build_monitoring_metrics(
         or []
     )
     pressure_reasons: list[str] = list(packet_queue_pressure_reasons)
+    flow_view_reasons = [
+        str(reason) for reason in flow_views.get("pressure_reasons") or []
+        if str(reason) in {"flow_view_capacity_evictions", "flow_view_publish_error", "flow_view_worker_stopped"}
+    ] if isinstance(flow_views.get("pressure_reasons"), list) else []
+    pressure_reasons.extend(flow_view_reasons)
+    flow_memory_reasons = [
+        str(reason) for reason in flow_memory.get("pressure_reasons") or []
+        if str(reason) in {"flow_memory_hot_pressure", "flow_memory_compaction_error"}
+    ] if isinstance(flow_memory.get("pressure_reasons"), list) else []
+    pressure_reasons.extend(flow_memory_reasons)
     flow_worker_reasons = _safe_flow_worker_reasons(
         flow_worker_pool.get("pressure_reasons") or []
     )
@@ -350,6 +362,13 @@ def build_monitoring_metrics(
     if history_slow_calls or history_max_ms >= 250.0:
         pressure_reasons.append("history_query_latency")
 
+    sniffer_observability = sniffer_state.get("observability") or {}
+    alert_engine = {**dict(sniffer_observability.get("alert_engine") or {}),
+                    **dict(observability.get("alert_engine") or {})}
+    threat_intelligence = {**dict(sniffer_observability.get("threat_intelligence") or {}),
+                           **dict(observability.get("threat_intelligence") or {})}
+    if alert_engine.get("health") in {"critical", "degraded", "error", "failed"}:
+        pressure_reasons.append("alert_engine_unhealthy")
     health = "healthy"
     if pressure_reasons:
         health = "degraded"
@@ -369,14 +388,46 @@ def build_monitoring_metrics(
         or live_ring_buffer.get("health") == "critical"
         or service_attribution.get("health") == "critical"
         or incidents.get("health") == "critical"
+        or alert_engine.get("health") in {"critical", "failed", "error"}
     ):
         health = "critical"
 
+    if sniffer_state.get("capture_error"):
+        health = "critical"
+        pressure_reasons.append("capture_loop_failed")
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "flow_memory": {
+            "enabled": bool(flow_memory.get("enabled")),
+            "health": str(flow_memory.get("health") or "healthy"),
+            "total_flows": _int(flow_memory.get("total_flows")),
+            "hot_flows": _int(flow_memory.get("hot_flows")),
+            "compressed_flows": _int(flow_memory.get("compressed_flows")),
+            "compressed_bytes": _int(flow_memory.get("compressed_bytes")),
+            "hot_target": _int(flow_memory.get("hot_target")),
+            "errors_total": _int(flow_memory.get("errors_total")),
+            "pressure_reasons": flow_memory_reasons,
+        },
+        "flow_views": {
+            "enabled": bool(flow_views.get("capacity")),
+            "health": str(flow_views.get("health") or "healthy"),
+            "pending": _int(flow_views.get("pending")),
+            "capacity": _int(flow_views.get("capacity")),
+            "capacity_policy": str(flow_views.get("capacity_policy") or ""),
+            "capacity_evictions_total": _int(flow_views.get("capacity_evictions_total")),
+            "errors_total": _int(flow_views.get("errors_total")),
+            "worker_alive": bool(flow_views.get("worker_alive")),
+            "pressure_reasons": flow_view_reasons,
+        },
+        "alert_engine": alert_engine,
+        "threat_intelligence": threat_intelligence,
         "health": health,
         "pressure_reasons": pressure_reasons,
         "capture": {
+            "health": sniffer_state.get("capture_health") or sniffer_state.get("health") or ("healthy" if sniffer_state.get("running") else "idle"),
+            "capture_error": sniffer_state.get("capture_error") or "",
+            "capture_started_at": sniffer_state.get("capture_started_at"),
+            "elapsed_seconds": _number(sniffer_state.get("elapsed_seconds")),
             "running": bool(sniffer_state.get("running")),
             "interface": sniffer_state.get("iface") or "default",
             "total_packets": _int(
@@ -526,6 +577,8 @@ def build_monitoring_metrics(
             "active_workers": _int(flow_worker_pool.get("active_workers")),
             "queue_depth_total": _int(flow_worker_pool.get("queue_depth_total")),
             "queue_max_total": _int(flow_worker_pool.get("queue_max_total")),
+            "queue_capacity_shared": bool(flow_worker_pool.get("queue_capacity_shared")),
+            "high_water_mark": _int(flow_worker_pool.get("high_water_mark")),
             "utilization_percent": _number(flow_worker_pool.get("utilization_percent")),
             "overflow_policy": str(
                 flow_worker_pool.get("overflow_policy") or "drop_oldest"
@@ -685,6 +738,9 @@ def build_monitoring_metrics(
                 persistence.get("persistence_enabled", persistence.get("enabled"))
             ),
             "queue_depth": queue_size,
+            "packet_storage_enabled": bool(persistence.get("packet_storage_enabled")),
+            "alert_storage_enabled": bool(persistence.get("alert_storage_enabled")),
+            "flow_storage_enabled": bool(persistence.get("flow_storage_enabled")),
             "queue_max": persistence_max_size,
             "utilization_percent": persistence_utilization,
             "batches_written_total": _int(

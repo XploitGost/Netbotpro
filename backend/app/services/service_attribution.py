@@ -6,9 +6,10 @@ import os
 import threading
 import time
 from collections import OrderedDict, deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from fnmatch import fnmatch
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,18 @@ def _domain(value: Any) -> str:
 
 def _safe_ip(value: Any) -> str:
     candidate = str(value or "").strip()
+    if len(candidate) > 128:
+        return _validate_ip(candidate)
+    return _cached_ip(candidate)
+
+
+@lru_cache(maxsize=4096)
+def _cached_ip(candidate: str) -> str:
+    # Only syntax normalization is cached, never route/DNS/VPN classification.
+    return _validate_ip(candidate)
+
+
+def _validate_ip(candidate: str) -> str:
     try:
         return str(ipaddress.ip_address(candidate))
     except ValueError:
@@ -148,7 +161,14 @@ class ServiceAttributionResult:
     risk_hint: str
 
     def to_dict(self) -> dict[str, Any]:
-        return redact_sensitive_data(asdict(self))
+        # Redaction already detaches containers; avoid asdict's earlier deep copy
+        # for this frozen scalar/tuple schema. Preserve generic subclass handling.
+        value = ({name: getattr(self, name) for name in _ATTRIBUTION_RESULT_FIELDS}
+                 if type(self) is ServiceAttributionResult else asdict(self))
+        return redact_sensitive_data(value)
+
+
+_ATTRIBUTION_RESULT_FIELDS = tuple(field.name for field in fields(ServiceAttributionResult))
 
 
 class ServiceAttributionEngine:
@@ -180,7 +200,7 @@ class ServiceAttributionEngine:
             1_000_000,
         )
         self._lock = threading.RLock()
-        self._dns_by_ip: OrderedDict[str, deque[tuple[float, str]]] = OrderedDict()
+        self._dns_by_ip: OrderedDict[tuple[str, str], deque[tuple[float, str, float | None]]] = OrderedDict()
         self._latencies: deque[float] = deque(maxlen=512)
         self._flow_outcomes: OrderedDict[str, tuple[bool, str, bool, bool]] = (
             OrderedDict()
@@ -243,12 +263,19 @@ class ServiceAttributionEngine:
     def enrich(self, packet: dict[str, Any]) -> dict[str, Any]:
         result = self.attribute(packet)
         public = result.to_dict()
+        domain, source, candidates = self._destination_domain(packet)
+        public["destination_domain"] = domain
+        public["destination_domain_source"] = source
+        public["destination_domain_candidates"] = candidates
         packet["service_attribution"] = public
         packet.update(
             {
                 "service_name": public["service_name"],
                 "service_category": public["service_category"],
-                "service_domain": public["domain"],
+                "service_domain": domain or (public["domain"] if source != "DNS answer (ambiguous)" and not packet.get("dns_qname") else ""),
+                "destination_domain": domain,
+                "destination_domain_source": source,
+                "destination_domain_candidates": candidates,
                 "service_confidence": public["attribution_confidence"],
                 "service_confidence_score": public["confidence_score"],
                 "service_reasons": list(public["attribution_reasons"]),
@@ -260,6 +287,25 @@ class ServiceAttributionEngine:
             }
         )
         return public
+
+    def _destination_domain(self, packet: dict[str, Any]) -> tuple[str, str, list[str]]:
+        for source, value in (
+            ("HTTP Host", packet.get("http_host")),
+            ("TLS SNI", packet.get("tls_sni") or packet.get("sni")),
+            ("QUIC SNI", packet.get("quic_sni") or packet.get("quic_server_name")),
+        ):
+            domain = _domain(value)
+            if domain and not _safe_ip(domain) and not any(char.isspace() for char in domain):
+                return domain, source, []
+        destination_ip = _safe_ip(packet.get("remote_ip") or packet.get("dst"))
+        if destination_ip and not packet.get("dns_qname"):
+            domains = self._recent_domains(destination_ip, packet)
+            distinct = list(dict.fromkeys(domains))
+            if len(distinct) == 1:
+                return distinct[0], "DNS answer (correlated)", []
+            if distinct:
+                return "", "DNS answer (ambiguous)", distinct[:3]
+        return "", "", []
 
     def attribute(self, packet: dict[str, Any]) -> ServiceAttributionResult:
         started = time.perf_counter()
@@ -321,8 +367,9 @@ class ServiceAttributionEngine:
             if normalized := _domain(value):
                 candidates.append(("dns", normalized))
         if destination_ip:
-            for value in self._recent_domains(destination_ip, packet):
-                candidates.append(("dns", value))
+            recent = set(self._recent_domains(destination_ip, packet))
+            if len(recent) == 1:
+                candidates.append(("dns", next(iter(recent))))
 
         evidence: list[tuple[str, str, ServiceFingerprint]] = []
         for source, candidate in candidates:
@@ -519,17 +566,35 @@ class ServiceAttributionEngine:
         if packet.get("dns_answer_ip"):
             answers.append(packet["dns_answer_ip"])
         observed_at = _timestamp(packet.get("ts") or packet.get("timestamp"))
+        per_ip = {}
+        for answer in answers:
+            candidate = (answer.get('ip') or answer.get('address')) if isinstance(answer, dict) else answer
+            ip = _safe_ip(candidate)
+            if not ip:
+                continue
+            ttl = answer.get('ttl') if isinstance(answer, dict) else None
+            if ttl is not None:
+                try:
+                    ttl = max(0, min(int(ttl), self.dns_window_sec))
+                except (TypeError, ValueError):
+                    ttl = None
+            if ip not in per_ip:
+                per_ip[ip] = ttl
+            elif ttl is not None:
+                previous = per_ip[ip]
+                per_ip[ip] = ttl if previous is None else min(previous, ttl)
         with self._lock:
-            for answer in answers:
-                candidate = (
-                    answer.get("ip") or answer.get("address")
-                    if isinstance(answer, dict)
-                    else answer
-                )
-                if ip := _safe_ip(candidate):
-                    values = self._dns_by_ip.setdefault(ip, deque(maxlen=20))
-                    values.append((observed_at, domain))
-                    self._dns_by_ip.move_to_end(ip)
+            for ip, ttl in per_ip.items():
+                if ip:
+                    client_ip = self._dns_client_ip(packet, dns_response=True)
+                    values = self._dns_by_ip.setdefault((client_ip, ip), deque(maxlen=20))
+                    if ttl is not None:
+                        retained = [row for row in values if row[1] != domain]
+                        values.clear()
+                        values.extend(retained)
+                    if ttl != 0:
+                        values.append((observed_at, domain, None if ttl is None else observed_at + ttl))
+                    self._dns_by_ip.move_to_end((client_ip, ip))
                     if len(self._dns_by_ip) > self.dns_cache_max:
                         self._dns_by_ip.popitem(last=False)
 
@@ -537,12 +602,21 @@ class ServiceAttributionEngine:
         now = _timestamp(packet.get("ts") or packet.get("timestamp"))
         cutoff = now - self.dns_window_sec
         with self._lock:
-            values = self._dns_by_ip.get(destination_ip, deque())
-            if destination_ip in self._dns_by_ip:
-                self._dns_by_ip.move_to_end(destination_ip)
-            recent = [item for item in values if item[0] >= cutoff]
+            key = (self._dns_client_ip(packet), destination_ip)
+            values = self._dns_by_ip.get(key, deque())
+            if key in self._dns_by_ip:
+                self._dns_by_ip.move_to_end(key)
+            recent = [item for item in values if cutoff <= item[0] <= now and (item[2] is None or now < item[2])]
             recent.sort(key=lambda item: abs(now - item[0]))
-            return [domain for _observed_at, domain in recent]
+            return [domain for _observed_at, domain, _expires in recent]
+
+    @staticmethod
+    def _dns_client_ip(packet: dict[str, Any], *, dns_response: bool = False) -> str:
+        src, dst = _safe_ip(packet.get("src")), _safe_ip(packet.get("dst"))
+        if dns_response and _safe_int(packet.get("sport"), 0, 0, 65535) == 53:
+            return dst
+        remote = _safe_ip(packet.get("remote_ip"))
+        return dst if remote and remote == src else src
 
     @staticmethod
     def _is_encrypted(packet: dict[str, Any], port: int) -> bool:

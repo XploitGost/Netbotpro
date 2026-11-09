@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -119,7 +120,7 @@ def seed_demo_data(
                     "demo",
                 ],
             },
-            DEMO_TOKEN,
+            os.environ.get("NETBOT_AGENT_TOKEN", "").strip() or DEMO_TOKEN,
         )
         registry.heartbeat(agent_id, {"status": "online", "source": "demo_seed"})
         registry.telemetry(agent_id, _sample_payload(profile, index))

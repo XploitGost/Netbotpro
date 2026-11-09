@@ -11,6 +11,7 @@ import platform
 import re
 import socket
 import subprocess
+import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -22,10 +23,12 @@ except Exception:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 _LAST_SCAN: float = 0.0
-_CACHE: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+_CACHE: Dict[Tuple[str, int, str], Optional[Dict[str, Any]]] = {}
 _PORT_CACHE: Dict[Tuple[int, str], list[Dict[str, Any]]] = {}
-_WILDCARD_PORT_CACHE: Dict[Tuple[int, str], Dict[str, Any]] = {}
+_WILDCARD_PORT_CACHE: Dict[Tuple[int, str, bool], Optional[Dict[str, Any]]] = {}
 _SCAN_INTERVAL = 3.0
+_CACHE_LOCK = threading.RLock()
+_PID_METADATA_CACHE: Dict[int, Dict[str, Any]] = {}
 _NETSTAT_TIMEOUT = 2.0
 _WILDCARD_HOSTS = {"0.0.0.0", "::", "*", "[::]"}
 
@@ -118,10 +121,20 @@ def _normalize_ip_key(value: Any) -> str:
 def _register_cache_entry(local_ip: str, local_port: int, proto: str, info: Dict[str, Any]) -> None:
     ip_key = _normalize_ip_key(local_ip)
     cache_key = (ip_key, int(local_port), proto)
-    _CACHE[cache_key] = info
+    _cache_socket_owner(_CACHE, cache_key, info)
     _PORT_CACHE.setdefault((int(local_port), proto), []).append({"local_ip": ip_key, "info": info})
     if ip_key in _WILDCARD_HOSTS:
-        _WILDCARD_PORT_CACHE[(int(local_port), proto)] = info
+        _cache_socket_owner(_WILDCARD_PORT_CACHE, (int(local_port), proto, ":" in ip_key), info)
+
+
+def _cache_socket_owner(cache, key, info) -> None:
+    if key not in cache:
+        cache[key] = info
+        return
+    previous = cache[key]
+    # A shared local endpoint cannot identify which process owns this packet.
+    if previous is None or previous.get("pid") != info.get("pid"):
+        cache[key] = None
 
 
 def _unique_port_candidate(local_ip: str, local_port: int, proto: str) -> Dict[str, Any] | None:
@@ -179,7 +192,7 @@ def _scan_with_psutil() -> None:
         if proto is None:
             continue
         pid: Optional[int] = c.pid
-        info = _safe_process_metadata(pid)
+        info = {"pid": pid}
         _register_cache_entry(local_ip, int(local_port), proto, _finalize_process_info(info, source="psutil"))
     _LAST_SCAN = time.time()
 
@@ -238,23 +251,32 @@ def _scan_with_netstat_windows() -> None:
 
         if not local_ip or local_port is None or proto is None:
             continue
-        info = _safe_process_metadata(pid)
+        info = {"pid": pid}
         _register_cache_entry(local_ip, local_port, proto, _finalize_process_info(info, source="netstat"))
     _LAST_SCAN = time.time()
 
 
 def _refresh_cache() -> None:
-    global _CACHE, _PORT_CACHE, _WILDCARD_PORT_CACHE
+    global _CACHE, _PORT_CACHE, _WILDCARD_PORT_CACHE, _LAST_SCAN
     _CACHE.clear()
     _PORT_CACHE.clear()
     _WILDCARD_PORT_CACHE.clear()
-    _scan_with_psutil()
-    if _CACHE:
-        return
-    _scan_with_netstat_windows()
+    _PID_METADATA_CACHE.clear()
+    try:
+        _scan_with_psutil()
+        if not _CACHE:
+            _scan_with_netstat_windows()
+    finally:
+        # Failed and empty scans need the same cooldown as successful scans.
+        _LAST_SCAN = time.time()
 
 
 def get_process_for_flow(local_ip: str, local_port: Optional[int], proto: Optional[str]) -> Dict[str, Any]:
+    with _CACHE_LOCK:
+        return _get_process_for_flow_locked(local_ip, local_port, proto)
+
+
+def _get_process_for_flow_locked(local_ip: str, local_port: Optional[int], proto: Optional[str]) -> Dict[str, Any]:
     if not local_ip or local_port is None or not proto:
         return _unavailable_process_info("No local socket key was available for process attribution.")
     now = time.time()
@@ -263,16 +285,25 @@ def get_process_for_flow(local_ip: str, local_port: Optional[int], proto: Option
     if now - _LAST_SCAN > _SCAN_INTERVAL:
         _refresh_cache()
     key = (local_ip_key, int(local_port), proto_key)
+    if key in _CACHE and _CACHE[key] is None:
+        return _unavailable_process_info("Multiple processes share this local socket endpoint.")
     info = _CACHE.get(key)
     if not info:
-        _refresh_cache()
-        info = _CACHE.get(key)
-    if not info:
-        info = _WILDCARD_PORT_CACHE.get((int(local_port), proto_key))
+        wildcard_key = (int(local_port), proto_key, ":" in local_ip_key)
+        if wildcard_key in _WILDCARD_PORT_CACHE and _WILDCARD_PORT_CACHE[wildcard_key] is None:
+            return _unavailable_process_info("Multiple processes share this wildcard socket endpoint.")
+        info = _WILDCARD_PORT_CACHE.get(wildcard_key)
     if not info:
         info = _unique_port_candidate(local_ip_key, int(local_port), proto_key)
     if not info:
         if psutil is None and platform.system().lower() != "windows":
             return _unavailable_process_info("Process attribution is unavailable in this runtime.")
         return _unavailable_process_info("No active socket match. The socket may be short-lived, kernel-owned, wildcard-bound, or already closed.")
+    pid = info.get("pid")
+    if pid and not info.get("process_name"):
+        if pid not in _PID_METADATA_CACHE:
+            _PID_METADATA_CACHE[pid] = _safe_process_metadata(pid)
+        return _finalize_process_info(
+            _PID_METADATA_CACHE[pid], source=str(info.get("attribution_source") or "psutil")
+        )
     return info.copy()

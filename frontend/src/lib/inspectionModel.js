@@ -154,7 +154,11 @@ function servicePort(packet) {
   const sport = normalizePort(packet?.sport);
   const dport = normalizePort(packet?.dport);
   if (direction === "OUTGOING") return dport || sport;
-  if (direction === "INCOMING") return sport || dport;
+  if (direction === "INCOMING") {
+    const flags = cleanText(packet?.flags ?? packet?.tcp_flags).toUpperCase();
+    const initialSyn = flags.includes("S") && !flags.includes("A");
+    return initialSyn ? dport || sport : sport || dport;
+  }
   return dport || sport;
 }
 

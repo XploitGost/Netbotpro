@@ -26,6 +26,7 @@
     },
     "files": [
       "main.cjs",
+      "backend-shutdown.cjs",
       "preload.cjs",
       "package.json"
     ],

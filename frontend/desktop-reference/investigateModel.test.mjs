@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {investigationView,evidenceRows} from './investigateModel.js';
+const packet={id:4,src:'192.0.2.1',dst:'203.0.113.1',proto:'TCP',ts:'2026-10-07T18:30:00Z',summary:'SYN'};
+assert.equal(evidenceRows([packet],'203.0.113').length,1);
+assert.equal(evidenceRows([packet],'','DNS').length,0);
+assert.equal(evidenceRows([packet],'SYN')[0].index,0);
+const view=investigationView(packet,{analystCards:[{label:'Protocol Guess',value:'TCP'},{label:'Why It Matters',value:'Observed evidence only'}],riskExplanation:{groups:[{title:'Top Reasons',items:[{title:'Observed SYN'}]}]}});
+assert.deepEqual(view.findings,['Observed SYN']);
+assert.equal(view.why,'Observed evidence only');
+assert.equal(view.timeline.length,1);
+assert.equal(view.process,'N/A');
+assert.deepEqual(view.entities,[packet.src,packet.dst]);
+assert.equal(investigationView(null).timeline.length,0);
+assert.equal(investigationView(packet,{analystCards:[{label:'Risk',value:'Medium (53%)'}]}).risk,'Low');
+assert.equal(investigationView({...packet,risk_level:'high'},{analystCards:[{label:'Risk',value:'Medium (53%)'}]}).risk,'High');
+assert.equal(investigationView(packet,{analystCards:[{label:'Risk',value:'Medium (53%)'}]}).analysisRisk,'Medium (53%)');
+assert.equal(investigationView(packet,{}, {timeline:[{ts:packet.ts,summary:'Real event'}]}).timeline[0].title,'Real event');
+console.log('Investigation model: filters, real findings, missing values and timeline passed.');

@@ -3,11 +3,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import queue
 import threading
 import time
 import uuid
-from collections import deque
+from collections import deque, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -15,10 +14,11 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORKER_COUNT = 4
-DEFAULT_QUEUE_MAX = 2000
+DEFAULT_QUEUE_MAX = 8192
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
 DEFAULT_ERROR_THRESHOLD = 25
 DEFAULT_SLOW_JOB_MS = 100.0
+HEALTH_WINDOW_SEC = 60.0
 VALID_OVERFLOW_POLICIES = {
     "drop_oldest",
     "drop_newest",
@@ -126,7 +126,6 @@ class FlowWorkerJob:
 @dataclass
 class _WorkerState:
     worker_id: int
-    queue: queue.Queue[FlowWorkerJob]
     thread: threading.Thread | None = None
     processed_total: int = 0
     failed_total: int = 0
@@ -135,7 +134,7 @@ class _WorkerState:
 
 
 class FlowWorkerPool:
-    """Bounded ordered lanes for parallel packet processing by flow."""
+    """Bounded shared work with FIFO ordering and one active job per flow."""
 
     def __init__(
         self,
@@ -164,18 +163,30 @@ class FlowWorkerPool:
         self.slow_job_ms = max(1.0, float(slow_job_ms))
         self.block_timeout_sec = max(0.001, min(1.0, float(block_timeout_sec)))
         self._lock = threading.RLock()
+        self._queue_changed = threading.Condition(self._lock)
+        self._queued_jobs = 0
+        self._pending: OrderedDict[str, FlowWorkerJob] = OrderedDict()
+        self._flow_queues: dict[str, deque[FlowWorkerJob]] = {}
+        self._ready_flows: OrderedDict[str, None] = OrderedDict()
+        self._active_flows: set[str] = set()
+        self._active_by_worker: dict[int, str] = {}
         self._stop = threading.Event()
         self._accepting = True
         self._jobs_received = 0
+        self._queue_high_water = 0
         self._jobs_processed = 0
         self._jobs_failed = 0
         self._jobs_dropped = 0
         self._jobs_rejected = 0
+        self._recent_drops: deque[tuple[int, int]] = deque()
+        self._recent_rejections: deque[tuple[int, int]] = deque()
+        self._recent_failures: deque[tuple[int, int]] = deque()
         self._unknown_flow_keys = 0
         self._slow_jobs = 0
         self._latencies_ms: deque[float] = deque(maxlen=4096)
         self._last_error = ""
         self._last_drop_reason = ""
+        self._last_pressure_log_at = float("-inf")
         self._last_slow_job_at = ""
         self._workers = self._create_workers()
         if self.enabled:
@@ -216,11 +227,9 @@ class FlowWorkerPool:
         )
 
     def _create_workers(self) -> list[_WorkerState]:
-        base, remainder = divmod(self.queue_max_total, self.worker_count)
         return [
             _WorkerState(
                 worker_id=worker_id,
-                queue=queue.Queue(maxsize=base + (1 if worker_id < remainder else 0)),
             )
             for worker_id in range(self.worker_count)
         ]
@@ -237,6 +246,9 @@ class FlowWorkerPool:
 
     def worker_index_for(self, packet: dict[str, Any]) -> int:
         key = FlowDispatchKey.from_packet(packet)
+        return self._worker_index_for_key(key)
+
+    def _worker_index_for_key(self, key: FlowDispatchKey) -> int:
         digest = hashlib.sha256(key.value.encode("utf-8")).digest()
         return int.from_bytes(digest[:8], "big") % self.worker_count
 
@@ -273,70 +285,100 @@ class FlowWorkerPool:
             ),
             priority=str(priority or "normal"),
         )
-        state = self._workers[self.worker_index_for(packet)]
-        return self._enqueue(state, job)
+        return self._enqueue(self._workers[self._worker_index_for_key(key)], job)
+
+    def _put_job(self, job: FlowWorkerJob) -> None:
+        self._pending[job.job_id] = job
+        self._flow_queues.setdefault(job.flow_key, deque()).append(job)
+        if job.flow_key not in self._active_flows:
+            self._ready_flows[job.flow_key] = None
+        self._queued_jobs += 1
+        self._queue_high_water = max(self._queue_high_water, self._queued_jobs)
+        self._queue_changed.notify_all()
 
     def _enqueue(self, state: _WorkerState, job: FlowWorkerJob) -> bool:
-        try:
+        # Queued flows are unassigned. Only an executing flow owns a worker.
+        with self._queue_changed:
             if self.overflow_policy == "block_short":
-                state.queue.put(job, timeout=self.block_timeout_sec)
-            else:
-                state.queue.put_nowait(job)
-            return True
-        except queue.Full:
-            pass
-
-        if self.overflow_policy == "drop_oldest":
-            try:
-                state.queue.get_nowait()
-                state.queue.task_done()
-                self._record_drop(state, "flow_worker_queue_full_drop_oldest")
-            except queue.Empty:
-                pass
-            try:
-                state.queue.put_nowait(job)
-                return True
-            except queue.Full:
-                self._record_drop(state, "flow_worker_queue_full_after_drop_oldest")
+                self._queue_changed.wait_for(
+                    lambda: self._queued_jobs < self.queue_max_total or not self._accepting,
+                    timeout=self.block_timeout_sec,
+                )
+            if not self._accepting:
+                self._record_rejection("worker_pool_closed")
                 return False
+            if self._queued_jobs < self.queue_max_total:
+                self._put_job(job)
+                return True
 
-        if self.overflow_policy == "drop_newest":
-            self._record_drop(state, "flow_worker_queue_full_drop_newest")
+            if self.overflow_policy == "drop_oldest":
+                _, discarded = self._pending.popitem(last=False)
+                items = self._flow_queues[discarded.flow_key]
+                items.popleft()
+                if not items:
+                    del self._flow_queues[discarded.flow_key]
+                    self._ready_flows.pop(discarded.flow_key, None)
+                self._queued_jobs -= 1
+                self._record_drop(state, "flow_worker_queue_full_drop_oldest")
+                self._put_job(job)
+                return True
+
+            if self.overflow_policy == "drop_newest":
+                self._record_drop(state, "flow_worker_queue_full_drop_newest")
+                return False
+            reason = (
+                "flow_worker_queue_block_timeout"
+                if self.overflow_policy == "block_short"
+                else "flow_worker_queue_full_reject_new"
+            )
+            self._record_rejection(reason)
             return False
-
-        reason = (
-            "flow_worker_queue_block_timeout"
-            if self.overflow_policy == "block_short"
-            else "flow_worker_queue_full_reject_new"
-        )
-        self._record_rejection(reason)
-        return False
 
     def _record_drop(self, state: _WorkerState, reason: str) -> None:
         with self._lock:
-            state.dropped_total += 1
+            # Waiting jobs are unassigned; loss belongs to the shared queue.
             self._jobs_dropped += 1
+            self._record_recent_event(self._recent_drops)
             self._last_drop_reason = reason
-        logger.warning(
-            "flow worker queue pressure; packet job dropped worker_id=%s reason=%s",
-            state.worker_id,
-            reason,
-        )
+        self._log_pressure(reason)
 
     def _record_rejection(self, reason: str) -> None:
         with self._lock:
             self._jobs_rejected += 1
+            self._record_recent_event(self._recent_rejections)
             self._last_drop_reason = reason
+        self._log_pressure(reason)
+
+    def _log_pressure(self, reason: str) -> None:
+        with self._lock:
+            now = time.monotonic()
+            if now - self._last_pressure_log_at < 5.0:
+                return
+            self._last_pressure_log_at = now
+            dropped, rejected = self._jobs_dropped, self._jobs_rejected
         logger.warning(
-            "flow worker queue pressure; packet job rejected reason=%s", reason
+            "flow worker queue pressure reason=%s dropped_total=%s rejected_total=%s",
+            reason, dropped, rejected,
         )
 
     def _worker_loop(self, state: _WorkerState) -> None:
-        while not self._stop.is_set() or not state.queue.empty():
-            try:
-                job = state.queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
+        while True:
+            with self._queue_changed:
+                self._queue_changed.wait_for(lambda: self._ready_flows or (self._stop.is_set() and not self._queued_jobs), timeout=.1)
+                if not self._ready_flows:
+                    if self._stop.is_set() and not self._queued_jobs:
+                        return
+                    continue
+                key, _ = self._ready_flows.popitem(last=False)
+                items = self._flow_queues[key]
+                job = items.popleft()
+                if not items:
+                    del self._flow_queues[key]
+                del self._pending[job.job_id]
+                self._queued_jobs -= 1
+                self._active_flows.add(key)
+                self._active_by_worker[state.worker_id] = key
+                self._queue_changed.notify_all()
             started = time.perf_counter()
             failed = False
             try:
@@ -346,6 +388,7 @@ class FlowWorkerPool:
                 with self._lock:
                     state.failed_total += 1
                     self._jobs_failed += 1
+                    self._record_recent_event(self._recent_failures)
                     self._last_error = type(exc).__name__
                 logger.error(
                     "flow worker job failed worker_id=%s error_type=%s",
@@ -355,7 +398,12 @@ class FlowWorkerPool:
             finally:
                 latency_ms = (time.perf_counter() - started) * 1000.0
                 self._record_completion(state, latency_ms, failed)
-                state.queue.task_done()
+                with self._queue_changed:
+                    self._active_flows.remove(job.flow_key)
+                    self._active_by_worker.pop(state.worker_id, None)
+                    if self._flow_queues.get(job.flow_key):
+                        self._ready_flows[job.flow_key] = None
+                    self._queue_changed.notify_all()
 
     def _process_inline(self, packet: dict[str, Any]) -> None:
         started = time.perf_counter()
@@ -364,6 +412,7 @@ class FlowWorkerPool:
         except Exception as exc:
             with self._lock:
                 self._jobs_failed += 1
+                self._record_recent_event(self._recent_failures)
                 self._last_error = type(exc).__name__
             logger.error(
                 "flow worker fallback failed error_type=%s", type(exc).__name__
@@ -398,16 +447,21 @@ class FlowWorkerPool:
         )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if all(state.queue.unfinished_tasks == 0 for state in self._workers):
-                return True
+            with self._lock:
+                if not self._queued_jobs and not self._active_flows:
+                    return True
             time.sleep(0.01)
-        return all(state.queue.unfinished_tasks == 0 for state in self._workers)
+        with self._lock:
+            return not self._queued_jobs and not self._active_flows
 
     def close(self, timeout_sec: float | None = None) -> bool:
         with self._lock:
             self._accepting = False
+            self._queue_changed.notify_all()
         drained = self.wait_until_drained(timeout_sec)
         self._stop.set()
+        with self._queue_changed:
+            self._queue_changed.notify_all()
         deadline = time.monotonic() + (
             self.shutdown_timeout_sec if timeout_sec is None else max(0.1, timeout_sec)
         )
@@ -417,13 +471,30 @@ class FlowWorkerPool:
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
         return drained
 
+    @staticmethod
+    def _record_recent_event(events: deque[tuple[int, int]]) -> None:
+        second = int(time.monotonic())
+        if events and events[-1][0] == second:
+            _, count = events.pop()
+            events.append((second, count + 1))
+        else:
+            events.append((second, 1))
+
     def stats(self) -> dict[str, Any]:
         with self._lock:
-            queue_depth = sum(state.queue.qsize() for state in self._workers)
+            cutoff = int(time.monotonic() - HEALTH_WINDOW_SEC)
+            for events in (self._recent_drops, self._recent_rejections, self._recent_failures):
+                while events and events[0][0] < cutoff:
+                    events.popleft()
+            recent_drops = sum(count for _, count in self._recent_drops)
+            recent_rejections = sum(count for _, count in self._recent_rejections)
+            recent_failures = sum(count for _, count in self._recent_failures)
+            queue_depth = self._queued_jobs
             active_workers = sum(
                 1 for state in self._workers if state.thread and state.thread.is_alive()
             )
             utilization = round(queue_depth / self.queue_max_total * 100.0, 2)
+            peak_utilization = utilization
             latencies = list(self._latencies_ms)
             pressure_reasons: list[str] = []
             if self.enabled and active_workers < self.worker_count:
@@ -432,11 +503,11 @@ class FlowWorkerPool:
                 pressure_reasons.append("flow_worker_queue_backlog")
             if utilization >= 80.0:
                 pressure_reasons.append("flow_worker_high_utilization")
-            if self._slow_jobs:
+            if _percentile(latencies, 0.95) >= self.slow_job_ms:
                 pressure_reasons.append("flow_worker_slow_jobs")
-            if self._jobs_failed:
+            if recent_failures:
                 pressure_reasons.append("flow_worker_job_failures")
-            if self._jobs_dropped or self._jobs_rejected:
+            if recent_drops or recent_rejections:
                 pressure_reasons.append("flow_worker_dropped_jobs")
 
             p95 = _percentile(latencies, 0.95)
@@ -444,8 +515,8 @@ class FlowWorkerPool:
             if self.enabled and (
                 active_workers < self.worker_count
                 or utilization >= 95.0
-                or self._jobs_failed >= self.error_threshold
-                or self._jobs_dropped >= self.error_threshold
+                or recent_failures >= self.error_threshold
+                or recent_drops >= self.error_threshold
                 or p95 >= self.slow_job_ms * 5
             ):
                 health = "critical"
@@ -459,8 +530,9 @@ class FlowWorkerPool:
                     {
                         "worker_id": state.worker_id,
                         "worker_alive": bool(state.thread and state.thread.is_alive()),
-                        "queue_depth": state.queue.qsize(),
-                        "queue_max": state.queue.maxsize,
+                        "queue_depth": 0,
+                        "busy": state.worker_id in self._active_by_worker,
+                        "queue_max": self.queue_max_total,
                         "processed_total": state.processed_total,
                         "failed_total": state.failed_total,
                         "dropped_total": state.dropped_total,
@@ -479,14 +551,28 @@ class FlowWorkerPool:
                 "worker_count": self.worker_count,
                 "active_workers": active_workers,
                 "queue_depth_total": queue_depth,
+                "high_water_mark": self._queue_high_water,
                 "queue_max_total": self.queue_max_total,
+                "queue_capacity_shared": True,
+                "scheduler": "fair_per_flow",
+                "drop_attribution": "shared_queue",
+                "unassigned_queue_depth": queue_depth,
+                "ready_flows": len(self._ready_flows),
+                "busy_workers": len(self._active_by_worker),
+                "queued_flows": len(self._flow_queues),
+                "largest_flow_backlog": max((len(items) for items in self._flow_queues.values()), default=0),
                 "utilization_percent": utilization,
+                "peak_worker_utilization_percent": round(peak_utilization, 2),
                 "overflow_policy": self.overflow_policy,
                 "jobs_received_total": self._jobs_received,
                 "jobs_processed_total": self._jobs_processed,
                 "jobs_failed_total": self._jobs_failed,
                 "jobs_dropped_total": self._jobs_dropped,
                 "jobs_rejected_total": self._jobs_rejected,
+                "jobs_dropped_recent": recent_drops,
+                "jobs_rejected_recent": recent_rejections,
+                "jobs_failed_recent": recent_failures,
+                "health_window_sec": HEALTH_WINDOW_SEC,
                 "unknown_flow_key_total": self._unknown_flow_keys,
                 "slow_jobs_total": self._slow_jobs,
                 "avg_processing_latency_ms": (

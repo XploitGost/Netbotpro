@@ -344,8 +344,6 @@ def export_alerts_pdf(save_path: str = "", alert_rows: list[dict] | None = None)
             "SELECT id, ts, src, dst, proto, attack_type as attack, score, detail FROM alerts ORDER BY id",
             conn,
         )
-    if df.empty:
-        return ""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     pdf = FPDF(format="A4")
     pdf.add_page()
@@ -357,6 +355,8 @@ def export_alerts_pdf(save_path: str = "", alert_rows: list[dict] | None = None)
         0, 6, f"Generated: {datetime.now().isoformat(timespec='seconds')}", ln=True
     )
     pdf.ln(3)
+    if df.empty:
+        pdf.cell(0, 8, "No alerts in this capture session.", ln=True)
     cols = ["ts", "src", "dst", "proto", "attack", "score"]
     col_w = [28, 36, 36, 12, 62, 12]
     pdf.set_font("Arial", "B", 9)

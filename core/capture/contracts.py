@@ -17,6 +17,8 @@ class CaptureInterface:
     label: str = ""
     is_up: bool = False
     recommended: bool = False
+    connection_name: str | None = None
+    connection_name_source: str | None = None
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "CaptureInterface":
@@ -29,6 +31,8 @@ class CaptureInterface:
             label=str(raw.get("label") or raw.get("name") or ""),
             is_up=bool(raw.get("is_up")),
             recommended=bool(raw.get("recommended")),
+            connection_name=str(raw.get("connection_name") or "").strip() or None,
+            connection_name_source=str(raw.get("connection_name_source") or "").strip() or None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -41,6 +45,8 @@ class CaptureInterface:
             "label": self.label,
             "is_up": self.is_up,
             "recommended": self.recommended,
+            "connection_name": self.connection_name,
+            "connection_name_source": self.connection_name_source,
         }
 
 

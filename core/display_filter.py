@@ -21,7 +21,7 @@ _ALIASES = {
     "tcp.flags.reset": "tcp.flags.reset",
     "udp.src_port": "sport",
     "udp.dst_port": "dport",
-    "dns.qry.name": "dns_query",
+    "dns.qry.name": "dns_qname",
     "dns.rcode": "dns_rcode",
     "http.host": "http_host",
     "http.method": "http_method",
@@ -46,14 +46,25 @@ def _tokens(expression: str) -> list[str]:
 
 
 def _value(row: dict[str, Any], field: str) -> Any:
+    if field.startswith('tcp.') and str(row.get('proto') or '').upper() != 'TCP':
+        return None
+    if field.startswith('udp.') and str(row.get('proto') or '').upper() != 'UDP':
+        return None
     if field in {"tcp.port", "udp.port"}:
         return [row.get("sport"), row.get("dport")]
     if field == "ip.addr":
         return [row.get("src"), row.get("dst")]
     if field.startswith("tcp.flags."):
         marker = {"syn": "S", "ack": "A", "reset": "R"}[field.rsplit(".", 1)[-1]]
-        return marker in str(row.get("flags") or "").upper()
+        flags = row.get('flags')
+        if type(flags) is int:
+            return bool(flags & {'S': 2, 'A': 16, 'R': 4}[marker])
+        return marker in str(flags or "").upper()
     key = _ALIASES.get(field, field)
+    if key == 'dns_qname':
+        return row.get('dns_qname') or row.get('dns_query')
+    if key == 'tls_sni':
+        return row.get('tls_sni') or row.get('sni')
     current: Any = row
     for part in key.split("."):
         current = current.get(part) if isinstance(current, dict) else None
@@ -61,6 +72,8 @@ def _value(row: dict[str, Any], field: str) -> Any:
 
 
 def _compare(actual: Any, operator: str, expected: str) -> bool:
+    if actual is None:
+        return False
     if isinstance(actual, list):
         return any(_compare(item, operator, expected) for item in actual)
     if operator in {">", ">=", "<", "<="}:
@@ -74,7 +87,7 @@ def _compare(actual: Any, operator: str, expected: str) -> bool:
             "<": left < right,
             "<=": left <= right,
         }[operator]
-    left, right = str(actual or "").lower(), str(expected).lower()
+    left, right = str(actual).lower(), str(expected).lower()
     return {
         "==": left == right,
         "!=": left != right,

@@ -99,7 +99,47 @@ class ServiceAttributionTests(unittest.TestCase):
         self.assertEqual(result["service_name"], "YouTube")
         self.assertIn("dns", result["attribution_sources"])
 
-    def test_dns_correlation_prefers_closest_observation(self):
+    def test_unknown_sni_is_exposed_as_destination_domain(self):
+        packet = {"src": "10.0.0.5", "dst": "203.0.113.8", "dport": 443,
+                  "tls_sni": "private.example.net", "app_protocol": "TLS"}
+        self.engine.enrich(packet)
+        self.assertEqual(packet["destination_domain"], "private.example.net")
+        self.assertEqual(packet["destination_domain_source"], "TLS SNI")
+        self.assertEqual(packet["service_domain"], "private.example.net")
+
+    def test_quic_sni_is_exposed_with_correct_evidence(self):
+        packet = {"src": "10.0.0.5", "dst": "203.0.113.8", "dport": 443,
+                  "quic_sni": "quic.example.net", "app_protocol": "QUIC"}
+        self.engine.enrich(packet)
+        self.assertEqual(packet["destination_domain"], "quic.example.net")
+        self.assertEqual(packet["destination_domain_source"], "QUIC SNI")
+
+    def test_dns_observation_after_packet_is_not_used(self):
+        self.engine.enrich({"src": "8.8.8.8", "dst": "10.0.0.5", "sport": 53,
+                            "dns_qname": "future.example.net", "dns_answer_ip": "203.0.113.9",
+                            "ts": "2026-07-15T10:02:00Z"})
+        earlier = {"src": "10.0.0.5", "dst": "203.0.113.9", "dport": 443,
+                   "ts": "2026-07-15T10:01:00Z"}
+        self.engine.enrich(earlier)
+        self.assertEqual(earlier["destination_domain"], "")
+
+    def test_dns_answer_correlates_only_with_answer_ip(self):
+        dns = {"src": "10.0.0.5", "dst": "8.8.8.8", "dport": 53,
+               "dns_qname": "private.example.net", "dns_answer_ips": ["203.0.113.9"],
+               "ts": "2026-07-15T10:00:00Z"}
+        self.engine.enrich(dns)
+        self.assertEqual(dns["destination_domain"], "")
+        connected = {"src": "10.0.0.5", "dst": "203.0.113.9", "dport": 443,
+                     "ts": "2026-07-15T10:01:00Z"}
+        self.engine.enrich(connected)
+        self.assertEqual(connected["destination_domain"], "private.example.net")
+        self.assertEqual(connected["destination_domain_source"], "DNS answer (correlated)")
+        unrelated = {"src": "10.0.0.5", "dst": "203.0.113.10", "dport": 443,
+                     "ts": "2026-07-15T10:01:00Z"}
+        self.engine.enrich(unrelated)
+        self.assertEqual(unrelated["destination_domain"], "")
+
+    def test_shared_ip_dns_domains_remain_ambiguous(self):
         for domain, timestamp in (
             ("github.com", "2026-07-15T10:00:00Z"),
             ("pypi.org", "2026-07-15T10:04:30Z"),
@@ -119,7 +159,26 @@ class ServiceAttributionTests(unittest.TestCase):
                 "ts": "2026-07-15T10:05:00Z",
             }
         ).to_dict()
-        self.assertEqual(result["service_name"], "PyPI")
+        self.assertTrue(result["is_unknown"])
+        packet = {"dst": "203.0.113.45", "dport": 443,
+                  "ts": "2026-07-15T10:05:00Z"}
+        self.engine.enrich(packet)
+        self.assertEqual(packet["destination_domain"], "")
+        self.assertEqual(packet["destination_domain_source"], "DNS answer (ambiguous)")
+        self.assertEqual(set(packet["destination_domain_candidates"]), {"github.com", "pypi.org"})
+
+    def test_dns_answers_do_not_cross_local_clients(self):
+        self.engine.enrich({"src": "8.8.8.8", "dst": "10.0.0.5", "sport": 53,
+                            "dns_qname": "private.example.net", "dns_answer_ip": "203.0.113.9",
+                            "ts": "2026-07-15T10:00:00Z"})
+        other = {"src": "10.0.0.6", "dst": "203.0.113.9", "dport": 443,
+                 "ts": "2026-07-15T10:01:00Z"}
+        self.engine.enrich(other)
+        self.assertEqual(other["destination_domain"], "")
+        own = {"src": "10.0.0.5", "dst": "203.0.113.9", "dport": 443,
+               "ts": "2026-07-15T10:01:00Z"}
+        self.engine.enrich(own)
+        self.assertEqual(own["destination_domain"], "private.example.net")
 
     def test_visible_quic_server_name_reuses_safe_sni_matching(self):
         result = self.result(tls_sni="", quic_server_name="googlevideo.com")

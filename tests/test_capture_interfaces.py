@@ -51,6 +51,24 @@ FAKE_MIXED_INTERFACES = [
 
 
 class CaptureInterfacesTests(unittest.TestCase):
+    def test_inventory_reuses_one_snapshot_for_selection_and_label(self):
+        items = [dict(item) for item in FAKE_INTERFACES]
+        with patch('core.netbotpro_sniffer_core.interfaces._scapy_interfaces', return_value=items) as scan, \
+                patch('core.netbotpro_sniffer_core.interfaces._detect_primary_local_ip', return_value='192.168.100.4'), \
+                patch('core.netbotpro_sniffer_core.interfaces._active_openvpn_provider', return_value=None):
+            result = list_capture_interfaces()
+        scan.assert_called_once()
+        self.assertEqual(result['recommended'], FAKE_INTERFACES[0]['value'])
+        self.assertEqual(result['recommended_label'], 'Ethernet')
+
+    def test_empty_inventory_is_not_reloaded_during_selection(self):
+        with patch('core.netbotpro_sniffer_core.interfaces._scapy_interfaces', return_value=[]) as scan, \
+                patch('core.netbotpro_sniffer_core.interfaces._active_openvpn_provider', return_value=None):
+            result = list_capture_interfaces()
+        scan.assert_called_once()
+        self.assertEqual(result['items'], [])
+        self.assertIsNone(result['recommended'])
+
     @patch("core.netbotpro_sniffer_core.interfaces._scapy_interfaces", return_value=FAKE_INTERFACES)
     @patch("core.netbotpro_sniffer_core.interfaces._detect_primary_local_ip", return_value="192.168.100.4")
     def test_recommended_interface_prefers_scapy_match(self, *_mocks):

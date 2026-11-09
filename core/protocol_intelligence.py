@@ -67,11 +67,23 @@ def _port(packet: dict[str, Any]) -> int:
         return 0
 
 
-def _signature_protocol(packet: dict[str, Any]) -> str:
-    payload = _text(packet.get("payload_ascii")).upper()
+def _signature_protocol(packet: dict[str, Any], payload_bytes: bytes | None = None) -> str:
+    if payload_bytes is None:
+        try:
+            raw = bytes.fromhex(_text(packet.get("payload_hex"))[:2048])
+        except ValueError:
+            raw = b""
+    else:
+        raw = payload_bytes[:1024]
+    if len(raw) >= 5 and raw[0] in {20, 21, 22, 23} and raw[1] == 3 and raw[2] <= 4 and 0 < int.from_bytes(raw[3:5], 'big') <= 18432:
+        return "TLS"
+    if raw.startswith((b"\xffSMB", b"\xfeSMB")):
+        return "SMB"
+    payload = (_text(packet.get("payload_ascii")) if payload_bytes is None
+               else payload_bytes.decode("latin-1").strip()).upper()
     if payload.startswith("SSH-"):
         return "SSH"
-    if payload.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "HTTP/")):
+    if payload.startswith(("GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "CONNECT ", "HTTP/", "PRI * HTTP/2.0")):
         return "HTTP"
     if payload.startswith(("220 ", "EHLO ", "HELO ")):
         return "SMTP"
@@ -101,6 +113,10 @@ def _normalize_protocol(value: Any) -> str:
         "IMAP",
         "POP3",
         "ICMP",
+        "QUIC", "WIREGUARD", "OPENVPN", "IPSEC NAT-T", "IKE / ISAKMP",
+        "STUN / TURN", "L2TP", "NTP", "FTP", "FTP-DATA", "SIP", "SIPS",
+        "RTP", "MYSQL", "MSSQL", "POSTGRES", "REDIS", "LDAP", "LDAPS",
+        "KERBEROS", "MSRPC", "VNC", "ORACLE", "ELASTIC", "NNTP", "ARP", "ICMPV6",
     }:
         return protocol
     return ""
@@ -156,7 +172,10 @@ def _safe_metadata(packet: dict[str, Any], protocol: str, port: int) -> dict[str
     return {key: value for key, value in metadata.items() if value not in (None, "")}
 
 
-def analyze_protocol(packet: dict[str, Any]) -> dict[str, Any]:
+def analyze_protocol(
+    packet: dict[str, Any], *, include_metadata: bool = True,
+    payload_bytes: bytes | None = None,
+) -> dict[str, Any]:
     """Return metadata-safe protocol intelligence without decryption."""
 
     port = _port(packet)
@@ -176,26 +195,30 @@ def analyze_protocol(packet: dict[str, Any]) -> dict[str, Any]:
         ):
             protocol, basis = "TLS", "visible TLS handshake metadata"
         else:
-            signature = _signature_protocol(packet)
+            signature = _signature_protocol(packet, payload_bytes)
             if signature:
                 protocol, basis = signature, "metadata-safe payload signature"
             elif port in _PORT_PROTOCOLS:
                 protocol, basis = _PORT_PROTOCOLS[port], f"service port {port}"
             elif transport == "ICMP":
                 protocol, basis = "ICMP", "network transport"
+            elif transport in {"ICMPV6", "ARP", "ESP", "AH", "GRE"}:
+                protocol, basis = transport, "network transport"
             else:
                 protocol, basis = "UNKNOWN", "no recognized metadata signature"
 
     return {
         "app_protocol": protocol,
-        "transport": transport if transport in {"TCP", "UDP", "ICMP"} else "OTHER",
+        "display_protocol": protocol if protocol != "UNKNOWN" else transport,
+        "application_identified": protocol != "UNKNOWN",
+        "transport": transport if transport in {"TCP", "UDP", "ICMP", "ICMPV6", "ARP", "ESP", "AH", "GRE"} else "OTHER",
         "confidence": "high"
-        if basis in {"decoded DNS metadata", "decoded HTTP metadata", "visible TLS handshake metadata"}
+        if basis in {"decoded DNS metadata", "decoded HTTP metadata", "visible TLS handshake metadata", "metadata-safe payload signature"}
         else "medium"
         if protocol != "UNKNOWN"
         else "low",
         "detection_basis": basis,
-        "metadata": _safe_metadata(packet, protocol, port),
+        "metadata": _safe_metadata(packet, protocol, port) if include_metadata else {},
     }
 
 

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {queueSnapshot,pressureLabel} from './queueModel.js';
+assert.equal(pressureLabel(0),'0%');
+assert.equal(pressureLabel(0.05),'<0.1%');
+assert.equal(queueSnapshot({}).label,'-');
+assert.equal(queueSnapshot({packet_queue:{current_depth:1,max_size:2000}}).label,'<0.1%');
+assert.equal(queueSnapshot({packet_queue:{current_depth:0,max_size:2000,dropped_total:2}}).health,'Degraded');
+const shared=queueSnapshot({flow_worker_pool:{enabled:true,queue_depth_total:100,queue_max_total:2000,per_worker:[{queue_depth:100,queue_max:100}]}});
+assert.equal(shared.pressure,5);
+assert.equal(queueSnapshot({flow_worker_pool:{enabled:false,utilization_percent:100}}).pressure,null);
+const snapshot=queueSnapshot({persistence:{queue_size:25,max_size:100,high_water_mark:70},websocket:{client_queue_depth_max:90,client_queue_max:100,dropped_for_slow_client_total:3}});
+assert.equal(snapshot.pressure,90);
+assert.equal(snapshot.rows[0].peak,70);
+assert.equal(snapshot.rows[1].dropped,3);
+assert.equal(queueSnapshot({packet_queue:{current_depth:null,max_size:100}}).pressure,null);
+console.log('Queue model: 10 checks passed');

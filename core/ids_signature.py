@@ -11,12 +11,25 @@ Rule types:
 """
 
 from __future__ import annotations
+from core.detection_clock import detection_time
+from core.scan_response_context import ScanResponseContext
 
 import json
 import os
-from collections import defaultdict
+import threading
+from functools import wraps
+from collections import defaultdict, deque, OrderedDict
+from bisect import insort
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def _with_state_lock(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._state_lock:
+            return method(self, *args, **kwargs)
+    return locked
 
 
 class SignatureIDS:
@@ -27,6 +40,14 @@ class SignatureIDS:
     """
 
     def __init__(self) -> None:
+        # Cleanup and packet updates must be atomic across flow workers.
+        self._state_lock = threading.RLock()
+        self._last_cleanup: Optional[datetime] = None
+        self._scan_responses = ScanResponseContext()
+        self._scan_reports = OrderedDict()
+        self._scan_reports_max = 8192
+        self._scan_reports_coalesced = 0
+        self._scan_report_evictions = 0
         # (src, dst) -> list[(ts, dport)]
         self.port_scan_map: Dict[Tuple[str, str], List[Tuple[datetime, int]]] = (
             defaultdict(list)
@@ -34,7 +55,7 @@ class SignatureIDS:
         # (src, dst) -> list[ts]
         self.syn_counter: Dict[Tuple[str, str], List[datetime]] = defaultdict(list)
         # src -> list[ts]
-        self.flood_counter: Dict[str, List[datetime]] = defaultdict(list)
+        self.flood_counter: Dict[str, deque[datetime]] = defaultdict(deque)
 
         # Default parameters; can be overridden from settings_manager
         self.port_scan_threshold: int = 3
@@ -60,6 +81,7 @@ class SignatureIDS:
     # ------------------------------------------------------------------
     # Parameter configuration
     # ------------------------------------------------------------------
+    @_with_state_lock
     def update_params(
         self,
         port_scan_threshold: Optional[int] = None,
@@ -73,6 +95,8 @@ class SignatureIDS:
             self.port_scan_threshold = int(port_scan_threshold)
         if port_scan_window_sec is not None:
             self.port_scan_window_sec = int(port_scan_window_sec)
+        if port_scan_threshold is not None or port_scan_window_sec is not None:
+            self._scan_reports.clear()
         if syn_threshold is not None:
             self.syn_threshold = int(syn_threshold)
         if syn_window_sec is not None:
@@ -85,6 +109,7 @@ class SignatureIDS:
     # ------------------------------------------------------------------
     # Custom rules: Rule Editor
     # ------------------------------------------------------------------
+    @_with_state_lock
     def load_rules_from_file(self, path: Optional[str] = None) -> None:
         path = path or self.rules_path
         try:
@@ -99,6 +124,7 @@ class SignatureIDS:
             self.custom_rules = []
             self.custom_state.clear()
 
+    @_with_state_lock
     def save_rules_to_file(self, path: Optional[str] = None) -> None:
         path = path or self.rules_path
         try:
@@ -108,9 +134,11 @@ class SignatureIDS:
             # ignore errors
             pass
 
+    @_with_state_lock
     def get_custom_rules(self) -> List[Dict[str, Any]]:
         return list(self.custom_rules)
 
+    @_with_state_lock
     def set_custom_rules(self, rules: List[Dict[str, Any]]) -> None:
         self.custom_rules = list(rules or [])
         self.custom_state.clear()
@@ -119,13 +147,36 @@ class SignatureIDS:
     # ------------------------------------------------------------------
     # Core analysis
     # ------------------------------------------------------------------
+    @_with_state_lock
+    def reset_runtime(self) -> None:
+        self.port_scan_map.clear()
+        self.syn_counter.clear()
+        self.flood_counter.clear()
+        self.custom_state.clear()
+        self._scan_responses.reset()
+        self._scan_reports.clear()
+        self._scan_reports_coalesced = 0
+        self._scan_report_evictions = 0
+        self._last_cleanup = None
+
+    @_with_state_lock
+    def port_scan_stats(self) -> Dict[str, Any]:
+        return {**self._scan_responses.stats(),
+                'tracked_reports': len(self._scan_reports),
+                'max_reports': self._scan_reports_max,
+                'reports_coalesced_total': self._scan_reports_coalesced,
+                'report_capacity_evictions_total': self._scan_report_evictions}
+
+    @_with_state_lock
     def _cleanup(self, now: datetime) -> None:
+        self._scan_responses.expire(now)
         # Port scan
         cutoff_ps = now - timedelta(seconds=self.port_scan_window_sec)
         for key, items in list(self.port_scan_map.items()):
             items[:] = [x for x in items if x[0] >= cutoff_ps]
             if not items:
                 del self.port_scan_map[key]
+                self._scan_reports.pop(key, None)
 
         # SYN
         cutoff_syn = now - timedelta(seconds=self.syn_window_sec)
@@ -137,7 +188,8 @@ class SignatureIDS:
         # Flood
         cutoff_flood = now - timedelta(seconds=self.flood_window_sec)
         for src, items in list(self.flood_counter.items()):
-            items[:] = [t for t in items if t >= cutoff_flood]
+            while items and items[0] < cutoff_flood:
+                items.popleft()
             if not items:
                 del self.flood_counter[src]
 
@@ -146,6 +198,7 @@ class SignatureIDS:
             if not items:
                 del self.custom_state[key]
 
+    @_with_state_lock
     def analyze_packet(self, meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Input meta must contain at least:
@@ -153,14 +206,24 @@ class SignatureIDS:
         Returns:
           alert dict or None
         """
-        now = datetime.now(timezone.utc)
-        self._cleanup(now)
+        now = detection_time(meta, datetime.now(timezone.utc))
+        if (self._last_cleanup is None or now < self._last_cleanup
+                or (now - self._last_cleanup).total_seconds() >= 1):
+            self._cleanup(now)
+            self._last_cleanup = now
 
         src = meta.get("src")
         dst = meta.get("dst")
         proto = meta.get("proto")
         dport = meta.get("dport")
         flags = meta.get("flags") or ""
+        if type(flags) is int and 0 <= flags <= 511:
+            flags = ''.join(letter for bit, letter in enumerate('FSRPAUECN') if flags & (1 << bit))
+        elif type(flags) is int:
+            flags = ''
+        else:
+            flags = str(flags).upper()
+        correlated_response = self._scan_responses.observe(meta, now, flags)
         length = int(
             meta.get("length") or 0
         )  # فعلاً استفاده نمی‌کنیم ولی برای آینده خوبه
@@ -170,7 +233,13 @@ class SignatureIDS:
         # ---------------- Generic Flood detection ----------------
         if src:
             arr = self.flood_counter[src]
-            arr.append(now)
+            cutoff_flood = now - timedelta(seconds=self.flood_window_sec)
+            while arr and arr[0] < cutoff_flood:
+                arr.popleft()
+            if arr and now < arr[-1]:
+                insort(arr, now)
+            else:
+                arr.append(now)
             if len(arr) >= self.flood_threshold:
                 alert = {
                     "attack_type": "Generic Flood / High Rate",
@@ -188,6 +257,7 @@ class SignatureIDS:
             and dst
             and dport is not None
             and proto in ("TCP", "UDP")
+            and not correlated_response
         ):
             key = (src, dst)
             arr2 = self.port_scan_map[key]
@@ -196,14 +266,32 @@ class SignatureIDS:
             arr2[:] = [(t, p) for (t, p) in arr2 if t >= cutoff]
             unique_ports = sorted({p for (_, p) in arr2})
             if len(unique_ports) >= self.port_scan_threshold:
-                alert = {
-                    "attack_type": "Port Scan / Nmap-like",
-                    "detail": (
-                        f"{src} → {dst} scanned ports {unique_ports} "
-                        f"in about {self.port_scan_window_sec} seconds."
-                    ),
-                    "score": float(len(unique_ports)),
-                }
+                previous = self._scan_reports.get(key)
+                emit = (previous is None or now < previous[0]
+                        or len(unique_ports) > previous[1]
+                        or (now - previous[0]).total_seconds() >= max(0, self.port_scan_window_sec))
+                if not emit:
+                    self._scan_reports[key] = (previous[0], previous[1], previous[2] + 1)
+                    self._scan_reports.move_to_end(key)
+                    self._scan_reports_coalesced += 1
+                else:
+                    occurrences = (previous[2] if previous else 0) + 1
+                    self._scan_reports[key] = (now, len(unique_ports), 0)
+                    self._scan_reports.move_to_end(key)
+                    while len(self._scan_reports) > self._scan_reports_max:
+                        self._scan_reports.popitem(last=False)
+                        self._scan_report_evictions += 1
+                    alert = {
+                        "attack_type": "Port Scan / Nmap-like",
+                        "detail": (
+                            f"{src} → {dst} scanned ports {unique_ports} "
+                            f"in about {self.port_scan_window_sec} seconds."
+                        ),
+                        "score": float(len(unique_ports)),
+                        "coalesced_occurrences": occurrences,
+                    }
+            else:
+                self._scan_reports.pop(key, None)
 
         # ---------------- SYN Flood detection ----------------
         if (
@@ -238,6 +326,7 @@ class SignatureIDS:
     # ------------------------------------------------------------------
     # Custom rules engine
     # ------------------------------------------------------------------
+    @_with_state_lock
     def _check_custom_rules(
         self,
         meta: Dict[str, Any],

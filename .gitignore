@@ -9,6 +9,9 @@ htmlcov/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
+!.env.*.example
 .runtime/
 benchmark_results_*.json
 benchmark_summary_*.md
@@ -60,3 +63,13 @@ logs/
 
 .DS_Store
 Thumbs.db
+
+# Local capture/build artifacts must never become source history.
+core/native-redaction-build.json
+*.pcap
+*.pcapng
+*.dmp
+*.before-*
+frontend/desktop-reference/.baseline/
+frontend/desktop-reference/preview/
+frontend/desktop-reference/release/

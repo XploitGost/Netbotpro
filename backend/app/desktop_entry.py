@@ -6,6 +6,47 @@ import sys
 
 CAPTURE_BACKEND_PROBE_ARG = "--capture-backend-probe"
 CAPTURE_DISCOVERY_ARG = "--capture-discovery-json"
+EXPORT_PROBE_ARG = "--export-runtime-probe"
+ML_PROBE_ARG = "--ml-runtime-probe"
+
+
+def _probe_ml_runtime() -> int:
+    from core.ids_ml import MLIDS
+    model = MLIDS(sample_rate=1, min_train_size=50)
+    for index in range(55):
+        model.analyze_packet({"src": "10.0.0.1", "dst": "8.8.8.8", "proto": "TCP",
+                              "sport": 51000, "dport": 443, "length": 120 + index, "ttl": 64})
+    if not model._trained or not model._ml_available:
+        raise RuntimeError("Packaged ML training failed")
+    print(json.dumps({"ml_available": True, "trained": True, "synthetic_samples": 55}))
+    return 0
+
+
+def _probe_export_runtime() -> int:
+    import tempfile
+    from pathlib import Path
+    import zipfile
+    with tempfile.TemporaryDirectory() as directory:
+        os.environ["NETBOT_DATA_DIR"] = directory
+        os.environ["NETBOT_LOG_DIR"] = directory
+        from backend.app.services import export_service
+        export_service.LOG_DIR = Path(directory)
+        service = export_service.ExportService()
+        results = {}
+        for kind in ("csv", "xlsx", "pdf", "html", "zip"):
+            result = service.export_session(kind, [], [], [])
+            path = Path(directory) / result["path"]
+            if not path.exists() or not path.stat().st_size:
+                raise RuntimeError("Empty export: " + kind)
+            if kind in ("xlsx", "zip"):
+                with zipfile.ZipFile(path) as archive:
+                    if archive.testzip() is not None:
+                        raise RuntimeError("Corrupt export: " + kind)
+            if kind == "pdf" and not path.read_bytes().startswith(b"%PDF"):
+                raise RuntimeError("Invalid PDF")
+            results[kind] = "ok"
+        print(json.dumps(results))
+    return 0
 
 
 def _trace(message: str) -> None:
@@ -40,6 +81,10 @@ def _probe_capture_backend() -> int:
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
     _trace("entrypoint starting")
+    if ML_PROBE_ARG in argv:
+        raise SystemExit(_probe_ml_runtime())
+    if EXPORT_PROBE_ARG in argv:
+        raise SystemExit(_probe_export_runtime())
     if CAPTURE_BACKEND_PROBE_ARG in argv:
         raise SystemExit(_probe_capture_backend())
     if CAPTURE_DISCOVERY_ARG in argv:
@@ -58,4 +103,6 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

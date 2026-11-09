@@ -171,6 +171,10 @@ class SystemCaptureProvider(CaptureProvider):
         return self._session_factory(packet_callback)
 
     def _default_session_factory(self, packet_callback: PacketCallback) -> CaptureSession:
+        if os.environ.get('NETBOT_CAPTURE_PROCESS', '') == '1' or os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1':
+            from core.capture.process_session import ProcessCaptureSession
+            journal = os.environ.get('NETBOT_CAPTURE_JOURNAL_PATH', '.runtime/capture-journal.db') if os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1' else None
+            return ProcessCaptureSession(packet_callback, journal_path=journal)
         return NetSniffer(
             packet_callback,
             iface_resolver=self._recommended_interface_for_runtime,

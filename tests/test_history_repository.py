@@ -255,6 +255,25 @@ class _AlertCorrelationSnifferService:
 
 
 class MemoryHistoryRepositoryTests(unittest.TestCase):
+    def test_ping_search_uses_read_only_scan_and_copies_selected_rows(self):
+        class _SnapshotSniffer:
+            packet = {"id": "ping", "src": "192.168.100.8", "dst": "8.8.8.8",
+                      "proto": "ICMP", "remote_ip": "8.8.8.8", "meta": {"type": 8}}
+
+            def recent_packets(self):
+                raise AssertionError("Full packet copy should not be used for list queries")
+
+            def recent_packet_refs(self):
+                return [self.packet]
+
+        sniffer = _SnapshotSniffer()
+        result = MemoryHistoryRepository(sniffer).list_packets(
+            PacketListQuery(text="8.8.8.8", proto="ICMP", limit=25)
+        )
+        self.assertEqual(result["total"], 1)
+        result["items"][0]["meta"]["type"] = 0
+        self.assertEqual(sniffer.packet["meta"]["type"], 8)
+
     def test_memory_detail_lookup_uses_stable_packet_id(self):
         repository = MemoryHistoryRepository(_FakeSnifferService())
 

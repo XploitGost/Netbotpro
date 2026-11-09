@@ -184,9 +184,9 @@ class EventAggregator:
     def _append_buffer(
         self, category: str, message: dict[str, Any], max_size: int
     ) -> None:
-        self._record_received()
         should_flush = False
         with self._lock:
+            self._events_received_total += 1
             buffer = self._buffer_for(category)
             buffer.append(message)
             should_flush = len(buffer) >= max_size
@@ -196,8 +196,8 @@ class EventAggregator:
         self._schedule(category)
 
     def _coalesce(self, category: str, message: dict[str, Any]) -> None:
-        self._record_received()
         with self._lock:
+            self._events_received_total += 1
             if category == "dashboard":
                 if self._dashboard_summary is not None:
                     self._events_coalesced_total += 1
@@ -260,7 +260,7 @@ class EventAggregator:
             timer = threading.Timer(delay, lambda: self._flush(category))
             timer.daemon = True
             self._timers[category] = timer
-            timer.start()
+        timer.start()
 
     def _delay_for(self, category: str) -> int:
         if category == "packet":

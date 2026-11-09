@@ -71,13 +71,13 @@ def dissect_packet(packet: dict[str, Any], *, capture_mode: str = "metadata", re
             _field("Protocol", "ip.protocol", proto),
             _field("Traffic Class", "ipv6.traffic_class", packet.get("traffic_class")),
             _field("Flow Label", "ipv6.flow_label", packet.get("flow_label")),
-            _field("Flags", "ip.flags", packet.get("ip_flags") or packet.get("flags")),
-            _field("Fragment Offset", "ip.fragment_offset", packet.get("fragment_offset") or 0),
+            _field("Flags", "ip.flags", packet.get("ip_flags")),
+            _field("Fragment Offset", "ip.fragment_offset", packet.get("fragment_offset")),
         ]))
     if proto in {"TCP", "UDP", "ICMP"}:
         fields = [_field("Source Port", f"{proto.lower()}.src_port", packet.get("sport")), _field("Destination Port", f"{proto.lower()}.dst_port", packet.get("dport"))]
         if proto == "TCP":
-            fields += [_field("Flags", "tcp.flags", packet.get("flags")), _field("Sequence", "tcp.seq", packet.get("seq")), _field("Acknowledgment", "tcp.ack", packet.get("ack")), _field("Window", "tcp.window", packet.get("window")), _field("Payload Length", "tcp.payload_length", packet.get("payload_length") or 0)]
+            fields += [_field("Flags", "tcp.flags", packet.get("flags")), _field("Sequence", "tcp.seq", packet.get("seq")), _field("Acknowledgment", "tcp.ack", packet.get("ack")), _field("Window", "tcp.window", packet.get("window")), _field("Header Length", "tcp.header_length", packet.get("tcp_header_length")), _field("MSS", "tcp.mss", packet.get("mss")), _field("Payload Length", "tcp.payload_length", packet.get("payload_length"))]
         elif proto == "UDP":
             fields += [_field("Length", "udp.length", packet.get("udp_length") or packet.get("length"))]
         else:

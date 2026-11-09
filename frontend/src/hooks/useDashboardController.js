@@ -139,6 +139,17 @@ function matchesFocusedTarget(row, focusedTarget) {
   return String(row?.src || "") === focusedTarget.ip || String(row?.dst || "") === focusedTarget.ip;
 }
 
+function matchesLivePacketQuery(packet, query) {
+  if (query.src && !String(packet.src || "").toLowerCase().includes(query.src.toLowerCase())) return false;
+  if (query.dst && !String(packet.dst || "").toLowerCase().includes(query.dst.toLowerCase())) return false;
+  if (query.proto && ![packet.proto, packet.app_protocol].join(" ").toLowerCase().includes(query.proto.toLowerCase())) return false;
+  if (query.process && ![packet.process_name, packet.parent_process_name, packet.executable_path].join(" ").toLowerCase().includes(query.process.toLowerCase())) return false;
+  if (query.pid && String(packet.pid || "").trim() !== String(query.pid)) return false;
+  if (query.only_alerts && !packet.is_alert) return false;
+  if (query.text && ![packet.src, packet.dst, packet.summary, packet.org, packet.country, packet.country_code, packet.remote_ip, packet.app_protocol, packet.l7, packet.dns_qname, packet.destination_domain, ...(packet.destination_domain_candidates||[]), packet.http_host, packet.http_path, packet.sni, packet.protocol_basis, packet.protocol_notes, packet.process_name, packet.parent_process_name, packet.executable_path].join(" ").toLowerCase().includes(query.text.toLowerCase())) return false;
+  return true;
+}
+
 function getPacketId(packet, index, offset = 0) {
   return String(packet?.id ?? offset + index);
 }
@@ -355,8 +366,9 @@ export function useDashboardController() {
         setPackets(dashboardData.recent_packets || []);
         setAlerts(dashboardData.recent_alerts || []);
         setTimeline(seedTimeline(dashboardData.recent_packets || [], dashboardData.recent_alerts || []));
-        setPacketMeta({ total: dashboardData.state?.packet_count || 0, source: "memory", offset: 0, limit: PAGE_SIZE });
-        setAlertMeta({ total: dashboardData.state?.total_alerts || 0, source: "memory", offset: 0, limit: PAGE_SIZE });
+        const retained = dashboardData.observability?.live_ring_buffer?.categories;
+        setPacketMeta({ total: retained?.packet?.records ?? dashboardData.state?.packet_count ?? 0, source: "memory", offset: 0, limit: PAGE_SIZE });
+        setAlertMeta({ total: retained?.alert?.records ?? dashboardData.state?.total_alerts ?? 0, source: "memory", offset: 0, limit: PAGE_SIZE });
         const interfaceItems = interfacesData.items || [];
         const validValues = new Set(interfaceItems.map((item) => item.value));
         const nextIface = validValues.has(settingsData.iface) ? settingsData.iface : "iface=default";
@@ -615,19 +627,25 @@ export function useDashboardController() {
       setSelectedPacketId(packetId);
       setSelectedPacketContext(null);
       const cached = readDetailCache(packetDetailCacheRef, packetId);
-      if (!cached) {
-        setLoading("packetDetail", true);
-      }
-      const [detail, context] = cached || await Promise.all([api.getPacketDetail(packetId), api.getPacketContext(packetId).catch(() => null)]);
+      setSelectedPacket(cached?.[0] || packet);
+      setLoading("packetDetail", !cached);
+      const detail = cached?.[0] || await api.getPacketDetail(packetId);
       if (packetDetailRequestRef.current !== requestId) {
         return;
       }
-      if (!cached) {
-        writeDetailCache(packetDetailCacheRef, packetId, [detail, context]);
-      }
       setSelectedPacket(detail);
-      setSelectedPacketContext(context);
+      setLoading("packetDetail", false);
       setInspectionPinned((current) => (current.kind === "packet" ? { kind: "packet", id: packetId } : current));
+      if (cached) {
+        setSelectedPacketContext(cached[1]);
+      } else {
+        writeDetailCache(packetDetailCacheRef, packetId, [detail, null]);
+        api.getPacketContext(packetId).then((context) => {
+          if (packetDetailRequestRef.current !== requestId) return;
+          setSelectedPacketContext(context);
+          writeDetailCache(packetDetailCacheRef, packetId, [detail, context]);
+        }).catch(() => {});
+      }
     } catch (err) {
       if (packetDetailRequestRef.current === requestId) {
         setError(normalizeErrorMessage(err, "Unable to load packet detail"));
@@ -648,18 +666,24 @@ export function useDashboardController() {
       setSelectedAlertId(alertId);
       setSelectedAlertContext(null);
       const cached = readDetailCache(alertDetailCacheRef, alertId);
-      if (!cached) {
-        setLoading("alertDetail", true);
-      }
-      const [detail, context] = cached || await Promise.all([api.getAlertDetail(alertId), api.getAlertContext(alertId).catch(() => null)]);
+      setSelectedAlert(cached?.[0] || alert);
+      setLoading("alertDetail", !cached);
+      const detail = cached?.[0] || await api.getAlertDetail(alertId);
       if (alertDetailRequestRef.current !== requestId) {
         return;
       }
-      if (!cached) {
-        writeDetailCache(alertDetailCacheRef, alertId, [detail, context]);
-      }
       setSelectedAlert(detail);
-      setSelectedAlertContext(context);
+      setLoading("alertDetail", false);
+      if (cached) {
+        setSelectedAlertContext(cached[1]);
+      } else {
+        writeDetailCache(alertDetailCacheRef, alertId, [detail, null]);
+        api.getAlertContext(alertId).then((context) => {
+          if (alertDetailRequestRef.current !== requestId) return;
+          setSelectedAlertContext(context);
+          writeDetailCache(alertDetailCacheRef, alertId, [detail, context]);
+        }).catch(() => {});
+      }
       setInspectionPinned((current) => (current.kind === "alert" ? { kind: "alert", id: alertId } : current));
     } catch (err) {
       if (alertDetailRequestRef.current === requestId) {
@@ -690,19 +714,25 @@ export function useDashboardController() {
       setSelectedPacketId(targetId);
       setSelectedPacketContext(null);
       const cached = readDetailCache(packetDetailCacheRef, targetId);
-      if (!cached) {
-        setLoading("packetDetail", true);
-      }
-      const [detail, context] = cached || await Promise.all([api.getPacketDetail(targetId), api.getPacketContext(targetId).catch(() => null)]);
+      setSelectedPacket(cached?.[0] || null);
+      setLoading("packetDetail", !cached);
+      const detail = cached?.[0] || await api.getPacketDetail(targetId);
       if (packetDetailRequestRef.current !== requestId) {
         return;
       }
-      if (!cached) {
-        writeDetailCache(packetDetailCacheRef, targetId, [detail, context]);
-      }
       setSelectedPacket(detail);
-      setSelectedPacketContext(context);
+      setLoading("packetDetail", false);
       setInspectionPinned((current) => (current.kind === "packet" ? { kind: "packet", id: targetId } : current));
+      if (cached) {
+        setSelectedPacketContext(cached[1]);
+      } else {
+        writeDetailCache(packetDetailCacheRef, targetId, [detail, null]);
+        api.getPacketContext(targetId).then((context) => {
+          if (packetDetailRequestRef.current !== requestId) return;
+          setSelectedPacketContext(context);
+          writeDetailCache(packetDetailCacheRef, targetId, [detail, context]);
+        }).catch(() => {});
+      }
     } catch (err) {
       if (packetDetailRequestRef.current === requestId) {
         setError(normalizeErrorMessage(err, "Unable to open packet detail"));
@@ -1110,6 +1140,7 @@ export function useDashboardController() {
   async function paginatePackets(direction) {
     const nextOffset = Math.max(0, packetMeta.offset + direction * PAGE_SIZE);
     if (nextOffset >= packetMeta.total && direction > 0) return;
+    if (nextOffset > 0) setLiveFollow(false);
     try {
       await loadPacketHistory(packetQuery, nextOffset);
     } catch (err) {
@@ -1145,8 +1176,14 @@ export function useDashboardController() {
     onPacketsBatch: (messages) => {
       clearHistoryCaches();
       setTimeline((current) => appendBatchToTimeline(current, "packet", messages));
-      setPackets((current) => (liveFollow && packetOffsetRef.current === 0 ? [...messages.map((message) => message.payload), ...current].slice(0, PAGE_SIZE) : current));
-      setPacketMeta((current) => ({ ...current, total: Math.max(current.total + messages.length, messages.length) }));
+      const matching = messages.map((message) => message.payload).filter((packet) => matchesLivePacketQuery(packet, packetQuery));
+      if (liveFollow && packetOffsetRef.current === 0 && matching.length) {
+        setPackets((current) => [...matching, ...current].slice(0, PAGE_SIZE));
+      }
+      if (matching.length) {
+        const capacity = observability.live_ring_buffer?.categories?.packet?.capacity;
+        setPacketMeta((current) => ({ ...current, total: capacity ? Math.min(current.total + matching.length, capacity) : current.total + matching.length }));
+      }
       setDashboard((current) => {
         if (!current) return current;
         const nextState = { ...(current.state || {}) };
@@ -1159,7 +1196,8 @@ export function useDashboardController() {
       clearHistoryCaches();
       setTimeline((current) => appendBatchToTimeline(current, "alert", messages));
       setAlerts((current) => (liveFollow && alertOffsetRef.current === 0 ? [...messages.map((message) => message.payload), ...current].slice(0, PAGE_SIZE) : current));
-      setAlertMeta((current) => ({ ...current, total: Math.max(current.total + messages.length, messages.length) }));
+      const alertCapacity = observability.live_ring_buffer?.categories?.alert?.capacity;
+      setAlertMeta((current) => ({ ...current, total: alertCapacity ? Math.min(current.total + messages.length, alertCapacity) : current.total + messages.length }));
       setDashboard((current) => {
         if (!current) return current;
         const nextState = { ...(current.state || {}) };

@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -26,16 +27,66 @@ class FlowService:
         engine: FlowEngine | None = None,
         db_path: str | Path | None = None,
         batch_persistence: bool = False,
+        persistent_writer: bool = False,
+        memory_compaction: bool | None = None,
     ) -> None:
         self.engine = engine or FlowEngine()
         self.db_path = Path(
             db_path or os.environ.get("NETBOT_FLOW_DB_PATH", ".runtime/logs/flows.db")
         )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._snapshot_lock = threading.RLock()
+        self._storage_lock = threading.Lock()
+        self._storage_samples = deque(maxlen=512)
+        self._persistent_writer = persistent_writer or batch_persistence
+        self._snapshot_connection: sqlite3.Connection | None = None
         self._init_schema()
         self._batch_writer = (
             _FlowSnapshotBatchWriter(self) if batch_persistence else None
         )
+        self._memory_stop = threading.Event()
+        self._memory_lock = threading.Lock()
+        self._memory_error = ''
+        self._memory_errors = 0
+        self._memory_thread = None
+        self._hot_target = 2048
+        self._cold_after = 120.0
+        try:
+            self._hot_target = max(64, min(100000, int(os.environ.get('NETBOT_FLOW_HOT_TARGET', '2048'))))
+            self._cold_after = max(1.0, min(86400.0, float(os.environ.get('NETBOT_FLOW_COLD_AFTER_SECONDS', '120'))))
+        except (TypeError, ValueError):
+            pass
+        enabled = self._persistent_writer if memory_compaction is None else memory_compaction
+        if enabled:
+            self._memory_thread = threading.Thread(target=self._compact_memory, daemon=True,
+                                                   name='netbotpro-flow-memory')
+            self._memory_thread.start()
+
+    def _compact_memory(self):
+        while not self._memory_stop.wait(1.0):
+            try:
+                self.engine.compact_idle(hot_target=self._hot_target, idle_seconds=self._cold_after, batch_size=16)
+                with self._memory_lock:
+                    self._memory_error = ''
+            except Exception as exc:
+                with self._memory_lock:
+                    self._memory_errors += 1
+                    self._memory_error = type(exc).__name__
+
+    def memory_stats(self):
+        metrics = self.engine.memory_stats()
+        with self._memory_lock:
+            error, errors = self._memory_error, self._memory_errors
+        reasons = []
+        if metrics['hot_flows'] > self._hot_target * 2:
+            reasons.append('flow_memory_hot_pressure')
+        if error:
+            reasons.append('flow_memory_compaction_error')
+        return dict(metrics, enabled=self._memory_thread is not None,
+                    worker_alive=bool(self._memory_thread and self._memory_thread.is_alive()),
+                    hot_target=self._hot_target, cold_after_seconds=self._cold_after,
+                    errors_total=errors, last_error=error, pressure_reasons=reasons,
+                    health='degraded' if reasons else 'healthy')
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
@@ -51,6 +102,7 @@ class FlowService:
 
     def _init_schema(self) -> None:
         with self._connection() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS flows (
                     flow_id TEXT PRIMARY KEY,
@@ -70,6 +122,26 @@ class FlowService:
                 "CREATE INDEX IF NOT EXISTS idx_flows_protocol ON flows(app_protocol)"
             )
 
+    @contextmanager
+    def _snapshot_transaction(self, timings=None):
+        timings = timings if timings is not None else {}
+        if not self._persistent_writer:
+            with self._connection() as connection:
+                yield connection
+            return
+        # Keep the WAL writer open between batches; serialize cross-thread use.
+        waiting = time.perf_counter()
+        with self._snapshot_lock:
+            timings['lock_wait'] = (time.perf_counter() - waiting) * 1000
+            if self._snapshot_connection is None:
+                self._snapshot_connection = sqlite3.connect(
+                    self.db_path, check_same_thread=False
+                )
+            with self._snapshot_connection:
+                yield self._snapshot_connection
+                committing = time.perf_counter()
+            timings['commit'] = (time.perf_counter() - committing) * 1000
+
     def ingest(
         self,
         packet: dict[str, Any],
@@ -77,8 +149,7 @@ class FlowService:
         *,
         persist: bool = True,
     ) -> dict[str, Any]:
-        flow = self.engine.ingest(packet, alerts)
-        flow = redact_sensitive_data(flow)
+        flow = self.engine.ingest(packet, alerts, redact_snapshot=True)
         if not persist:
             return flow
         if self._batch_writer is not None:
@@ -90,43 +161,83 @@ class FlowService:
     def write_snapshots(self, flows: list[dict[str, Any]]) -> None:
         """Persist already-redacted flow snapshots in one SQLite transaction."""
         latest = {
-            str(flow["flow_id"]): redact_sensitive_data(flow)
+            str(flow["flow_id"]): flow
             for flow in flows
             if flow.get("flow_id")
         }
-        self._write_snapshots(list(latest.values()))
+        self._write_snapshots([redact_sensitive_data(flow) for flow in latest.values()])
 
-    def _write_snapshots(self, flows: list[dict[str, Any]]) -> None:
+    def ingest_live(self, packet: dict[str, Any], alerts=None) -> dict[str, Any]:
+        return self.engine.ingest(
+            packet, alerts, redact_snapshot=True, live_summary=True
+        )
+
+    def ingest_for_analysis(self, packet: dict[str, Any], alerts=None) -> dict[str, Any]:
+        """Detached internal summary; public writers must redact at their boundary."""
+        return self.engine.ingest(packet, alerts, live_summary=True)
+
+    def write_live_snapshots(self, references: list[dict[str, Any]]) -> None:
+        # Resolve once per flow per batch, not once per captured packet.
+        identifiers = dict.fromkeys(str(row["flow_id"]) for row in references if row.get("flow_id"))
+        started = time.perf_counter()
+        snapshots = self.engine.snapshot_flows(list(identifiers))
+        snapshot_ms = (time.perf_counter() - started) * 1000
+        self._write_snapshots(snapshots, snapshot_ms=snapshot_ms)
+
+    def _write_snapshots(self, flows: list[dict[str, Any]], *, snapshot_ms: float = 0.0) -> None:
         if not flows:
             return
-        with self._connection() as conn:
-            conn.executemany(
-                """
+        started = time.perf_counter()
+        rows = [(flow['flow_id'], flow['conversation_id'], flow['first_seen'], flow['last_seen'],
+                 flow['app_protocol'], flow['risk_score'], flow['direction'],
+                 json.dumps(flow, ensure_ascii=True, default=str)) for flow in flows]
+        serialization_ms = (time.perf_counter() - started) * 1000
+        started = time.perf_counter()
+        timings = {}
+        with self._snapshot_transaction(timings) as conn:
+            executing = time.perf_counter()
+            statement = """
                 INSERT INTO flows (
                     flow_id, conversation_id, first_seen, last_seen,
                     app_protocol, risk_score, direction, snapshot_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES {values}
                 ON CONFLICT(flow_id) DO UPDATE SET
                     last_seen=excluded.last_seen,
                     app_protocol=excluded.app_protocol,
                     risk_score=excluded.risk_score,
                     direction=excluded.direction,
                     snapshot_json=excluded.snapshot_json
-                """,
-                [
-                    (
-                        flow["flow_id"],
-                        flow["conversation_id"],
-                        flow["first_seen"],
-                        flow["last_seen"],
-                        flow["app_protocol"],
-                        flow["risk_score"],
-                        flow["direction"],
-                        json.dumps(flow, ensure_ascii=True, default=str),
-                    )
-                    for flow in flows
-                ],
-            )
+                WHERE flows.snapshot_json IS NOT excluded.snapshot_json
+                   OR flows.last_seen IS NOT excluded.last_seen
+                   OR flows.app_protocol IS NOT excluded.app_protocol
+                   OR flows.risk_score IS NOT excluded.risk_score
+                   OR flows.direction IS NOT excluded.direction
+                """
+            # Fewer SQLite calls reduce GIL hand-offs under concurrent analysis.
+            # 100 rows stay below SQLite's historical 999-variable limit.
+            for offset in range(0, len(rows), 100):
+                chunk = rows[offset:offset + 100]
+                values = ','.join(['(?,?,?,?,?,?,?,?)'] * len(chunk))
+                conn.execute(statement.format(values=values),
+                             [value for row in chunk for value in row])
+            timings['sql'] = (time.perf_counter() - executing) * 1000
+        transaction_ms = (time.perf_counter() - started) * 1000
+        with self._storage_lock:
+            self._storage_samples.append((time.monotonic(), snapshot_ms, serialization_ms, transaction_ms, len(rows), timings))
+
+    def storage_metrics(self) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._storage_lock:
+            samples = [row for row in self._storage_samples if now - row[0] <= 60]
+        metrics = {'window_seconds':60, 'batches':len(samples)}
+        for index, name in enumerate(('snapshot_build', 'serialization', 'transaction'), 1):
+            values = sorted(row[index] for row in samples)
+            metrics[f'{name}_ms_p95'] = round(values[min(len(values)-1, int(len(values)*0.95))], 2) if values else 0.0
+        metrics['last_batch_flows'] = samples[-1][4] if samples else 0
+        for name in ('lock_wait', 'sql', 'commit'):
+            values = sorted(row[5][name] for row in samples if name in row[5])
+            metrics[f'{name}_ms_p95'] = round(values[min(len(values)-1, int(len(values)*0.95))], 2) if values else None
+        return metrics
 
     def persistence_stats(self) -> dict[str, Any]:
         if self._batch_writer is None:
@@ -134,8 +245,17 @@ class FlowService:
         return self._batch_writer.stats()
 
     def close(self, timeout_sec: float = 5.0) -> None:
+        self._memory_stop.set()
+        if self._memory_thread is not None:
+            self._memory_thread.join(max(1, timeout_sec))
+            if self._memory_thread.is_alive():
+                raise RuntimeError('Flow memory worker did not stop')
         if self._batch_writer is not None:
             self._batch_writer.close(timeout_sec=timeout_sec)
+        with self._snapshot_lock:
+            if self._snapshot_connection is not None:
+                self._snapshot_connection.close()
+                self._snapshot_connection = None
 
     def list_flows(self, **filters: Any) -> list[dict[str, Any]]:
         return redact_sensitive_data(self.engine.list_flows(**filters))
@@ -153,7 +273,10 @@ class FlowService:
         return redact_sensitive_data(self.engine.get_conversation(conversation_id))
 
     def summary(self) -> dict[str, Any]:
-        return redact_sensitive_data(self.engine.summary())
+        return redact_sensitive_data(self.engine.summary(compact_top=True))
+
+    def monitoring_summary(self) -> dict[str, Any]:
+        return self.engine.monitoring_summary()
 
     def reset(self) -> None:
         self.engine.reset()
@@ -163,6 +286,8 @@ class FlowService:
         protocols: dict[str, dict[str, Any]] = {}
         for flow in flows:
             name = str(flow.get("app_protocol") or "UNKNOWN")
+            if name == "UNKNOWN":
+                name = str(flow.get("transport") or "OTHER")
             row = protocols.setdefault(
                 name,
                 {
@@ -197,7 +322,7 @@ class FlowService:
         )
 
     def report(self) -> dict[str, Any]:
-        summary = self.summary()
+        summary = redact_sensitive_data(self.engine.summary())
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "total_flows": summary["total_flows"],

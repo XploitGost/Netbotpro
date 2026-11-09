@@ -12,6 +12,48 @@ from backend.app.services.batch_persistence import BatchPersistenceWriter
 
 
 class BatchPersistenceWriterTests(unittest.TestCase):
+    def test_flow_references_coalesce_but_packets_and_alerts_do_not(self):
+        writes = []
+        writer = BatchPersistenceWriter(writes.append, batch_sizes={'flow_record':20},
+                                        flush_ms={'flow_record':60000,'packet_record':60000,'alert_record':60000})
+        try:
+            for _ in range(10):
+                writer.enqueue('flow_record', {'flow_id':'same'})
+            for kind in ('packet_record','alert_record'):
+                writer.enqueue(kind, {'id':1})
+                writer.enqueue(kind, {'id':1})
+            self.assertTrue(writer.flush())
+            rows = {kind:sum(len(batch.get(kind,[])) for batch in writes)
+                    for kind in ('flow_record','packet_record','alert_record')}
+            self.assertEqual(rows, {'flow_record':1,'packet_record':2,'alert_record':2})
+            self.assertEqual(writer.metrics()['events_coalesced_total'], 9)
+            self.assertEqual(writer.metrics()['events_written_total'], 5)
+            writer.enqueue('flow_record', {'flow_id':'same'})
+            self.assertTrue(writer.flush())
+            self.assertEqual(writer.metrics()['events_written_total'], 6)
+        finally:
+            writer.close()
+
+    def test_full_flow_snapshots_are_not_coalesced_as_references(self):
+        writes = []
+        writer = BatchPersistenceWriter(writes.append, flush_ms={'flow_record':60000})
+        try:
+            writer.enqueue('flow_record', {'flow_id':'same','packets_count':1})
+            writer.enqueue('flow_record', {'flow_id':'same','packets_count':2})
+            self.assertTrue(writer.flush())
+            self.assertEqual(len(writes[0]['flow_record']), 2)
+            self.assertEqual(writer.metrics()['events_coalesced_total'], 0)
+        finally:
+            writer.close()
+
+    def test_enqueue_high_water_does_not_scan_pending_events(self):
+        writer = BatchPersistenceWriter(lambda _grouped: None)
+        try:
+            with patch.object(writer, "_queued_event_depth", side_effect=AssertionError("queue scan")):
+                self.assertTrue(writer.enqueue("flow_record", {"flow_id": "f1"}))
+        finally:
+            writer.close()
+
     def test_invalid_environment_values_fall_back_to_safe_defaults(self):
         invalid = {
             "NETBOT_PERSISTENCE_BATCH_ENABLED": "maybe",
@@ -30,6 +72,8 @@ class BatchPersistenceWriterTests(unittest.TestCase):
                 self.assertEqual(metrics["overflow_policy"], "drop_oldest")
                 self.assertEqual(writer._batch_size("packet_record"), 500)
                 self.assertEqual(writer._flush_ms["packet_record"], 1000)
+                self.assertEqual(writer._batch_size("flow_record"), 250)
+                self.assertEqual(writer._flush_ms["flow_record"], 750)
             finally:
                 writer.close()
 
@@ -107,6 +151,26 @@ class BatchPersistenceWriterTests(unittest.TestCase):
         finally:
             writer.close()
         self.assertEqual(writes[0]["flow_record"][0]["payload"]["flow_id"], "f1")
+
+    def test_urgent_alert_does_not_force_pending_flow_snapshot(self):
+        writes = []
+        writer = BatchPersistenceWriter(
+            writes.append,
+            batch_sizes={"flow_record": 100, "alert_record": 100},
+            flush_ms={"flow_record": 60_000, "alert_record": 60_000},
+        )
+        try:
+            writer.enqueue("flow_record", {"flow_id": "f1"})
+            writer.enqueue("alert_record", {"id": 1}, priority="critical")
+            deadline = time.monotonic() + 2
+            while not writes and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(len(writes), 1)
+            self.assertEqual(set(writes[0]), {"alert_record"})
+            self.assertTrue(writer.flush())
+            self.assertEqual(set(writes[1]), {"flow_record"})
+        finally:
+            writer.close()
 
     def test_retry_is_bounded_and_succeeds(self):
         calls = []

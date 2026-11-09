@@ -51,7 +51,8 @@ class SnifferPersistenceTests(unittest.TestCase):
             persistence.close()
 
         self.assertTrue(mock_insert_batch.called)
-        packet_rows, alert_rows = mock_insert_batch.call_args[0]
+        packet_rows = [row for call in mock_insert_batch.call_args_list for row in call.args[0]]
+        alert_rows = [row for call in mock_insert_batch.call_args_list for row in call.args[1]]
         self.assertEqual(len(packet_rows), 2)
         self.assertEqual(len(alert_rows), 1)
         self.assertEqual(packet_rows[1]["remote_ip"], None)
@@ -59,7 +60,7 @@ class SnifferPersistenceTests(unittest.TestCase):
         self.assertEqual(packet_rows[1]["process_name"], None)
         self.assertEqual(alert_rows[0]["engine"], None)
         stats = persistence.stats()
-        self.assertEqual(stats["flush_batches"], 1)
+        self.assertGreaterEqual(stats["flush_batches"], 1)
         self.assertEqual(stats["overload_policy"], "drop_oldest")
 
     @patch(

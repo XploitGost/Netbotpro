@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .ip_utils import infer_flow, is_local_ip, is_public_ip, normalize_ip_set, parse_ip, preferred_remote_ip
@@ -15,6 +15,14 @@ LOCAL_COUNTRY_CODE = "IR"
 TimestampFactory = Callable[[], str]
 
 
+def captured_packet_length(pkt: Any) -> int:
+    # libpcap supplies the original frame length; avoid Scapy reserialization.
+    wire_length = getattr(pkt, "wirelen", None)
+    if type(wire_length) is int and wire_length > 0:
+        return wire_length
+    return len(pkt)
+
+
 @dataclass(frozen=True)
 class PacketLayers:
     Ether: Any
@@ -24,6 +32,9 @@ class PacketLayers:
     ICMP: Any
     DNS: Any
     DNSQR: Any
+    IPv6: Any = None
+    ARP: Any = None
+    ICMPv6: Any = None
 
 
 @dataclass(slots=True)
@@ -38,6 +49,7 @@ class PacketMetadataBuilder:
     process_mapper: Any | None = None
     timestamp_factory: TimestampFactory | None = None
     capture_payload_preview: bool = True
+    _capture_timestamp: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if self.geoip_provider is None:
@@ -47,11 +59,17 @@ class PacketMetadataBuilder:
         if self.process_mapper is None:
             self.process_mapper = DefaultProcessMapper(enabled=True)
         if self.timestamp_factory is None:
-            self.timestamp_factory = lambda: datetime.now().strftime("%H:%M:%S")
+            self._capture_timestamp = True
+            self.timestamp_factory = lambda: datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         self.local_ips = normalize_ip_set(self.local_ips)
 
     def build(self, pkt: Any) -> dict[str, Any]:
         ts = self.timestamp_factory()
+        if self._capture_timestamp:
+            try:
+                ts = datetime.fromtimestamp(float(pkt.time), timezone.utc).isoformat(timespec="milliseconds")
+            except (AttributeError, TypeError, ValueError, OverflowError, OSError):
+                pass
         src_mac, dst_mac = self._extract_macs(pkt)
         vendor_src = self._lookup_vendor(src_mac)
         vendor_dst = self._lookup_vendor(dst_mac)
@@ -102,7 +120,13 @@ class PacketMetadataBuilder:
             "attribution_source": process.get("attribution_source"),
             "summary": summary,
         }
+        meta.update({key: network[key] for key in ("seq", "ack", "window", "mss", "tcp_header_length", "payload_length") if key in network})
         meta.update(layer7)
+        from core.protocol_intelligence import analyze_protocol
+        classification = analyze_protocol(meta, include_metadata=False, payload_bytes=payload[:256])
+        if classification["application_identified"]:
+            meta.update(app_protocol=classification["app_protocol"], app_confidence=classification["confidence"],
+                        protocol_basis=classification["detection_basis"])
         meta.update(safe_bytes_preview(payload, enabled=self.capture_payload_preview))
         return meta
 
@@ -129,7 +153,8 @@ class PacketMetadataBuilder:
         sport = None
         dport = None
         flags = ""
-        length = len(pkt)
+        length = captured_packet_length(pkt)
+        tcp_fields: dict[str, Any] = {}
 
         if self.layers.IP in pkt:
             ip_layer = pkt[self.layers.IP]
@@ -146,6 +171,17 @@ class PacketMetadataBuilder:
             proto = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(proto_num, str(proto_num) if proto_num >= 0 else "OTHER")
         elif self.layers.ICMP in pkt:
             proto = "ICMP"
+        elif self.layers.IPv6 is not None and self.layers.IPv6 in pkt:
+            ip_layer = pkt[self.layers.IPv6]
+            src, dst = ip_layer.src, ip_layer.dst
+            ttl = int(ip_layer.hlim)
+            proto = {6: "TCP", 17: "UDP", 58: "ICMPv6", 50: "ESP", 51: "AH"}.get(int(ip_layer.nh), str(ip_layer.nh))
+        elif self.layers.ARP is not None and self.layers.ARP in pkt:
+            arp = pkt[self.layers.ARP]
+            src, dst, proto = arp.psrc, arp.pdst, "ARP"
+
+        if self.layers.ICMPv6 is not None and self.layers.ICMPv6 in pkt:
+            proto = "ICMPv6"
 
         if self.layers.TCP in pkt:
             tcp_layer = pkt[self.layers.TCP]
@@ -153,6 +189,21 @@ class PacketMetadataBuilder:
             dport = self._safe_port(getattr(tcp_layer, "dport", None))
             flags = str(getattr(tcp_layer, "flags", ""))
             proto = "TCP"
+            for key in ("seq", "ack", "window"):
+                value = self._safe_port(getattr(tcp_layer, key, None))
+                if value is not None:
+                    tcp_fields[key] = value
+            data_offset = self._safe_port(getattr(tcp_layer, "dataofs", None))
+            if data_offset is not None:
+                tcp_fields["tcp_header_length"] = data_offset * 4
+            for option in getattr(tcp_layer, "options", None) or []:
+                if isinstance(option, (tuple, list)) and len(option) == 2 and option[0] == "MSS":
+                    value = self._safe_port(option[1])
+                    if value is not None:
+                        tcp_fields["mss"] = value
+            tcp_payload = getattr(tcp_layer, "payload", None)
+            if tcp_payload is not None:
+                tcp_fields["payload_length"] = len(tcp_payload)
         elif self.layers.UDP in pkt:
             udp_layer = pkt[self.layers.UDP]
             sport = self._safe_port(getattr(udp_layer, "sport", None))
@@ -168,6 +219,7 @@ class PacketMetadataBuilder:
             "dport": dport,
             "flags": flags,
             "length": length,
+            **tcp_fields,
         }
 
     def _infer_direction(self, src: str | None, dst: str | None) -> dict[str, Any]:
@@ -243,8 +295,51 @@ class PacketMetadataBuilder:
     def _best_remote_ip(self, src: str | None, dst: str | None) -> str | None:
         return preferred_remote_ip(dst, src, local_ips=self.local_ips)
 
-    @staticmethod
-    def _safe_summary(pkt: Any) -> str:
+    def _plain_tcp_summary(self, pkt: Any) -> str | None:
+        ether = pkt if type(pkt) is self.layers.Ether else None
+        ip = ether.payload if ether is not None else pkt
+        if (type(ip) is not self.layers.IP
+                or self.layers.IP.__module__ != "scapy.layers.inet"):
+            return None
+        tcp = ip.payload
+        if (type(tcp) is not self.layers.TCP
+                or self.layers.TCP.__module__ != "scapy.layers.inet"):
+            return None
+        from scapy.config import conf
+        from scapy.packet import NoPayload, Padding, Raw
+        if (conf.emph.fields or conf.emph.layers
+                or conf.resolve.fields or conf.resolve.layers
+                or conf.noenum.fields or conf.noenum.layers or conf.raw_summary):
+            return None
+        # Only the standard payload-free summary grammar is rendered here.
+        # Decoded applications, tunnels and custom formatting stay with Scapy.
+        suffix = []
+        tail = tcp.payload
+        for _ in range(2):
+            if type(tail) not in (Raw, Padding):
+                break
+            if tail.show_summary:
+                suffix.append(type(tail).__name__)
+            tail = tail.payload
+        if type(tail) is not NoPayload:
+            return None
+        src = ip.get_field("src").i2repr(ip, ip.src)
+        dst = ip.get_field("dst").i2repr(ip, ip.dst)
+        sport = tcp.get_field("sport").i2repr(tcp, tcp.sport)
+        dport = tcp.get_field("dport").i2repr(tcp, tcp.dport)
+        flags = tcp.get_field("flags").i2repr(tcp, tcp.flags)
+        prefix = ["Ether"] if ether is not None and ether.show_summary else []
+        if ip.show_summary:
+            prefix.append("IP")
+        return " / ".join([*prefix, f"TCP {src}:{sport} > {dst}:{dport} {flags}", *suffix])
+
+    def _safe_summary(self, pkt: Any) -> str:
+        try:
+            summary = self._plain_tcp_summary(pkt)
+            if summary is not None:
+                return summary
+        except Exception:
+            logger.debug("plain TCP summary unavailable", exc_info=True)
         try:
             return pkt.summary()
         except Exception:

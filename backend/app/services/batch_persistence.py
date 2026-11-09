@@ -144,7 +144,7 @@ class BatchPersistenceWriter:
                 "NETBOT_PERSISTENCE_PACKET_FLUSH_MS", 1000, minimum=1
             ),
             "flow_record": _env_int(
-                "NETBOT_PERSISTENCE_FLOW_FLUSH_MS", 1500, minimum=1
+                "NETBOT_PERSISTENCE_FLOW_FLUSH_MS", 750, minimum=1
             ),
             "alert_record": _env_int(
                 "NETBOT_PERSISTENCE_ALERT_FLUSH_MS", 1000, minimum=1
@@ -164,15 +164,19 @@ class BatchPersistenceWriter:
             queue.Queue(maxsize=self._queue_max)
         )
         self._buffers: dict[str, list[PersistenceEvent]] = defaultdict(list)
+        self._flow_reference_slots: dict[str, int] = {}
         self._first_buffered_at: dict[str, float] = {}
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._events_received = self._events_written = self._events_dropped = 0
+        self._events_coalesced = 0
         self._events_failed = self._batches_written = self._retry_total = 0
         self._consecutive_failures = 0
         self._high_water = 0
+        self._last_drop_log_at = float("-inf")
         self._last_flush_at = self._last_error = self._last_drop_reason = ""
         self._latencies: deque[float] = deque(maxlen=512)
+        self._recent_latencies: deque[tuple[float, float]] = deque(maxlen=512)
         self._worker = threading.Thread(
             target=self._run, name="netbotpro-batch-persistence", daemon=True
         )
@@ -276,7 +280,10 @@ class BatchPersistenceWriter:
                 + sum(len(rows) for rows in self._buffers.values()),
             )
             utilization = round(min(100.0, depth / self._queue_max * 100.0), 2)
-            latencies = sorted(self._latencies)
+            now = time.monotonic()
+            while self._recent_latencies and now - self._recent_latencies[0][0] > 60.0:
+                self._recent_latencies.popleft()
+            latencies = sorted(latency for _, latency in self._recent_latencies)
             p95 = (
                 latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
                 if latencies
@@ -331,6 +338,7 @@ class BatchPersistenceWriter:
                 "batches_written_total": self._batches_written,
                 "events_received_total": self._events_received,
                 "events_written_total": self._events_written,
+                "events_coalesced_total": self._events_coalesced,
                 "events_dropped_total": self._events_dropped,
                 "events_failed_total": self._events_failed,
                 "retry_total": self._retry_total,
@@ -341,6 +349,7 @@ class BatchPersistenceWriter:
                 "last_error": self._last_error,
                 "last_drop_reason": self._last_drop_reason,
                 "write_latency_avg_ms": round(latency_avg, 2),
+                "write_latency_last_ms": round(self._latencies[-1], 2) if self._latencies else 0.0,
                 "write_latency_p95_ms": round(p95, 2),
                 "backlog_age_ms": backlog_age,
                 "health": health,
@@ -361,6 +370,7 @@ class BatchPersistenceWriter:
                     "persistence_last_error": self._last_error,
                     "persistence_last_drop_reason": self._last_drop_reason,
                     "persistence_write_latency_ms_avg": round(latency_avg, 2),
+                    "persistence_write_latency_ms_last": round(self._latencies[-1], 2) if self._latencies else 0.0,
                     "persistence_write_latency_ms_p95": round(p95, 2),
                     "persistence_backlog_age_ms": backlog_age,
                     "persistence_health": health,
@@ -371,12 +381,15 @@ class BatchPersistenceWriter:
 
     def _handle_overflow(self, event: PersistenceEvent | _EventGroup) -> bool:
         reason = f"queue_full_{self._overflow_policy}"
+        dropped_count = 0
         if self._overflow_policy == "drop_oldest":
             try:
                 dropped = self._queue.get_nowait()
                 self._queue.task_done()
                 if isinstance(dropped, _FlushCommand):
                     dropped.completed.set()
+                else:
+                    dropped_count = len(dropped.events) if isinstance(dropped, _EventGroup) else 1
             except queue.Empty:
                 pass
             try:
@@ -386,12 +399,21 @@ class BatchPersistenceWriter:
                 accepted = False
         else:
             accepted = False
+        if not accepted:
+            dropped_count += len(event.events) if isinstance(event, _EventGroup) else 1
         with self._lock:
-            self._events_dropped += (
-                len(event.events) if isinstance(event, _EventGroup) else 1
-            )
+            self._events_dropped += dropped_count
             self._last_drop_reason = reason
-        logger.warning("persistence event dropped reason=%s", reason)
+            now = time.monotonic()
+            log_pressure = now - self._last_drop_log_at >= 5
+            if log_pressure:
+                self._last_drop_log_at = now
+            total_dropped = self._events_dropped
+        if log_pressure:
+            logger.warning(
+                "persistence event dropped reason=%s dropped_total=%s",
+                reason, total_dropped,
+            )
         self._record_high_water()
         return accepted
 
@@ -399,7 +421,7 @@ class BatchPersistenceWriter:
         with self._lock:
             self._high_water = min(
                 self._queue_max,
-                max(self._high_water, self._queued_event_depth()),
+                max(self._high_water, self._queue.qsize()),
             )
 
     def _queued_event_depth(self) -> int:
@@ -440,17 +462,27 @@ class BatchPersistenceWriter:
                     item.completed.set()
                     continue
                 events = item.events if isinstance(item, _EventGroup) else (item,)
-                urgent = False
-                size_due = False
+                immediate_types: set[str] = set()
                 for event in events:
-                    self._buffers[event.type].append(event)
-                    self._first_buffered_at.setdefault(event.type, time.monotonic())
-                    urgent = urgent or event.priority in {"high", "critical"}
-                    size_due = size_due or len(
-                        self._buffers[event.type]
-                    ) >= self._batch_size(event.type)
-                if urgent or size_due:
-                    self._flush_due(force=True)
+                    with self._lock:
+                        buffer = self._buffers[event.type]
+                        reference = (str(event.payload['flow_id'])
+                                     if event.type == 'flow_record' and set(event.payload) == {'flow_id'} else None)
+                        if event.type == 'flow_record' and reference is None:
+                            self._flow_reference_slots.clear()
+                        if reference is not None and reference in self._flow_reference_slots:
+                            buffer[self._flow_reference_slots[reference]] = event
+                            self._events_coalesced += 1
+                        else:
+                            if reference is not None:
+                                self._flow_reference_slots[reference] = len(buffer)
+                            buffer.append(event)
+                        self._first_buffered_at.setdefault(event.type, time.monotonic())
+                        if event.priority in {"high", "critical"} or len(buffer) >= self._batch_size(event.type):
+                            immediate_types.add(event.type)
+                if immediate_types:
+                    self._flush_due(types=immediate_types)
+                    self._flush_due()
                 else:
                     self._flush_due()
             finally:
@@ -480,18 +512,20 @@ class BatchPersistenceWriter:
             for kind, started in self._first_buffered_at.items()
             if force or now - started >= self._flush_interval(kind)
         }
-        grouped = {
-            kind: [event.public() for event in self._buffers[kind]]
-            for kind in due_types
-            if self._buffers.get(kind)
-        }
-        if not grouped:
-            return
-        # Once handed to the storage call these records are in-flight, not queued
-        # backlog. Removing them here keeps queue depth bounded and truthful.
-        for kind in grouped:
-            self._buffers.pop(kind, None)
-            self._first_buffered_at.pop(kind, None)
+        with self._lock:
+            grouped = {
+                kind: [event.public() for event in self._buffers[kind]]
+                for kind in due_types
+                if self._buffers.get(kind)
+            }
+            if not grouped:
+                return
+            # Storage I/O below runs outside this lock.
+            for kind in grouped:
+                self._buffers.pop(kind, None)
+                self._first_buffered_at.pop(kind, None)
+                if kind == 'flow_record':
+                    self._flow_reference_slots.clear()
         events = sum(len(rows) for rows in grouped.values())
         started = time.perf_counter()
         try:
@@ -502,6 +536,7 @@ class BatchPersistenceWriter:
                 self._batches_written += 1
                 self._retry_total += retries
                 self._latencies.append(latency)
+                self._recent_latencies.append((time.monotonic(), latency))
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
                 self._last_error = ""
                 self._consecutive_failures = 0
@@ -555,6 +590,7 @@ class BatchPersistenceWriter:
                 self._batches_written += 1
                 self._retry_total += retries
                 self._latencies.append(latency)
+                self._recent_latencies.append((time.monotonic(), latency))
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
                 self._last_error = ""
                 self._consecutive_failures = 0

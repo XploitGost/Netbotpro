@@ -20,6 +20,113 @@ def packet(index: int, *, src: str = "10.0.0.1", dst: str = "8.8.8.8"):
 
 
 class FlowWorkerPoolTests(unittest.TestCase):
+    def test_shared_scheduler_never_executes_same_flow_concurrently(self):
+        active = set()
+        observed = {str(i): [] for i in range(4)}
+        lock = threading.Lock()
+        def process(item):
+            key = item['src']
+            with lock:
+                self.assertNotIn(key, active)
+                active.add(key)
+            time.sleep(.0005)
+            with lock:
+                observed[key].append(item['sequence'])
+                active.remove(key)
+        pool = FlowWorkerPool(process, worker_count=4, queue_max=500)
+        try:
+            for i in range(50):
+                for key in observed:
+                    pool.submit(packet(i, src=key))
+            self.assertTrue(pool.wait_until_drained(3))
+            self.assertEqual(pool.stats()['jobs_failed_total'], 0)
+            for values in observed.values():
+                self.assertEqual(values, list(range(50)))
+        finally:
+            pool.close()
+
+    def test_empty_shared_queue_is_not_drained_while_flow_is_executing(self):
+        started, release = threading.Event(), threading.Event()
+        def process(item):
+            started.set()
+            release.wait(3)
+        pool = FlowWorkerPool(process, worker_count=2)
+        try:
+            pool.submit(packet(0))
+            self.assertTrue(started.wait(1))
+            self.assertEqual(pool.stats()['queue_depth_total'], 0)
+            self.assertEqual(pool.stats()['busy_workers'], 1)
+            self.assertFalse(pool.wait_until_drained(.02))
+            release.set()
+            self.assertTrue(pool.wait_until_drained(1))
+        finally:
+            release.set()
+            pool.close()
+
+    def test_idle_worker_can_take_flow_queued_behind_busy_worker(self):
+        a_started, b_started, c_done = threading.Event(), threading.Event(), threading.Event()
+        release_a, release_b = threading.Event(), threading.Event()
+        def processor(item):
+            if item['src'] == '10.0.0.1':
+                a_started.set()
+                release_a.wait(3)
+            elif item['src'] == '10.0.0.2':
+                b_started.set()
+                release_b.wait(3)
+            else:
+                c_done.set()
+        pool = FlowWorkerPool(processor, worker_count=2, queue_max=200)
+        try:
+            pool.submit(packet(0, src='10.0.0.1'))
+            self.assertTrue(a_started.wait(1))
+            pool.submit(packet(0, src='10.0.0.2'))
+            self.assertTrue(b_started.wait(1))
+            for i in range(50):
+                pool.submit(packet(i+1, src='10.0.0.1'))
+            pool.submit(packet(0, src='10.0.0.3'))
+            release_a.set()
+            self.assertTrue(c_done.wait(1), 'Unrelated flow stranded behind a busy lane')
+            self.assertFalse(release_b.is_set())
+        finally:
+            release_a.set()
+            release_b.set()
+            pool.close()
+
+    def test_hash_collision_uses_idle_worker_without_reordering_flow(self):
+        started = threading.Event()
+        second_done = threading.Event()
+        release = threading.Event()
+        first_sequences = []
+        def process(item):
+            if item['src'] == '10.0.0.1':
+                if item['sequence'] == 0:
+                    started.set()
+                    release.wait(3)
+                first_sequences.append(item['sequence'])
+            else:
+                second_done.set()
+        pool = FlowWorkerPool(process, worker_count=2, queue_max=30)
+        first = packet(0)
+        second = packet(99, src='10.0.0.2')
+        while pool.worker_index_for(second) != pool.worker_index_for(first):
+            second['sport'] += 1
+        try:
+            pool.submit(first)
+            self.assertTrue(started.wait(1))
+            for i in range(1, 10):
+                pool.submit(packet(i))
+            pool.submit(second)
+            self.assertTrue(second_done.wait(1), 'Hash collision blocked an idle worker')
+            self.assertEqual(first_sequences, [])
+            release.set()
+            self.assertTrue(pool.wait_until_drained(3))
+            self.assertEqual(first_sequences, list(range(10)))
+            self.assertEqual(pool._pending, {})
+            self.assertEqual(pool._active_flows, set())
+        finally:
+            release.set()
+            pool.close()
+
     def test_creates_configured_workers_and_accepts_jobs(self):
         processed = []
         pool = FlowWorkerPool(processed.append, worker_count=3, queue_max=30)
@@ -127,6 +234,27 @@ class FlowWorkerPoolTests(unittest.TestCase):
             release.set()
             pool.close()
         self.assertEqual(processed, [1, 3])
+
+    def test_health_recovers_after_old_drops_leave_window(self):
+        processed, pool, release = self._blocked_pool("drop_oldest")
+        try:
+            pool.submit(packet(2))
+            pool.submit(packet(3))
+            recent = pool.stats()
+            self.assertEqual(recent["jobs_dropped_total"], 1)
+            self.assertEqual(recent["jobs_dropped_recent"], 1)
+            with pool._lock:
+                second, count = pool._recent_drops.pop()
+                pool._recent_drops.append((second - 120, count))
+            release.set()
+            self.assertTrue(pool.wait_until_drained(1.0))
+            recovered = pool.stats()
+        finally:
+            release.set()
+            pool.close()
+        self.assertEqual(recovered["jobs_dropped_total"], 1)
+        self.assertEqual(recovered["jobs_dropped_recent"], 0)
+        self.assertEqual(recovered["health"], "healthy")
 
     def test_drop_newest_rejects_latest_queued_job(self):
         processed, pool, release = self._blocked_pool("drop_newest")
@@ -250,7 +378,7 @@ class FlowWorkerPoolTests(unittest.TestCase):
 
         self.assertTrue(stats["enabled"])
         self.assertEqual(stats["worker_count"], 4)
-        self.assertEqual(stats["queue_max_total"], 2000)
+        self.assertEqual(stats["queue_max_total"], 8192)
         self.assertEqual(stats["overflow_policy"], "drop_oldest")
 
     @staticmethod

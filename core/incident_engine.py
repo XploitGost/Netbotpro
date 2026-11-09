@@ -11,6 +11,7 @@ Defensive/blue-team use only; run on networks you own or have permission to moni
 """
 
 from __future__ import annotations
+from core.detection_clock import detection_time
 
 import hashlib
 from dataclasses import dataclass
@@ -65,7 +66,7 @@ class IncidentCorrelator:
         return h[:12]
 
     def enrich_alert(self, meta: Dict[str, Any], alert: Dict[str, Any]) -> None:
-        now = datetime.now(timezone.utc)
+        now = detection_time(meta, datetime.now(timezone.utc))
         key = self._make_key(meta, alert)
 
         # Parse normalized score if present

@@ -50,6 +50,8 @@ jobs:
         run: npm ci
       - name: Run frontend UI tests
         run: npm run test:ui
+      - name: Run preserved desktop model contracts
+        run: node --test desktop-reference/dashboardModel.test.mjs desktop-reference/endpointModel.test.mjs desktop-reference/investigateModel.test.mjs desktop-reference/monitorModel.test.mjs desktop-reference/queueModel.test.mjs desktop-reference/trafficModel.test.mjs
       - name: Build frontend
         run: npm run build
 
@@ -85,6 +87,7 @@ jobs:
         run: |
           node --check main.cjs
           node --check preload.cjs
+          node --test backend-shutdown.test.cjs
       - name: Build and stage packaged backend
         run: |
           python -m PyInstaller packaging/pyinstaller/netbotpro_backend.spec --clean --noconfirm

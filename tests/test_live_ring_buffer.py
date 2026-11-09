@@ -59,6 +59,28 @@ class LiveRingBufferTests(unittest.TestCase):
         self.assertEqual(metrics["records_evicted_total"], 1)
         self.assertEqual(metrics["categories"]["packet"]["evicted_total"], 1)
 
+    def test_internal_history_uses_full_capacity_not_public_query_limit(self):
+        ring = self.make_buffer(capacities={"packet": 4}, max_query_limit=2)
+        for index in range(5):
+            ring.append("packet", {"id": index, "payload_ascii": "secret"})
+
+        rows = ring.recent_payloads("packet")
+
+        self.assertEqual([row["id"] for row in rows], [4, 3, 2, 1])
+        self.assertTrue(all(row["payload_ascii"] == "" for row in rows))
+        rows[0]["id"] = "changed"
+        self.assertEqual(ring.recent_payloads("packet")[0]["id"], 4)
+
+    def test_read_only_refs_use_stored_redacted_payloads(self):
+        ring = self.make_buffer()
+        ring.append("packet", {"id": "ping", "payload_ascii": "secret", "meta": {"type": 8}})
+
+        rows = ring.recent_payload_refs("packet")
+
+        self.assertEqual(rows[0]["payload_ascii"], "")
+        self.assertEqual(rows[0]["meta"]["type"], 8)
+        self.assertIs(rows[0], ring.recent_payload_refs("packet")[0])
+
     def test_query_by_type_flow_key_since_and_latest_order(self):
         ring = self.make_buffer()
         ring.append(
@@ -160,14 +182,16 @@ class LiveRingBufferTests(unittest.TestCase):
         self.assertNotIn("do-not-leak", serialized)
         self.assertNotIn("payload", serialized)
 
-    def test_health_transitions_for_utilization_evictions_and_errors(self):
+    def test_health_transitions_for_normal_evictions_and_errors(self):
         ring = self.make_buffer(capacities={"packet": 2})
         self.assertEqual(ring.metrics()["health"], "healthy")
 
         ring.append("packet", {"id": 1})
         ring.append("packet", {"id": 2})
-        self.assertEqual(ring.metrics()["health"], "degraded")
-        self.assertIn("live_ring_high_utilization", ring.metrics()["pressure_reasons"])
+        ring.append("packet", {"id": 3})
+        self.assertEqual(ring.metrics()["health"], "healthy")
+        self.assertEqual(ring.metrics()["records_evicted_total"], 1)
+        self.assertEqual(ring.metrics()["pressure_reasons"], [])
 
         self.assertIsNone(ring.append("unsupported", {}))
         self.assertEqual(ring.metrics()["health"], "critical")
