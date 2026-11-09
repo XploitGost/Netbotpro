@@ -7,6 +7,8 @@ import queue
 import threading
 import time
 
+from core.capture.batch_delivery import BatchDeliveryError, JournalBatchDelivery
+
 _STATE_FIELDS = ('selected_iface', 'auto_interface', 'route_switches', 'route_warning',
                  'driver_stats', 'capture_callback_errors', 'optional_enrichment', 'capture_profile', 'raw_buffers', 'raw_buffer_pressure')
 
@@ -139,6 +141,8 @@ class ProcessCaptureSession:
         self._started = None
         self._delivered = 0
         self._callback_errors = 0
+        self._journal_acknowledged = 0
+        self._journal_failure_stage = None
         self._complete = threading.Event()
         self._closed = False
         self._lock = threading.Lock()
@@ -228,6 +232,8 @@ class ProcessCaptureSession:
             self._complete.set()
 
     def _receive_journal(self):
+        delivery = JournalBatchDelivery(self._callback, self._journal.acknowledge,
+            prepare=self._prepare_batch, on_completed=self._record_journal_completion)
         while True:
             row = self._journal.first()
             if row is None:
@@ -245,20 +251,22 @@ class ProcessCaptureSession:
                     continue
             identifier, packets = row
             try:
-                if self._prepare_batch is not None:
-                    self._prepare_batch(packets)
-                for packet in packets:
-                    # Journal mode callback completes analysis, not queue admission.
-                    self._callback(packet)
-                    with self._lock:
-                        self._delivered += 1
-                self._journal.acknowledge(identifier)
-            except Exception as exc:
+                receipt = delivery.deliver(identifier, packets)
                 with self._lock:
+                    self._journal_acknowledged += receipt.completed_records
+            except BatchDeliveryError as exc:
+                with self._lock:
+                    # Preserve the legacy aggregate; expose the actual stage separately.
                     self._callback_errors += 1
-                    self._error = f'Journal analysis failed: {type(exc).__name__}; batch retained'
+                    self._journal_failure_stage = exc.stage
+                    self._error = str(exc)
                 self._stopping.set()
                 return
+
+    def _record_journal_completion(self):
+        # Journal callback returns after analysis/delivery, not durable persistence.
+        with self._lock:
+            self._delivered += 1
 
     def stop(self):
         if self._process is None:
@@ -349,6 +357,8 @@ class ProcessCaptureSession:
                         ipc_pending=journal_stats.get('journal_pending_records', pending), ipc_batch_max=32,
                         **journal_stats,
                         journal_backlog_warning_records=self._capacity if self._journal_path else None,
+                        journal_acknowledged_records=self._journal_acknowledged if self._journal_path else None,
+                        journal_failure_stage=self._journal_failure_stage,
                         ipc_delivered=self._delivered, ipc_callback_errors=self._callback_errors)
 
     def shutdown_ready(self):

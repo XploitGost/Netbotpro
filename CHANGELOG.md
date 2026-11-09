@@ -4,6 +4,15 @@
 
 ### Added
 
+- Prepared persistence operations preserve successful history/flow steps within
+  one retry cycle, preventing duplicate history inserts after later flow failure
+  without adding a disk ledger or claiming crash-safe deduplication (ADR 0004).
+- Explicit persistence flush receipts distinguish completion, timeout, eviction
+  and unavailable workers. New write failures or drops prevent false success;
+  existing overflow/retry policies remain unchanged (ADR 0003).
+- Journal batch acknowledgement boundary, stage-specific failure diagnostics and
+  completed-versus-acknowledged counters, with encrypted replay regression tests
+  (ADR 0002); no change to downstream durability or automatic retry policy.
 - Typed analysis-to-delivery handoff and explicit delivery ports, preserving
   existing destination order and redaction responsibilities (ADR 0001).
 - Regression coverage for later clean stability windows without erasing historical

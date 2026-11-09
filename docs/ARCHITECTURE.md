@@ -54,6 +54,26 @@ a durable commit acknowledgement. Legacy flow adapters may retain their existing
 ingest side effects; this is not yet a pure domain-analysis implementation.
 See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md) for the contract and tests.
 
+`JournalBatchDelivery` now owns the ordered prepare/callback/acknowledgement loop,
+separately from `ProcessCaptureSession` lifecycle. Stage-specific errors distinguish
+preparation, analysis/delivery and acknowledgement failure; completed callbacks
+and acknowledged records have separate counters. Its receipt is not a downstream
+durable commit and failed batches can replay a completed prefix.
+See [ADR 0002](adr/0002-journal-batch-acknowledgement.md).
+
+The write-behind queue has an explicit `PersistenceFlushReceipt` contract. A
+completed barrier, timeout, eviction and unavailable worker are distinct, and
+newly observed failed/dropped records prevent a success result. This fixes false
+success from evicted flush commands and internally handled write errors; it does
+not turn the existing storage adapter into a crash-atomic commit protocol.
+See [ADR 0003](adr/0003-persistence-flush-receipts.md).
+
+Prepared central writes keep batch-local progress during retries, so a later
+flow write failure does not reinsert history whose callback already returned.
+This is not persistent deduplication or a cross-database transaction; replay after
+restart and uncertain callback outcomes remain open.
+See [ADR 0004](adr/0004-partial-persistence-retry.md).
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch

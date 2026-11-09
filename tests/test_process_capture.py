@@ -57,6 +57,32 @@ def orphan_parent(channel):
 
 
 class ProcessCaptureTests(unittest.TestCase):
+    def test_journal_failure_stage_and_completed_prefix_are_preserved(self):
+        for stage in ('preparation', 'analysis', 'acknowledgement'):
+            with self.subTest(stage=stage):
+                def callback(packet):
+                    if stage == 'analysis' and packet['sequence'] == 2:
+                        raise ValueError('test failure')
+                session = ProcessCaptureSession(callback)
+                session._journal = Mock()
+                session._journal.first.return_value = (7, [{'sequence': 1}, {'sequence': 2}])
+                session._stopping = threading.Event()
+                if stage == 'preparation':
+                    session._prepare_batch = Mock(side_effect=ValueError('test failure'))
+                if stage == 'acknowledgement':
+                    session._journal.acknowledge.side_effect = ValueError('test failure')
+                session._receive_journal()
+                self.assertTrue(session._stopping.is_set())
+                self.assertEqual(session._journal_failure_stage, stage)
+                self.assertEqual(session._journal_acknowledged, 0)
+                self.assertEqual(session._callback_errors, 1)
+                self.assertEqual(session._delivered,
+                    {'preparation': 0, 'analysis': 1, 'acknowledgement': 2}[stage])
+                self.assertIn(f'Journal {stage} failed', session._error)
+                self.assertEqual(session._journal.first.call_count, 1)
+                self.assertEqual(session._journal.acknowledge.call_count,
+                    1 if stage == 'acknowledgement' else 0)
+
     @unittest.skipUnless(os.name == 'nt', 'DPAPI journal requires Windows')
     def test_inflight_packet_finishes_during_normal_journal_stop(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -117,6 +143,8 @@ class ProcessCaptureTests(unittest.TestCase):
         session._receive_journal()
         self.assertEqual(received, [{'sequence':0}])
         session._journal.acknowledge.assert_called_once_with(1)
+        self.assertEqual(session._journal_acknowledged, 1)
+        self.assertIsNone(session._journal_failure_stage)
 
     @unittest.skipUnless(os.name == 'nt', 'DPAPI journal requires Windows')
     def test_journal_drains_after_analysis_and_retains_failed_batch(self):
@@ -129,6 +157,7 @@ class ProcessCaptureTests(unittest.TestCase):
             session.stop()
             self.assertEqual([p['sequence'] for p in received], list(range(40)))
             self.assertEqual(session.capture_status()['journal_pending_records'], 0)
+            self.assertEqual(session.capture_status()['journal_acknowledged_records'], 40)
             def fail(packet):
                 raise RuntimeError('analysis failure')
             failed = ProcessCaptureSession(fail, factory=FakeCapture, journal_path=path)

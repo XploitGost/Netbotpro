@@ -12,6 +12,37 @@ from backend.app.services.batch_persistence import BatchPersistenceWriter
 
 
 class BatchPersistenceWriterTests(unittest.TestCase):
+    def test_prepared_write_is_created_once_per_retry_cycle_in_both_modes(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                prepared, attempts = [], []
+                def prepare(grouped):
+                    prepared.append(grouped)
+                    count = 0
+                    def write():
+                        nonlocal count
+                        count += 1
+                        attempts.append(count)
+                        if count == 1:
+                            raise OSError('temporary')
+                        return {'retries': 0}
+                    return write
+                def fallback(grouped):
+                    self.fail('prepared writer must own the attempt')
+                writer = BatchPersistenceWriter(fallback, enabled=enabled,
+                    prepare_write=prepare, retry_max=1, retry_backoff_ms=0,
+                    batch_sizes={'packet_record': 100}, flush_ms={'packet_record': 60000})
+                try:
+                    for index in range(2):
+                        self.assertTrue(writer.enqueue('packet_record', {'id': index}))
+                        self.assertTrue(writer.flush())
+                    self.assertEqual(len(prepared), 2)
+                    self.assertEqual(attempts, [1, 2, 1, 2])
+                    self.assertEqual(writer.metrics()['events_written_total'], 2)
+                    self.assertEqual(writer.metrics()['retry_total'], 2)
+                finally:
+                    writer.close()
+
     def test_flow_references_coalesce_but_packets_and_alerts_do_not(self):
         writes = []
         writer = BatchPersistenceWriter(writes.append, batch_sizes={'flow_record':20},

@@ -29,8 +29,24 @@ migration work.
 First implemented slice: `AnalyzedPacket`, `DeliveryPorts` and `PacketDelivery`
 separate the ordered delivery fan-out from the service's analysis step without
 introducing queues, skipping redaction or claiming durable acknowledgement.
-See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md). Capture lifecycle,
-batch ownership, transactional receipts and UI build unification remain open.
+See [ADR 0001](adr/0001-packet-analysis-delivery-boundary.md).
+
+Second slice: `JournalBatchDelivery` separates preparation/callback/ack ordering
+from process capture lifecycle, with stage-specific failures and an explicit
+acknowledgement receipt. It does not certify durable downstream writes or prevent
+replay of a completed prefix. See [ADR 0002](adr/0002-journal-batch-acknowledgement.md).
+Global sequencing, transactional receipts and UI build unification remain open.
+
+`PersistenceFlushReceipt` now distinguishes writer-barrier completion from
+timeout/eviction and records observed failure/drop counters. Boolean flush callers
+use this explicit result instead of treating any wakeup as successful storage.
+See [ADR 0003](adr/0003-persistence-flush-receipts.md). This is not a downstream
+crash-atomic commit receipt or a change to capture acknowledgement.
+
+Central persistence now prepares one retry-local operation per batch: history
+that returned successfully is not inserted again solely because the separate
+flow writer failed. No completion state survives restart and no disk ledger is
+added. See [ADR 0004](adr/0004-partial-persistence-retry.md).
 
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.

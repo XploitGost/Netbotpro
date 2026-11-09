@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.app.services.redaction import redact_sensitive_data
+from backend.app.services.persistence_contracts import FlushStatus, PersistenceFlushReceipt
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class PersistenceEvent:
 @dataclass
 class _FlushCommand:
     completed: threading.Event
+    status: FlushStatus | None = None
 
 
 @dataclass(frozen=True)
@@ -81,7 +83,11 @@ class _EventGroup:
 
 
 class BatchPersistenceWriter:
-    """Bounded, redacting write-behind queue for non-audit history records."""
+    """Bounded, redacting write-behind queue for non-audit history records.
+
+    Optional prepare_write owns progress for one batch's retry cycle. Its callable
+    replaces write_batch for those attempts; it is never shared across batches.
+    """
 
     def __init__(
         self,
@@ -94,8 +100,10 @@ class BatchPersistenceWriter:
         retry_backoff_ms: int | None = None,
         batch_sizes: dict[str, int] | None = None,
         flush_ms: dict[str, int] | None = None,
+        prepare_write: Callable[[dict[str, list[dict[str, Any]]]], Callable[[], Any]] | None = None,
     ) -> None:
         self._write_batch = write_batch
+        self._prepare_write = prepare_write
         self._enabled = (
             _env_bool("NETBOT_PERSISTENCE_BATCH_ENABLED", True)
             if enabled is None
@@ -256,14 +264,35 @@ class BatchPersistenceWriter:
             return self._handle_overflow(group)
 
     def flush(self, timeout_sec: float = 10.0) -> bool:
-        if not self._enabled or not self._worker.is_alive():
-            return not self._enabled
+        return self.flush_result(timeout_sec).succeeded
+
+    def flush_result(self, timeout_sec: float = 10.0) -> PersistenceFlushReceipt:
+        """Wait for a FIFO barrier, reporting eviction, timeout and observed losses.
+
+        A timeout does not cancel queued work. Callback success is only as durable
+        as the configured storage adapter; this is not a journal acknowledgement.
+        """
+        deadline = time.monotonic() + max(0.0, timeout_sec)
+        with self._lock:
+            baseline = (self._events_failed, self._events_dropped)
+        if not self._enabled:
+            return self._flush_receipt('synchronous', baseline)
+        if not self._worker.is_alive():
+            return self._flush_receipt('worker_unavailable', baseline)
         command = _FlushCommand(threading.Event())
         try:
-            self._queue.put(command, timeout=max(0.1, timeout_sec / 2))
+            self._queue.put(command, timeout=max(0.0, deadline - time.monotonic()))
         except queue.Full:
-            return False
-        return command.completed.wait(max(0.1, timeout_sec))
+            return self._flush_receipt('queue_timeout', baseline)
+        if not command.completed.wait(max(0.0, deadline - time.monotonic())):
+            return self._flush_receipt('timeout', baseline)
+        return self._flush_receipt(command.status or 'worker_unavailable', baseline)
+
+    def _flush_receipt(self, status: FlushStatus,
+                       baseline: tuple[int, int]) -> PersistenceFlushReceipt:
+        with self._lock:
+            return PersistenceFlushReceipt(status, baseline[0], self._events_failed,
+                                           baseline[1], self._events_dropped)
 
     def close(self, timeout_sec: float = 10.0) -> None:
         if not self._enabled:
@@ -387,6 +416,7 @@ class BatchPersistenceWriter:
                 dropped = self._queue.get_nowait()
                 self._queue.task_done()
                 if isinstance(dropped, _FlushCommand):
+                    dropped.status = 'superseded'
                     dropped.completed.set()
                 else:
                     dropped_count = len(dropped.events) if isinstance(dropped, _EventGroup) else 1
@@ -459,6 +489,7 @@ class BatchPersistenceWriter:
             try:
                 if isinstance(item, _FlushCommand):
                     self._flush_due(force=True)
+                    item.status = 'completed'
                     item.completed.set()
                     continue
                 events = item.events if isinstance(item, _EventGroup) else (item,)
@@ -552,10 +583,13 @@ class BatchPersistenceWriter:
             )
 
     def _write_with_retry(self, grouped: dict[str, list[dict[str, Any]]]) -> int:
+        # One operation owns retry progress; never share it with another batch.
+        write = (self._prepare_write(grouped) if self._prepare_write is not None
+                 else lambda: self._write_batch(grouped))
         retries = 0
         while True:
             try:
-                result = self._write_batch(grouped)
+                result = write()
                 storage_retries = (
                     int(result.get("retries", 0)) if isinstance(result, dict) else 0
                 )
