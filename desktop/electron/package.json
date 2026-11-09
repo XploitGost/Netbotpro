@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "electron": "^40.10.2",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "com.netbotpro.desktop",
