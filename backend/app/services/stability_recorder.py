@@ -7,6 +7,12 @@ from pathlib import Path
 import threading
 import time
 
+ERROR_COUNTERS = (
+    'rejected', 'callback_errors', 'capture_callback_errors', 'detector_errors',
+    'storage_dropped', 'storage_failed', 'driver_buffer_dropped',
+    'driver_interface_dropped_raw', 'ml_training_failures', 'flow_compaction_errors',
+)
+
 
 def number(value):
     return value if type(value) is int or (type(value) is float and math.isfinite(value)) else None
@@ -94,12 +100,14 @@ class StabilityRecorder:
         self._stop = threading.Event()
         self._thread = None
         self._previous = None
+        self._known_error_fields = set()
         self._summary = dict(samples=0, active_seconds=0.0, target_seconds=4*60*60,
                              max_pending=0, last_pending=None, issues_observed=False,
                              driver_unknown_samples=0, driver_incomplete_samples=0,
                              sampling_gaps=0, write_errors=0, last_error_type='',
                              resource_unknown_samples=0,
                              backlog_warning_samples=0, capture_sessions=0,
+                             error_intervals=0, counter_reset_intervals=0,
                              qualified_continuous_seconds=0.0, max_qualified_continuous_seconds=0.0,
                              unobserved_seconds_total=0.0, max_sampling_gap_seconds=0.0,
                              last_sampling_gap_utc=None, last_gap_received_delta=None,
@@ -168,15 +176,34 @@ class StabilityRecorder:
                     age = row['driver_sample_age_seconds']
                     summary['driver_incomplete_samples'] += int(not row['driver_coverage_complete'] or age is None or age > 5)
                     summary['resource_unknown_samples'] += int(row['backend_rss_bytes'] is None or row['capture_rss_bytes'] is None)
-                issues = row['capture_error'] or any((row[key] or 0) > 0 for key in (
-                    'rejected', 'callback_errors', 'capture_callback_errors', 'detector_errors',
-                    'storage_dropped', 'storage_failed', 'driver_buffer_dropped', 'driver_interface_dropped_raw', 'ml_training_failures', 'flow_compaction_errors'))
-                summary['issues_observed'] |= issues
+                observed_errors = row['capture_error'] or any((row[key] or 0) > 0 for key in ERROR_COUNTERS)
+                if not same:
+                    self._known_error_fields.clear()
+                interval_errors = bool(row['capture_error'])
+                counter_reset = False
+                for key in ERROR_COUNTERS:
+                    current = row[key]
+                    prior = previous[1][key] if same and not gap else None
+                    if current is None:
+                        interval_errors |= key in self._known_error_fields
+                        continue
+                    self._known_error_fields.add(key)
+                    if prior is None:
+                        interval_errors |= current > 0
+                    else:
+                        interval_errors |= current != prior
+                        counter_reset |= current < prior
+                row['error_interval'] = bool(interval_errors)
+                row['error_counter_reset'] = bool(counter_reset)
+                summary['error_intervals'] += int(interval_errors)
+                summary['counter_reset_intervals'] += int(counter_reset)
+                # Historical failures remain sticky, but a later clean window can qualify.
+                summary['issues_observed'] |= bool(observed_errors or counter_reset)
                 age = row['driver_sample_age_seconds']
                 row['qualified_sample'] = bool(row['capture_running'] and row['driver_available']
                     and row['driver_coverage_complete'] and age is not None and 0 <= age <= 5
                     and row['backend_rss_bytes'] is not None and row['capture_rss_bytes'] is not None
-                    and not issues and not backlog)
+                    and not interval_errors and not backlog)
                 if same and not gap and delta > 0 and row['qualified_sample'] and previous[1].get('qualified_sample'):
                     summary['qualified_continuous_seconds'] += delta
                 else:
