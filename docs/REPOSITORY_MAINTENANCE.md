@@ -39,7 +39,8 @@ checks are not configured. Prefer PRs voluntarily until a stable required-check
 policy is agreed. Repository settings are remote state, not installed by cloning.
 
 Secret scanning and push protection are enabled. Dependency vulnerability alerts
-and security-update PRs are enabled. Dependabot checks Actions, Python and npm
+and private vulnerability reporting are enabled. Security-update PRs
+are enabled. Dependabot checks Actions, Python and npm
 dependencies weekly with bounded open PR counts. No auto-merge is configured.
 Merged feature branches are deleted automatically; existing branches and tags
 are not deleted by this maintenance work.

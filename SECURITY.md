@@ -11,6 +11,10 @@ NetBotPro is a defensive network analysis tool. Security reports, hardening sugg
 
 ## Reporting A Security Issue
 
+Use [GitHub private vulnerability reporting](https://github.com/XploitGost/Netbotpro/security/advisories/new)
+for this public repository. Do not open a public issue containing vulnerability
+details, credentials or private network traffic.
+
 For private repositories or private deployments, report security issues directly to the repository owner/maintainer. Include:
 
 - affected version or commit
