@@ -13,6 +13,7 @@ describe their own release, not the current branch or installed desktop overlay.
 
 - [Current architecture](ARCHITECTURE.md)
 - [Target boundaries](ARCHITECTURE_BOUNDARIES.md)
+- [ADR 0001: analysis-to-delivery handoff](adr/0001-packet-analysis-delivery-boundary.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Screenshot provenance](SCREENSHOTS.md)
