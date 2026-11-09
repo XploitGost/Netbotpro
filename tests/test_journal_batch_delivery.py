@@ -65,6 +65,20 @@ class JournalBatchDeliveryTests(unittest.TestCase):
         self.assertEqual(raised.exception.completed_records, 1)
         self.assertEqual(acknowledged, [])
 
+    def test_acknowledgement_exception_does_not_claim_rollback(self):
+        retained = {9: [{}]}
+        def acknowledge(identifier):
+            del retained[identifier]
+            raise OSError('connection closed after commit')
+        delivery = JournalBatchDelivery(lambda packet: None, acknowledge,
+            on_completed=lambda: None)
+        with self.assertRaises(BatchDeliveryError) as raised:
+            delivery.deliver(9, retained[9])
+        self.assertEqual(retained, {})
+        self.assertEqual(raised.exception.completed_records, 1)
+        self.assertIn('acknowledgement unconfirmed', str(raised.exception))
+        self.assertNotIn('batch retained', str(raised.exception))
+
     def test_empty_batch_preserves_legacy_acknowledgement(self):
         events = []
         delivery = JournalBatchDelivery(lambda packet: self.fail('unexpected packet'), events.append,
