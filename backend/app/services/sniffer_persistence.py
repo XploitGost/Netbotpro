@@ -7,7 +7,9 @@ from typing import Any, Callable
 
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.batch_persistence import BatchPersistenceWriter
-from backend.app.services.persistence_contracts import PersistenceFlushReceipt
+from backend.app.services.persistence_contracts import (
+    HistoryStorageUnavailable, PersistenceFlushReceipt, PersistenceWriteOutcome,
+)
 
 ensure_project_root_on_path()
 
@@ -282,6 +284,7 @@ class SnifferPersistence:
             "accepted_writes": metrics["events_received_total"],
             "dropped_writes": metrics["events_dropped_total"],
             "failed_writes": metrics["events_failed_total"],
+            "skipped_writes": metrics["events_skipped_total"],
             "failed_batches": 1 if metrics["events_failed_total"] else 0,
             "persisted_packets": self._persisted_packets,
             "persisted_alerts": self._persisted_alerts,
@@ -319,12 +322,12 @@ class SnifferPersistence:
 
     def _write_central_batch(
         self, grouped: dict[str, list[dict[str, Any]]]
-    ) -> dict[str, int]:
+    ) -> PersistenceWriteOutcome:
         return self._prepare_central_batch(grouped)()
 
     def _prepare_central_batch(
         self, grouped: dict[str, list[dict[str, Any]]]
-    ) -> Callable[[], dict[str, int]]:
+    ) -> Callable[[], PersistenceWriteOutcome]:
         """Own confirmed-step progress for one bounded retry cycle, not restart.
 
         A callback that raises after committing is unconfirmed and may replay.
@@ -334,24 +337,36 @@ class SnifferPersistence:
         alert_rows = [row["payload"] for row in grouped.get("alert_record", [])]
         flow_rows = [row["payload"] for row in grouped.get("flow_record", [])]
         history_done = flow_done = False
-        result = {"retries": 0}
+        history_skipped = False
+        result: dict[str, Any] = {"retries": 0}
 
-        def write() -> dict[str, int]:
-            nonlocal history_done, flow_done, result
+        def write() -> PersistenceWriteOutcome:
+            nonlocal history_done, flow_done, history_skipped, result
             if not history_done:
                 returned = (insert_batch(packet_rows, alert_rows)
                             if packet_rows or alert_rows else {"retries": 0})
                 result = returned if isinstance(returned, dict) else {"retries": 0}
+                status = result.get('status', 'committed')
+                if status == 'unavailable':
+                    raise HistoryStorageUnavailable('History connection is unavailable')
+                if status not in {'committed', 'disabled'}:
+                    raise ValueError('Unrecognized history write status')
+                history_skipped = status == 'disabled'
                 history_done = True
                 with self._lock:
-                    self._persisted_packets += result.get('packets_inserted', len(packet_rows))
-                    self._persisted_alerts += result.get('alerts_inserted', len(alert_rows))
+                    if not history_skipped:
+                        self._persisted_packets += result.get('packets_inserted', len(packet_rows))
+                        self._persisted_alerts += result.get('alerts_inserted', len(alert_rows))
             if not flow_done:
                 if flow_rows and self._flow_writer is not None:
                     self._flow_writer(flow_rows)
                 flow_done = True
             self._run_retention_cleanup()
-            return result
+            skipped = ((len(packet_rows) + len(alert_rows)) if history_skipped else 0)
+            if self._flow_writer is None:
+                skipped += len(flow_rows)
+            events = len(packet_rows) + len(alert_rows) + len(flow_rows)
+            return PersistenceWriteOutcome(events - skipped, skipped, int(result.get('retries', 0)))
 
         return write
 

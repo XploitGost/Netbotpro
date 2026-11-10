@@ -80,6 +80,13 @@ legacy capture IDs or identical independent packets. Alert and flow side effects
 are not deduplicated, and callback acknowledgement still is not a durable history
 receipt. See [ADR 0005](adr/0005-journal-packet-occurrence-identity.md).
 
+History writes distinguish commit, intentional disable and missing connection.
+The central writer counts confirmed processing separately from intentional skips;
+duplicate-only commits remain successful with zero inserted rows. Flush receipts
+include new skips without treating disabled storage as a database fault.
+Legacy and flow adapters still have implicit return semantics. See
+[ADR 0006](adr/0006-explicit-history-write-outcomes.md).
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch

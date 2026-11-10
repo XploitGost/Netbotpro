@@ -32,14 +32,18 @@ class CaptureIdentityTests(unittest.TestCase):
                 try:
                     rows = [{'capture_event_id': EVENT, 'capture_id': EVENT, 'ts': '1'}]
                     with patch.object(storage, 'is_persist_enabled', return_value=True):
-                        self.assertEqual(storage.insert_batch(rows, [])['packets_inserted'], 1)
+                        result = storage.insert_batch(rows, [])
+                        self.assertEqual(result['status'], 'committed')
+                        self.assertEqual(result['packets_inserted'], 1)
                 finally:
                     conn.close()
             with self.history(path):
                 conn = config.get_conn()
                 try:
                     with patch.object(storage, 'is_persist_enabled', return_value=True):
-                        self.assertEqual(storage.insert_batch(rows, [])['packets_inserted'], 0)
+                        replay = storage.insert_batch(rows, [])
+                        self.assertEqual(replay['status'], 'committed')
+                        self.assertEqual(replay['packets_inserted'], 0)
                         result = storage.insert_batch([
                             {'capture_event_id': EVENT[:-1] + '1', 'ts': '1'},
                             {'capture_event_id': EVENT.replace('a' * 32, 'b' * 32), 'ts': '1'},
@@ -73,6 +77,7 @@ class CaptureIdentityTests(unittest.TestCase):
         connection.assert_not_called()
         self.assertEqual(result['packets_inserted'], 0)
         self.assertEqual(result['alerts_inserted'], 0)
+        self.assertEqual(result['status'], 'disabled')
 
     def test_retention_deletion_does_not_create_permanent_tombstones(self):
         with tempfile.TemporaryDirectory() as folder, self.history(Path(folder)/'history.db'):

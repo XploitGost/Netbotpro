@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.app.services.redaction import redact_sensitive_data
-from backend.app.services.persistence_contracts import FlushStatus, PersistenceFlushReceipt
+from backend.app.services.persistence_contracts import (
+    FlushStatus, PersistenceFlushReceipt, PersistenceWriteOutcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +179,7 @@ class BatchPersistenceWriter:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._events_received = self._events_written = self._events_dropped = 0
+        self._events_skipped = 0
         self._events_coalesced = 0
         self._events_failed = self._batches_written = self._retry_total = 0
         self._consecutive_failures = 0
@@ -274,7 +277,7 @@ class BatchPersistenceWriter:
         """
         deadline = time.monotonic() + max(0.0, timeout_sec)
         with self._lock:
-            baseline = (self._events_failed, self._events_dropped)
+            baseline = (self._events_failed, self._events_dropped, self._events_skipped)
         if not self._enabled:
             return self._flush_receipt('synchronous', baseline)
         if not self._worker.is_alive():
@@ -289,10 +292,11 @@ class BatchPersistenceWriter:
         return self._flush_receipt(command.status or 'worker_unavailable', baseline)
 
     def _flush_receipt(self, status: FlushStatus,
-                       baseline: tuple[int, int]) -> PersistenceFlushReceipt:
+                       baseline: tuple[int, int, int]) -> PersistenceFlushReceipt:
         with self._lock:
             return PersistenceFlushReceipt(status, baseline[0], self._events_failed,
-                                           baseline[1], self._events_dropped)
+                                           baseline[1], self._events_dropped,
+                                           baseline[2], self._events_skipped)
 
     def close(self, timeout_sec: float = 10.0) -> None:
         if not self._enabled:
@@ -367,6 +371,7 @@ class BatchPersistenceWriter:
                 "batches_written_total": self._batches_written,
                 "events_received_total": self._events_received,
                 "events_written_total": self._events_written,
+                "events_skipped_total": self._events_skipped,
                 "events_coalesced_total": self._events_coalesced,
                 "events_dropped_total": self._events_dropped,
                 "events_failed_total": self._events_failed,
@@ -392,6 +397,7 @@ class BatchPersistenceWriter:
                     "persistence_batches_written_total": self._batches_written,
                     "persistence_events_received_total": self._events_received,
                     "persistence_events_written_total": self._events_written,
+                    "persistence_events_skipped_total": self._events_skipped,
                     "persistence_events_dropped_total": self._events_dropped,
                     "persistence_events_failed_total": self._events_failed,
                     "persistence_retry_total": self._retry_total,
@@ -560,17 +566,19 @@ class BatchPersistenceWriter:
         events = sum(len(rows) for rows in grouped.values())
         started = time.perf_counter()
         try:
-            retries = self._write_with_retry(grouped)
+            outcome = self._execute_with_retry(grouped)
             latency = (time.perf_counter() - started) * 1000.0
             with self._lock:
-                self._events_written += events
-                self._batches_written += 1
-                self._retry_total += retries
-                self._latencies.append(latency)
-                self._recent_latencies.append((time.monotonic(), latency))
+                self._events_written += outcome.written_events
+                self._events_skipped += outcome.skipped_events
+                self._batches_written += int(outcome.written_events > 0)
+                self._retry_total += outcome.storage_retries
+                if outcome.written_events:
+                    self._latencies.append(latency)
+                    self._recent_latencies.append((time.monotonic(), latency))
+                    self._last_error = ""
+                    self._consecutive_failures = 0
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
-                self._last_error = ""
-                self._consecutive_failures = 0
         except Exception as exc:
             with self._lock:
                 self._events_failed += events
@@ -583,17 +591,25 @@ class BatchPersistenceWriter:
             )
 
     def _write_with_retry(self, grouped: dict[str, list[dict[str, Any]]]) -> int:
+        return self._execute_with_retry(grouped).storage_retries
+
+    def _execute_with_retry(self, grouped: dict[str, list[dict[str, Any]]]) -> PersistenceWriteOutcome:
         # One operation owns retry progress; never share it with another batch.
         write = (self._prepare_write(grouped) if self._prepare_write is not None
                  else lambda: self._write_batch(grouped))
         retries = 0
+        events = sum(len(rows) for rows in grouped.values())
         while True:
             try:
                 result = write()
+                if isinstance(result, PersistenceWriteOutcome):
+                    if result.written_events + result.skipped_events != events:
+                        raise ValueError('Write outcome does not account for the batch')
+                    return result
                 storage_retries = (
                     int(result.get("retries", 0)) if isinstance(result, dict) else 0
                 )
-                return storage_retries
+                return PersistenceWriteOutcome(events, storage_retries=storage_retries)
             except Exception:
                 if retries >= self._retry_max or self._stop.is_set():
                     raise
@@ -617,18 +633,20 @@ class BatchPersistenceWriter:
             self._events_received += len(events)
         started = time.perf_counter()
         try:
-            retries = self._write_with_retry(dict(grouped))
+            outcome = self._execute_with_retry(dict(grouped))
             latency = (time.perf_counter() - started) * 1000.0
             with self._lock:
-                self._events_written += len(events)
-                self._batches_written += 1
-                self._retry_total += retries
-                self._latencies.append(latency)
-                self._recent_latencies.append((time.monotonic(), latency))
+                self._events_written += outcome.written_events
+                self._events_skipped += outcome.skipped_events
+                self._batches_written += int(outcome.written_events > 0)
+                self._retry_total += outcome.storage_retries
+                if outcome.written_events:
+                    self._latencies.append(latency)
+                    self._recent_latencies.append((time.monotonic(), latency))
+                    self._last_error = ""
+                    self._consecutive_failures = 0
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
-                self._last_error = ""
-                self._consecutive_failures = 0
-            return True
+            return outcome.skipped_events == 0
         except Exception as exc:
             with self._lock:
                 self._events_failed += len(events)
