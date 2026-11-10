@@ -4,6 +4,9 @@
 
 ### Added
 
+- Explicit history commit/disabled/unavailable outcomes and typed batch processing
+  versus skip counts prevent skipped or unavailable writes being reported as
+  stored events; flush receipts retain skip visibility (ADR 0006).
 - Stable journal occurrence IDs and optional unique packet-history keys protect
   retained packet rows on reopen/replay, preserving old records and independent
   identical packets. Alerts/flow state and end-to-end durability remain separate

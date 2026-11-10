@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from .config import get_conn, is_persist_enabled
+from .contracts import HistoryWriteResult
 from core.capture.identity import valid_capture_event_id
 
 _DB_LOCK = threading.Lock()
@@ -160,12 +161,12 @@ def _is_retryable_sqlite_error(exc: sqlite3.Error) -> bool:
     return "locked" in text or "busy" in text
 
 
-def insert_batch(packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, Any]]) -> dict[str, int]:
+def insert_batch(packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, Any]]) -> HistoryWriteResult:
     if not is_persist_enabled():
-        return {"retries": 0, "packets_inserted": 0, "alerts_inserted": 0}
+        return {"status": "disabled", "retries": 0, "packets_inserted": 0, "alerts_inserted": 0}
     conn = get_conn()
     if conn is None:
-        return {"retries": 0, "packets_inserted": 0, "alerts_inserted": 0}
+        return {"status": "unavailable", "retries": 0, "packets_inserted": 0, "alerts_inserted": 0}
     with _DB_LOCK:
         retries = 0
         for attempt, delay in enumerate((0.0, *_LOCK_RETRY_DELAYS_SEC)):
@@ -173,7 +174,7 @@ def insert_batch(packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, A
                 packets_inserted = _insert_packets_no_commit(conn, packet_rows)
                 alerts_inserted = _insert_alerts_no_commit(conn, alert_rows)
                 conn.commit()
-                return {"retries": retries, "packets_inserted": packets_inserted,
+                return {"status": "committed", "retries": retries, "packets_inserted": packets_inserted,
                         "alerts_inserted": alerts_inserted}
             except sqlite3.Error as exc:
                 conn.rollback()
@@ -182,7 +183,7 @@ def insert_batch(packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, A
                 retries += 1
                 logger.warning("sqlite_write_retry retries=%s delay_ms=%.0f error=%s", retries, delay * 1000.0, exc)
                 time.sleep(delay)
-        return {"retries": retries}
+        raise RuntimeError('History write attempts exhausted without a result')
 
 
 def insert_packet(row: dict[str, Any]) -> None:

@@ -53,6 +53,11 @@ history rows against replay. It does not merge old IDs, deduplicate alerts/flow
 analysis or delay journal acknowledgement until durable history commit.
 See [ADR 0005](adr/0005-journal-packet-occurrence-identity.md).
 
+Explicit history outcomes now separate committed processing from intentional skips
+and unavailable connections. These diagnostics do not certify remaining legacy
+adapters or change journal reclamation. See
+[ADR 0006](adr/0006-explicit-history-write-outcomes.md).
+
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.
 2. Define batch schema, sequence, lifecycle, ownership, error and backpressure
