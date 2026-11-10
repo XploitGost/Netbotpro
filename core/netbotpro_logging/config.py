@@ -34,6 +34,7 @@ PERSIST_LOGS = False
 _CONN: sqlite3.Connection | None = None
 
 _PACKET_SCHEMA_UPDATES = {
+    "capture_event_id": "ALTER TABLE packets ADD COLUMN capture_event_id TEXT",
     "capture_id": "ALTER TABLE packets ADD COLUMN capture_id TEXT",
     "remote_ip": "ALTER TABLE packets ADD COLUMN remote_ip TEXT",
     "app_protocol": "ALTER TABLE packets ADD COLUMN app_protocol TEXT",
@@ -308,6 +309,7 @@ def get_conn() -> sqlite3.Connection | None:
             _ensure_column(_CONN, "packets", column, statement)
         for column, statement in _ALERT_SCHEMA_UPDATES.items():
             _ensure_column(_CONN, "alerts", column, statement)
+        _CONN.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_packets_capture_event_id ON packets(capture_event_id) WHERE capture_event_id IS NOT NULL')
         _CONN.commit()
     return _CONN
 

@@ -6,6 +6,19 @@ from backend.app.services.sniffer_persistence import SnifferPersistence
 
 
 class SnifferPersistenceTests(unittest.TestCase):
+    @patch('backend.app.services.sniffer_persistence.is_persist_enabled', return_value=True)
+    @patch('backend.app.services.sniffer_persistence.insert_batch',
+           return_value={'retries': 0, 'packets_inserted': 0, 'alerts_inserted': 0})
+    def test_replay_identity_is_retained_and_duplicate_is_not_counted_as_new(self, insert, _enabled):
+        identity = 'cap-v1:' + 'a' * 32 + ':1:0'
+        persistence = SnifferPersistence(batch_size=100, flush_interval=60)
+        try:
+            persistence.persist({'id': identity, 'capture_event_id': identity}, [])
+            self.assertTrue(persistence.flush())
+            self.assertEqual(insert.call_args.args[0][0]['capture_event_id'], identity)
+            self.assertEqual(persistence.stats()['persisted_packets'], 0)
+        finally:
+            persistence.close()
     @patch("backend.app.services.sniffer_persistence.is_persist_enabled", return_value=True)
     @patch("backend.app.services.sniffer_persistence.insert_batch")
     def test_explicit_flush_result_reports_storage_failure(self, insert, _enabled):

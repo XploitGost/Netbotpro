@@ -7,12 +7,14 @@ import time
 from typing import Any
 
 from .config import get_conn, is_persist_enabled
+from core.capture.identity import valid_capture_event_id
 
 _DB_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 _LOCK_RETRY_DELAYS_SEC = (0.02, 0.05, 0.1)
 
 _PACKET_COLUMNS = (
+    "capture_event_id",
     "capture_id",
     "ts",
     "src",
@@ -125,28 +127,32 @@ _ALERT_COLUMNS = (
 )
 
 
-def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> None:
+def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> int:
     if not rows:
-        return
-    conn.executemany(
-        f"INSERT INTO packets ({', '.join(_PACKET_COLUMNS)}) VALUES ({', '.join(['?'] * len(_PACKET_COLUMNS))})",
+        return 0
+    cursor = conn.executemany(
+        f"INSERT INTO packets ({', '.join(_PACKET_COLUMNS)}) VALUES ({', '.join(['?'] * len(_PACKET_COLUMNS))}) ON CONFLICT(capture_event_id) WHERE capture_event_id IS NOT NULL DO NOTHING",
         [
-            tuple((1 if column == "is_alert" and row.get(column) else 0) if column == "is_alert" else row.get(column) for column in _PACKET_COLUMNS)
+            tuple(valid_capture_event_id(row.get(column)) if column == 'capture_event_id' else
+                  (1 if row.get(column) else 0) if column == 'is_alert' else row.get(column)
+                  for column in _PACKET_COLUMNS)
             for row in rows
         ],
     )
+    return cursor.rowcount
 
 
-def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> None:
+def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> int:
     if not rows:
-        return
-    conn.executemany(
+        return 0
+    cursor = conn.executemany(
         f"INSERT INTO alerts ({', '.join(_ALERT_COLUMNS)}) VALUES ({', '.join(['?'] * len(_ALERT_COLUMNS))})",
         [
             tuple(row.get(column) for column in _ALERT_COLUMNS)
             for row in rows
         ],
     )
+    return cursor.rowcount
 
 
 def _is_retryable_sqlite_error(exc: sqlite3.Error) -> bool:
@@ -156,18 +162,19 @@ def _is_retryable_sqlite_error(exc: sqlite3.Error) -> bool:
 
 def insert_batch(packet_rows: list[dict[str, Any]], alert_rows: list[dict[str, Any]]) -> dict[str, int]:
     if not is_persist_enabled():
-        return {"retries": 0}
+        return {"retries": 0, "packets_inserted": 0, "alerts_inserted": 0}
     conn = get_conn()
     if conn is None:
-        return {"retries": 0}
+        return {"retries": 0, "packets_inserted": 0, "alerts_inserted": 0}
     with _DB_LOCK:
         retries = 0
         for attempt, delay in enumerate((0.0, *_LOCK_RETRY_DELAYS_SEC)):
             try:
-                _insert_packets_no_commit(conn, packet_rows)
-                _insert_alerts_no_commit(conn, alert_rows)
+                packets_inserted = _insert_packets_no_commit(conn, packet_rows)
+                alerts_inserted = _insert_alerts_no_commit(conn, alert_rows)
                 conn.commit()
-                return {"retries": retries}
+                return {"retries": retries, "packets_inserted": packets_inserted,
+                        "alerts_inserted": alerts_inserted}
             except sqlite3.Error as exc:
                 conn.rollback()
                 if attempt >= len(_LOCK_RETRY_DELAYS_SEC) or not _is_retryable_sqlite_error(exc):

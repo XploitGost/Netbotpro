@@ -48,6 +48,11 @@ that returned successfully is not inserted again solely because the separate
 flow writer failed. No completion state survives restart and no disk ledger is
 added. See [ADR 0004](adr/0004-partial-persistence-retry.md).
 
+Journal occurrence identity now survives reopen and protects retained packet
+history rows against replay. It does not merge old IDs, deduplicate alerts/flow
+analysis or delay journal acknowledgement until durable history commit.
+See [ADR 0005](adr/0005-journal-packet-occurrence-identity.md).
+
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.
 2. Define batch schema, sequence, lifecycle, ownership, error and backpressure

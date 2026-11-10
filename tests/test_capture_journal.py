@@ -26,11 +26,12 @@ class JournalTests(unittest.TestCase):
             self.assertEqual(journal.stats()['journal_pending_records'], 3)
             journal.close()
             recovered = CaptureJournal(path)
-            self.assertEqual(recovered.first(), (identifier, packets))
+            self.assertEqual(recovered.first(), (identifier, pending))
             delivered = []
             receipt = JournalBatchDelivery(delivered.append, recovered.acknowledge,
                 on_completed=lambda: None).deliver(*recovered.first())
-            self.assertEqual(delivered, packets)
+            self.assertEqual(delivered, pending)
+            self.assertNotIn('capture_event_id', packets[0])
             self.assertEqual(receipt.completed_records, 3)
             self.assertIsNone(recovered.first())
             recovered.close()
@@ -73,5 +74,5 @@ class JournalTests(unittest.TestCase):
             with self.assertRaises(JournalFull):
                 journal.append([{'sequence':1}])
             self.assertEqual(journal.stats(), dict(before, journal_max_payload_bytes=journal.max_bytes))
-            self.assertEqual(journal.first()[1], [{'sequence':0}])
+            self.assertEqual(journal.first()[1][0]['sequence'], 0)
             journal.close()
