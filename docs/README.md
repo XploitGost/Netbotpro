@@ -17,6 +17,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [ADR 0002: journal batch acknowledgement](adr/0002-journal-batch-acknowledgement.md)
 - [ADR 0003: persistence flush results](adr/0003-persistence-flush-receipts.md)
 - [ADR 0004: partial persistence retry](adr/0004-partial-persistence-retry.md)
+- [ADR 0005: stable journal packet identity](adr/0005-journal-packet-occurrence-identity.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Screenshot provenance](SCREENSHOTS.md)

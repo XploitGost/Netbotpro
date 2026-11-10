@@ -70,6 +70,7 @@ class SnifferPersistence:
 
         packet_row = {
             "capture_id": packet.get("id"),
+            "capture_event_id": packet.get("capture_event_id"),
             "ts": packet.get("ts"),
             "src": packet.get("src"),
             "dst": packet.get("dst"),
@@ -343,8 +344,8 @@ class SnifferPersistence:
                 result = returned if isinstance(returned, dict) else {"retries": 0}
                 history_done = True
                 with self._lock:
-                    self._persisted_packets += len(packet_rows)
-                    self._persisted_alerts += len(alert_rows)
+                    self._persisted_packets += result.get('packets_inserted', len(packet_rows))
+                    self._persisted_alerts += result.get('alerts_inserted', len(alert_rows))
             if not flow_done:
                 if flow_rows and self._flow_writer is not None:
                     self._flow_writer(flow_rows)

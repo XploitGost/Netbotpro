@@ -4,6 +4,10 @@
 
 ### Added
 
+- Stable journal occurrence IDs and optional unique packet-history keys protect
+  retained packet rows on reopen/replay, preserving old records and independent
+  identical packets. Alerts/flow state and end-to-end durability remain separate
+  work (ADR 0005).
 - Prepared persistence operations preserve successful history/flow steps within
   one retry cycle, preventing duplicate history inserts after later flow failure
   without adding a disk ledger or claiming crash-safe deduplication (ADR 0004).

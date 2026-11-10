@@ -114,6 +114,19 @@ class _FakeFlowService:
 
 
 class SnifferServiceTests(unittest.TestCase):
+    def test_journal_occurrence_id_survives_analysis_and_view_delivery(self):
+        identity = 'cap-v1:' + 'a' * 32 + ':1:0'
+        service = SnifferService(EventBus(), capture_provider=_FakeCaptureProvider(),
+                                 flow_service=_FakeFlowService())
+        try:
+            with patch.object(service._detection_pipeline, 'analyze', return_value=[]):
+                service._process_packet({'capture_event_id': identity, 'src': '192.0.2.1',
+                                         'dst': '192.0.2.2', 'proto': 'TCP'})
+            packet = service.recent_packets()[-1]
+            self.assertEqual(packet['id'], identity)
+            self.assertEqual(packet['capture_event_id'], identity)
+        finally:
+            service.close()
     def test_runtime_handover_updates_display_interface(self):
         from unittest.mock import Mock
         provider = _FakeCaptureProvider()

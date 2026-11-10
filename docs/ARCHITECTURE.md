@@ -74,6 +74,12 @@ This is not persistent deduplication or a cross-database transaction; replay aft
 restart and uncertain callback outcomes remain open.
 See [ADR 0004](adr/0004-partial-persistence-retry.md).
 
+Journal packet occurrences now have stable, database-namespaced identities.
+Retained packet history rows are unique on this new optional key, without merging
+legacy capture IDs or identical independent packets. Alert and flow side effects
+are not deduplicated, and callback acknowledgement still is not a durable history
+receipt. See [ADR 0005](adr/0005-journal-packet-occurrence-identity.md).
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch

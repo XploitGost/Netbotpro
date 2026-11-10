@@ -24,6 +24,7 @@ from backend.app.services.incident_correlation import (
 from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.packet_delivery import AnalyzedPacket, DeliveryPorts, PacketDelivery
+from core.capture.identity import valid_capture_event_id
 from backend.app.services.redaction import redact_sensitive_data
 from core.privacy_redaction import redaction_backend
 from backend.app.services.service_attribution import ServiceAttributionEngine
@@ -285,7 +286,8 @@ class SnifferService:
     def _analyze_packet(self, meta: dict[str, Any]) -> AnalyzedPacket:
         packet = dict(meta)
         packet.setdefault("ts", datetime.now(timezone.utc).isoformat())
-        packet.setdefault("id", self._next_packet_id())
+        if 'id' not in packet:
+            packet['id'] = valid_capture_event_id(packet.get('capture_event_id')) or self._next_packet_id()
         payload_settings = current_payload_capture_settings()
         self._apply_payload_policy(packet, payload_settings)
         journal_mode = os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1'

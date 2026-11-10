@@ -10,6 +10,9 @@ from pathlib import Path
 import sqlite3
 import threading
 import zlib
+from uuid import uuid4
+
+from core.capture.identity import valid_capture_event_id
 
 
 class JournalFull(RuntimeError):
@@ -67,7 +70,13 @@ class CaptureJournal:
         self._db.execute('CREATE TABLE IF NOT EXISTS batches (id INTEGER PRIMARY KEY AUTOINCREMENT, count INTEGER NOT NULL, payload BLOB NOT NULL)')
         self._db.execute('CREATE TABLE IF NOT EXISTS budget (id INTEGER PRIMARY KEY CHECK(id=1), bytes INTEGER NOT NULL, records INTEGER NOT NULL)')
         self._db.execute('INSERT OR IGNORE INTO budget VALUES (1,0,0)')
+        self._db.execute('CREATE TABLE IF NOT EXISTS journal_identity (id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL)')
+        self._db.execute('INSERT OR IGNORE INTO journal_identity VALUES (1,?)', (uuid4().hex,))
         self._db.commit()
+        self._namespace = self._db.execute('SELECT namespace FROM journal_identity WHERE id=1').fetchone()[0]
+        if valid_capture_event_id(f'cap-v1:{self._namespace}:1:0') is None:
+            self._db.close()
+            raise ValueError('Invalid journal identity; refusing to change replay identities')
 
     def append(self, packets):
         if not packets:
@@ -89,7 +98,13 @@ class CaptureJournal:
     def first(self):
         with self._lock:
             row = self._db.execute('SELECT id,payload FROM batches ORDER BY id LIMIT 1').fetchone()
-        return (row[0], json.loads(zlib.decompress(_protect(row[1], decrypt=True)))) if row else None
+        if row is None:
+            return None
+        packets = json.loads(zlib.decompress(_protect(row[1], decrypt=True)))
+        # Decoded rows are owned here; identity also works for legacy encrypted batches.
+        for offset, packet in enumerate(packets):
+            packet['capture_event_id'] = f'cap-v1:{self._namespace}:{row[0]}:{offset}'
+        return row[0], packets
 
     def acknowledge(self, identifier):
         with self._lock, self._db:
