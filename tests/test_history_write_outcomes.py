@@ -104,6 +104,23 @@ class HistoryWriteOutcomeTests(unittest.TestCase):
         self.assertEqual(writer.metrics()['events_written_total'], 0)
         self.assertEqual(writer.metrics()['events_failed_total'], 1)
 
+    def test_skips_do_not_clear_errors_or_create_success_latency_samples(self):
+        write = Mock(side_effect=[OSError('private connection details'),
+                                 PersistenceWriteOutcome(0, 1), PersistenceWriteOutcome(1)])
+        writer = BatchPersistenceWriter(write, enabled=False, retry_max=0)
+        self.assertFalse(writer.enqueue('packet_record', {}))
+        self.assertFalse(writer.enqueue('packet_record', {}))
+        metrics = writer.metrics()
+        self.assertEqual(metrics['last_error'], 'OSError')
+        self.assertEqual(metrics['events_skipped_total'], 1)
+        self.assertEqual(metrics['events_written_total'], 0)
+        self.assertEqual(len(writer._latencies), 0)
+        self.assertEqual(writer._consecutive_failures, 1)
+        self.assertNotIn('private connection', str(metrics))
+        self.assertTrue(writer.enqueue('packet_record', {}))
+        self.assertEqual(writer.metrics()['last_error'], '')
+        self.assertEqual(len(writer._latencies), 1)
+
     @patch('backend.app.services.sniffer_persistence.is_persist_enabled', return_value=True)
     def test_missing_connection_is_not_a_successful_write(self, _enabled):
         persistence = SnifferPersistence(batch_size=100, flush_interval=60, max_retries=0)

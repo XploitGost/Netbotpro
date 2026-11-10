@@ -28,8 +28,10 @@ Central prepared writes distinguish these outcomes:
 `PersistenceWriteOutcome` carries adapter-confirmed processed event counts,
 intentional skip counts and adapter retries. The batch writer validates the counts
 against its prepared group. Synchronous and worker paths count skipped events
-separately; all-skipped groups do not increment written batches. The existing
-`events_written_total` describes confirmed processing, not newly inserted rows;
+separately; all-skipped groups do not increment written batches.
+All-skipped groups also do not create write-latency samples or clear a preceding
+storage error/failure streak. A later confirmed write can clear that current error.
+The existing `events_written_total` describes confirmed processing, not newly inserted rows;
 packet/alert insertion counters retain the adapter's actual row counts.
 
 Skipped events are exposed as `events_skipped_total`, its persistence-prefixed

@@ -573,11 +573,12 @@ class BatchPersistenceWriter:
                 self._events_skipped += outcome.skipped_events
                 self._batches_written += int(outcome.written_events > 0)
                 self._retry_total += outcome.storage_retries
-                self._latencies.append(latency)
-                self._recent_latencies.append((time.monotonic(), latency))
+                if outcome.written_events:
+                    self._latencies.append(latency)
+                    self._recent_latencies.append((time.monotonic(), latency))
+                    self._last_error = ""
+                    self._consecutive_failures = 0
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
-                self._last_error = ""
-                self._consecutive_failures = 0
         except Exception as exc:
             with self._lock:
                 self._events_failed += events
@@ -639,11 +640,12 @@ class BatchPersistenceWriter:
                 self._events_skipped += outcome.skipped_events
                 self._batches_written += int(outcome.written_events > 0)
                 self._retry_total += outcome.storage_retries
-                self._latencies.append(latency)
-                self._recent_latencies.append((time.monotonic(), latency))
+                if outcome.written_events:
+                    self._latencies.append(latency)
+                    self._recent_latencies.append((time.monotonic(), latency))
+                    self._last_error = ""
+                    self._consecutive_failures = 0
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
-                self._last_error = ""
-                self._consecutive_failures = 0
             return outcome.skipped_events == 0
         except Exception as exc:
             with self._lock:
