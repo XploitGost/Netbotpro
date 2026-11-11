@@ -87,6 +87,12 @@ include new skips without treating disabled storage as a database fault.
 Legacy and flow adapters still have implicit return semantics. See
 [ADR 0006](adr/0006-explicit-history-write-outcomes.md).
 
+An opt-in tracked-history API now exposes one stable, payload-free receipt per
+bounded packet/alert group. Only explicit adapter category confirmation can mark
+it committed; queue admission, legacy returns and a later flush cannot. Normal
+Capture does not use this API yet, and journal acknowledgement remains unchanged.
+See [ADR 0007](adr/0007-tracked-history-group-receipts.md).
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch

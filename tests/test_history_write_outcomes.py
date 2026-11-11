@@ -38,7 +38,8 @@ class HistoryWriteOutcomeTests(unittest.TestCase):
         try:
             with patch.object(persistence, '_run_retention_cleanup'):
                 outcome = persistence._batch_writer._execute_with_retry(grouped)
-            self.assertEqual(outcome, PersistenceWriteOutcome(3))
+            self.assertEqual(outcome, PersistenceWriteOutcome(3,
+                confirmed_types=frozenset({'packet_record', 'alert_record'})))
             self.assertEqual(insert.call_count, 2)
             flow.assert_called_once()
             self.assertEqual(persistence.stats()['persisted_packets'], 1)
