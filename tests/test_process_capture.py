@@ -58,7 +58,7 @@ def orphan_parent(channel):
 
 class ProcessCaptureTests(unittest.TestCase):
     def test_journal_failure_stage_and_completed_prefix_are_preserved(self):
-        for stage in ('preparation', 'analysis', 'acknowledgement'):
+        for stage in ('preparation', 'analysis', 'completion', 'acknowledgement'):
             with self.subTest(stage=stage):
                 def callback(packet):
                     if stage == 'analysis' and packet['sequence'] == 2:
@@ -69,6 +69,8 @@ class ProcessCaptureTests(unittest.TestCase):
                 session._stopping = threading.Event()
                 if stage == 'preparation':
                     session._prepare_batch = Mock(side_effect=ValueError('test failure'))
+                if stage == 'completion':
+                    session._complete_batch = Mock(side_effect=ValueError('test failure'))
                 if stage == 'acknowledgement':
                     session._journal.acknowledge.side_effect = ValueError('test failure')
                 session._receive_journal()
@@ -77,11 +79,19 @@ class ProcessCaptureTests(unittest.TestCase):
                 self.assertEqual(session._journal_acknowledged, 0)
                 self.assertEqual(session._callback_errors, 1)
                 self.assertEqual(session._delivered,
-                    {'preparation': 0, 'analysis': 1, 'acknowledgement': 2}[stage])
+                    {'preparation': 0, 'analysis': 1, 'completion': 2, 'acknowledgement': 2}[stage])
                 self.assertIn(f'Journal {stage} failed', session._error)
                 self.assertEqual(session._journal.first.call_count, 1)
                 self.assertEqual(session._journal.acknowledge.call_count,
                     1 if stage == 'acknowledgement' else 0)
+
+    def test_completion_requires_journal_and_configuration_before_start(self):
+        session = ProcessCaptureSession(lambda packet: None, complete_batch=lambda *args: None)
+        with self.assertRaisesRegex(RuntimeError, 'requires journal'):
+            session.start()
+        session._process = object()
+        with self.assertRaisesRegex(RuntimeError, 'before Start'):
+            session.set_batch_completion(lambda *args: None)
 
     @unittest.skipUnless(os.name == 'nt', 'DPAPI journal requires Windows')
     def test_inflight_packet_finishes_during_normal_journal_stop(self):

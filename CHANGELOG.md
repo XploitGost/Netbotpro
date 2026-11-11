@@ -4,6 +4,10 @@
 
 ### Added
 
+- Experimental history-confirmed journal acknowledgement waits for one bounded
+  packet/alert commit receipt before publication and journal reclamation, with
+  failure/replay regression tests. Default callback policy and installed settings
+  are unchanged; stateful analysis is not transactional (ADR 0009).
 - Versioned detector occurrence keys and targeted alert-history uniqueness protect
   identified journal detections on replay while preserving unknown/legacy alerts,
   independent occurrences and existing live IDs. Capture acknowledgement and

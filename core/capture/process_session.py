@@ -125,9 +125,10 @@ def _capture_child(output, control, stopping, counters, iface, factory, capacity
 
 
 class ProcessCaptureSession:
-    def __init__(self, callback, *, capacity=8192, factory=None, timeout=10, journal_path=None, prepare_batch=None):
+    def __init__(self, callback, *, capacity=8192, factory=None, timeout=10, journal_path=None, prepare_batch=None, complete_batch=None):
         self._callback = callback
         self._prepare_batch = prepare_batch
+        self._complete_batch = complete_batch
         self._capacity = max(1, int(capacity))
         self._factory = factory
         self._journal_path = str(journal_path) if journal_path else None
@@ -158,9 +159,16 @@ class ProcessCaptureSession:
             raise RuntimeError('Batch preparation must be configured before Start')
         self._prepare_batch = callback
 
+    def set_batch_completion(self, callback):
+        if self._process is not None:
+            raise RuntimeError('Batch completion must be configured before Start')
+        self._complete_batch = callback
+
     def start(self, iface=None):
         if self._process is not None:
             raise RuntimeError('Capture session already started')
+        if self._complete_batch is not None and not self._journal_path:
+            raise RuntimeError('Batch completion requires journal capture')
         context = mp.get_context('spawn')
         if self._journal_path:
             from core.capture.journal import CaptureJournal
@@ -233,7 +241,8 @@ class ProcessCaptureSession:
 
     def _receive_journal(self):
         delivery = JournalBatchDelivery(self._callback, self._journal.acknowledge,
-            prepare=self._prepare_batch, on_completed=self._record_journal_completion)
+            prepare=self._prepare_batch, on_completed=self._record_journal_completion,
+            complete_batch=self._complete_batch)
         while True:
             row = self._journal.first()
             if row is None:
@@ -359,6 +368,7 @@ class ProcessCaptureSession:
                         journal_backlog_warning_records=self._capacity if self._journal_path else None,
                         journal_acknowledged_records=self._journal_acknowledged if self._journal_path else None,
                         journal_failure_stage=self._journal_failure_stage,
+                        journal_completion_required=self._complete_batch is not None,
                         ipc_delivered=self._delivered, ipc_callback_errors=self._callback_errors)
 
     def shutdown_ready(self):

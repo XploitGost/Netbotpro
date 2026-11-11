@@ -90,8 +90,16 @@ Legacy and flow adapters still have implicit return semantics. See
 An opt-in tracked-history API now exposes one stable, payload-free receipt per
 bounded packet/alert group. Only explicit adapter category confirmation can mark
 it committed; queue admission, legacy returns and a later flush cannot. Normal
-Capture does not use this API yet, and journal acknowledgement remains unchanged.
+Capture leaves this API unused by default, with callback acknowledgement unchanged.
 See [ADR 0007](adr/0007-tracked-history-group-receipts.md).
+
+The experimental `NETBOT_JOURNAL_ACK_MODE=history` policy now connects this API
+to journal completion: analyze at most 32 packets, commit one tracked packet/alert
+group, publish through delivery ports without duplicating history, then acknowledge.
+History storage and process journal capture must be enabled. Unconfirmed writes
+retain the batch. Stateful analysis, flow writes and publication are not covered
+by one transaction or an exactly-once guarantee. Installed settings and the default
+policy are unchanged. See [ADR 0009](adr/0009-opt-in-history-confirmed-journal-ack.md).
 
 Identified detections now have separate versioned occurrence keys assigned before
 coalescing. Retained alert history suppresses only matching keys, without merging

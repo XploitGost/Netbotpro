@@ -2,10 +2,35 @@ import ast
 from pathlib import Path
 import unittest
 
-from core.capture.batch_delivery import BatchDeliveryError, JournalBatchDelivery
+from core.capture.batch_delivery import BatchDeliveryError, JournalBatchDelivery, BatchCompletionReceipt
 
 
 class JournalBatchDeliveryTests(unittest.TestCase):
+    def test_completion_receives_all_results_and_precedes_ack(self):
+        events = []
+        def complete(identifier, results):
+            events.append(('complete', list(results)))
+            return BatchCompletionReceipt(identifier, len(results))
+        delivery = JournalBatchDelivery(lambda row: row['sequence'],
+            lambda identifier: events.append(('ack', identifier)),
+            on_completed=lambda: None, complete_batch=complete)
+        delivery.deliver(7, [{'sequence': 1}, {'sequence': 2}])
+        self.assertEqual(events, [('complete', [1, 2]), ('ack', 7)])
+
+    def test_missing_or_mismatched_completion_never_acknowledges(self):
+        for value in (None, False, {'identifier': 7}, BatchCompletionReceipt(8, 1),
+                      BatchCompletionReceipt(7, 2), BatchCompletionReceipt(7, True)):
+            with self.subTest(value=value):
+                acknowledgements = []
+                delivery = JournalBatchDelivery(lambda packet: packet,
+                    acknowledgements.append, on_completed=lambda: None,
+                    complete_batch=lambda identifier, results: value)
+                with self.assertRaises(BatchDeliveryError) as raised:
+                    delivery.deliver(7, [{}])
+                self.assertEqual(raised.exception.stage, 'completion')
+                self.assertEqual(raised.exception.completed_records, 1)
+                self.assertEqual(acknowledgements, [])
+
     def test_prepare_callbacks_accounting_then_acknowledgement(self):
         events = []
         packets = [{'sequence': 1}, {'sequence': 2}]
