@@ -24,6 +24,7 @@ from backend.app.services.incident_correlation import (
 from backend.app.services.live_ring_buffer import LiveRingBuffer
 from backend.app.services.packet_queue import BoundedPacketQueue
 from backend.app.services.packet_delivery import AnalyzedPacket, DeliveryPorts, PacketDelivery
+from backend.app.services.journal_history_delivery import JournalHistoryDelivery, MAX_HISTORY_BATCH_PACKETS
 from core.capture.identity import valid_capture_event_id
 from backend.app.services.redaction import redact_sensitive_data
 from core.privacy_redaction import redaction_backend
@@ -82,6 +83,11 @@ class SnifferService:
         service_attribution: ServiceAttributionEngine | None = None,
         incident_correlation: IncidentCorrelationEngine | None = None,
     ) -> None:
+        self._journal_ack_mode = os.environ.get('NETBOT_JOURNAL_ACK_MODE', 'callback').strip().lower() or 'callback'
+        if self._journal_ack_mode not in {'callback', 'history'}:
+            raise ValueError('Unknown journal acknowledgement mode')
+        if self._journal_ack_mode == 'history' and os.environ.get('NETBOT_CAPTURE_JOURNAL', '') != '1':
+            raise ValueError('History-confirmed acknowledgement requires journal capture')
         self._lock = threading.Lock()
         self._event_bus = event_bus
         self._lifecycle_lock = threading.RLock()
@@ -119,6 +125,14 @@ class SnifferService:
             incident_correlation or IncidentCorrelationEngine.from_env()
         )
         self._packet_delivery = self._make_packet_delivery()
+        self._history_delivery = None
+        if self._journal_ack_mode == 'history':
+            history_publication = self._make_packet_delivery(persist_history=False)
+            self._history_delivery = JournalHistoryDelivery(
+                lambda packet: self._analyze_packet(packet),
+                lambda records: self._persistence.persist_batch_tracked(records),
+                history_publication.deliver,
+            )
         self._packet_queue = BoundedPacketQueue(
             max_size=PACKET_QUEUE_MAX_SIZE,
             overflow_policy=PACKET_QUEUE_OVERFLOW_POLICY,
@@ -167,6 +181,8 @@ class SnifferService:
         return "Live capture is unavailable in the current runtime."
 
     def _start_capture_session(self, iface: str | None) -> tuple[CaptureSession, str]:
+        if self._history_delivery is not None and not self._persistence.stats().get('packet_storage_enabled'):
+            raise CaptureStartUnavailableError('History-confirmed capture requires enabled history storage')
         preflight = self.capture_preflight()
         if not preflight.get("ready"):
             raise CaptureStartUnavailableError(
@@ -179,9 +195,16 @@ class SnifferService:
 
         def runner() -> None:
             try:
-                engine = self._capture_provider.create_session(self._on_packet)
+                callback = self._history_delivery.analyze if self._history_delivery is not None else self._on_packet
+                engine = self._capture_provider.create_session(callback)
+                if self._history_delivery is not None and not isinstance(engine, ProcessCaptureSession):
+                    raise RuntimeError('History-confirmed capture requires a journal process session')
                 if isinstance(engine, ProcessCaptureSession):
-                    engine.set_batch_preparer(self._detection_pipeline.prepare_batch)
+                    if self._history_delivery is not None:
+                        engine.set_batch_preparer(self._prepare_history_batch)
+                        engine.set_batch_completion(self._history_delivery.complete)
+                    else:
+                        engine.set_batch_preparer(self._detection_pipeline.prepare_batch)
                 engine.start(iface=iface)
                 actual_iface = engine.selected_iface() or iface or "default"
                 result["engine"] = engine
@@ -247,14 +270,19 @@ class SnifferService:
         if not accepted:
             logger.warning("packet intake queue full; dropped newest packet")
 
-    def _make_packet_delivery(self) -> PacketDelivery:
+    def _prepare_history_batch(self, packets: list[dict[str, Any]]) -> None:
+        self._history_delivery.validate_batch(packets)
+        self._detection_pipeline.prepare_batch(packets)
+
+    def _make_packet_delivery(self, *, persist_history: bool = True) -> PacketDelivery:
         return PacketDelivery(DeliveryPorts(
             add_packet=lambda row: self._state.add_packet(row),
             add_alerts=lambda rows: self._state.add_alerts(rows),
             append_view=lambda *args, **kwargs: self._live_ring_buffer.append(*args, **kwargs),
             append_incident_view=self._append_incident_view,
             submit_flow_view=self._submit_flow_view,
-            persist_packet=lambda packet, alerts: self._persistence.persist(packet, alerts),
+            persist_packet=(lambda packet, alerts: self._persistence.persist(packet, alerts))
+                if persist_history else (lambda packet, alerts: None),
             persist_flow=self._persist_analyzed_flow,
             publish_packet=lambda row: self._publisher.publish_packet(row),
             publish_alerts=lambda rows: self._publisher.publish_alerts(rows),
@@ -290,7 +318,8 @@ class SnifferService:
             packet['id'] = valid_capture_event_id(packet.get('capture_event_id')) or self._next_packet_id()
         payload_settings = current_payload_capture_settings()
         self._apply_payload_policy(packet, payload_settings)
-        journal_mode = os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1'
+        journal_mode = (getattr(self, '_journal_ack_mode', 'callback') == 'history'
+                        or os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1')
         prior_errors = self._detection_pipeline.error_count() if journal_mode else 0
         try:
             alerts = self._detection_pipeline.analyze(packet)
@@ -654,7 +683,13 @@ class SnifferService:
             "stage_profile": self._stage_profiler.stats() if self._stage_profiler is not None else {"enabled": False},
             "redaction": {"backend": redaction_backend()},
             "stability": self._stability_recorder.stats() if self._stability_recorder is not None else {"enabled": False},
-            "analysis_delivery": {"mode": "journal_inline" if os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1' else "worker_pool"},
+            "analysis_delivery": {
+                "mode": "journal_history" if self._history_delivery is not None else
+                    "journal_inline" if os.environ.get('NETBOT_CAPTURE_JOURNAL', '') == '1' else "worker_pool",
+                "journal_ack_policy": self._journal_ack_mode,
+                "history_scope": "packet_alert_history" if self._history_delivery is not None else None,
+                "history_batch_packet_limit": MAX_HISTORY_BATCH_PACKETS if self._history_delivery is not None else None,
+            },
             'flow_views': self._flow_views.stats() if self._flow_views is not None else {'enabled': False},
             'flow_memory': self._flow_service.memory_stats() if type(self._flow_service) is FlowService else {'enabled': False},
             "capture": self._capture_runtime_state() if capture_state is None else deepcopy(capture_state),

@@ -59,14 +59,21 @@ adapters or change journal reclamation. See
 [ADR 0006](adr/0006-explicit-history-write-outcomes.md).
 
 Tracked packet/alert groups have process-local completion handles grounded in
-explicit adapter category confirmation. This opt-in foundation is not yet wired
-to Capture or journal reclamation; see
+explicit adapter category confirmation. This foundation leaves default Capture
+acknowledgement unchanged; see
 [ADR 0007](adr/0007-tracked-history-group-receipts.md).
 
 Versioned detector occurrence keys now protect retained identified alert rows
 on replay. Unknown provenance remains non-deduplicated; this does not checkpoint
 analysis state or change Capture acknowledgement. See
 [ADR 0008](adr/0008-versioned-alert-occurrence-keys.md).
+
+An experimental `NETBOT_JOURNAL_ACK_MODE=history` bridge now submits one bounded
+packet/alert history group, waits for its commit receipt, publishes without a
+second history enqueue, then permits journal acknowledgement. The default remains
+`callback`. Flow/analysis side effects are not transactional, and real-traffic
+performance validation remains required. See
+[ADR 0009](adr/0009-opt-in-history-confirmed-journal-ack.md).
 
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.
