@@ -78,6 +78,9 @@ _PACKET_SCHEMA_UPDATES = {
 }
 
 _ALERT_SCHEMA_UPDATES = {
+    "alert_event_id": "ALTER TABLE alerts ADD COLUMN alert_event_id TEXT",
+    "detection_rule_key": "ALTER TABLE alerts ADD COLUMN detection_rule_key TEXT",
+    "detection_rule_version": "ALTER TABLE alerts ADD COLUMN detection_rule_version TEXT",
     "severity": "ALTER TABLE alerts ADD COLUMN severity TEXT",
     "engine": "ALTER TABLE alerts ADD COLUMN engine TEXT",
     "score_raw": "ALTER TABLE alerts ADD COLUMN score_raw REAL",
@@ -310,6 +313,7 @@ def get_conn() -> sqlite3.Connection | None:
         for column, statement in _ALERT_SCHEMA_UPDATES.items():
             _ensure_column(_CONN, "alerts", column, statement)
         _CONN.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_packets_capture_event_id ON packets(capture_event_id) WHERE capture_event_id IS NOT NULL')
+        _CONN.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_alert_event_id ON alerts(alert_event_id) WHERE alert_event_id IS NOT NULL')
         _CONN.commit()
     return _CONN
 

@@ -12,6 +12,7 @@ Rule types:
 
 from __future__ import annotations
 from core.detection_clock import detection_time
+from core.alert_identity import custom_rule_key
 from core.scan_response_context import ScanResponseContext
 
 import json
@@ -243,6 +244,8 @@ class SignatureIDS:
             if len(arr) >= self.flood_threshold:
                 alert = {
                     "attack_type": "Generic Flood / High Rate",
+                    "detection_rule_key": "signature.generic_flood",
+                    "detection_rule_version": "1",
                     "detail": (
                         f"Source {src} sent {len(arr)} packets in the last "
                         f"{self.flood_window_sec} seconds."
@@ -283,6 +286,8 @@ class SignatureIDS:
                         self._scan_report_evictions += 1
                     alert = {
                         "attack_type": "Port Scan / Nmap-like",
+                        "detection_rule_key": "signature.port_scan",
+                        "detection_rule_version": "1",
                         "detail": (
                             f"{src} → {dst} scanned ports {unique_ports} "
                             f"in about {self.port_scan_window_sec} seconds."
@@ -310,6 +315,8 @@ class SignatureIDS:
             if len(arr3) >= self.syn_threshold:
                 alert = {
                     "attack_type": "SYN Flood",
+                    "detection_rule_key": "signature.syn_flood",
+                    "detection_rule_version": "1",
                     "detail": (
                         f"{src} → {dst} sent {len(arr3)} SYN packets "
                         f"in about {self.syn_window_sec} seconds."
@@ -378,6 +385,9 @@ class SignatureIDS:
 
             if len(arr) >= thr:
                 fired = {
+                    "detection_rule_key": custom_rule_key('signature.custom', idx,
+                        rule.get('name') or 'Custom rule', src_ip, rule_dport, window_sec, thr),
+                    "detection_rule_version": "1",
                     "attack_type": rule.get("name") or "Custom rule",
                     "detail": (
                         f"Custom rule '{rule.get('name')}' fired for src={src} "

@@ -93,6 +93,12 @@ it committed; queue admission, legacy returns and a later flush cannot. Normal
 Capture does not use this API yet, and journal acknowledgement remains unchanged.
 See [ADR 0007](adr/0007-tracked-history-group-receipts.md).
 
+Identified detections now have separate versioned occurrence keys assigned before
+coalescing. Retained alert history suppresses only matching keys, without merging
+unknown provenance, legacy records or similar independent packet occurrences.
+Live IDs, detector state and journal acknowledgement remain unchanged. See
+[ADR 0008](adr/0008-versioned-alert-occurrence-keys.md).
+
 ## Capture, Recovery And Durability
 
 Process capture isolates raw intake with bounded buffering, a journal and batch
