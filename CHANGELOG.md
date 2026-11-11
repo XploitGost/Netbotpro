@@ -4,6 +4,10 @@
 
 ### Added
 
+- Versioned detector occurrence keys and targeted alert-history uniqueness protect
+  identified journal detections on replay while preserving unknown/legacy alerts,
+  independent occurrences and existing live IDs. Capture acknowledgement and
+  stateful analysis replay remain separate work (ADR 0008).
 - Opt-in, bounded history-group receipts distinguish admission, confirmed commit,
   rejection, eviction, skips and failure without changing normal Capture or
   journal acknowledgement. Legacy returns cannot certify these handles (ADR 0007).

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 from core.detection_clock import detection_time
+from core.alert_identity import custom_rule_key
 import os
 import threading
 from collections import defaultdict
@@ -125,6 +126,9 @@ class RuleEngine:
 
             if len(arr) >= thr:
                 return {
+                    "detection_rule_key": custom_rule_key('rules.custom', idx,
+                        rule.get('name') or 'Custom rule', src_ip, rule_dport, window_sec, thr),
+                    "detection_rule_version": "1",
                     "attack_type": rule.get("name") or "Custom rule",
                     "score": 1.0,
                     "detail": f"rule: {rule.get('name')} window={window_sec}s thr={thr}",

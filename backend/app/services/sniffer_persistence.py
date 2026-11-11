@@ -136,6 +136,9 @@ class SnifferPersistence:
         }
         alert_rows = [
             {
+                "alert_event_id": alert.get("alert_event_id"),
+                "detection_rule_key": alert.get("detection_rule_key"),
+                "detection_rule_version": alert.get("detection_rule_version"),
                 "ts": alert.get("ts"),
                 "src": alert.get("src"),
                 "dst": alert.get("dst"),

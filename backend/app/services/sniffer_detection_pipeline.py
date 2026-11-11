@@ -13,6 +13,7 @@ from backend.app.services.app_protocols import infer_app_protocol
 ensure_project_root_on_path()
 
 from core.detection_clock import detection_time
+from core.alert_identity import alert_occurrence_id
 
 from core.firewall_tools import block_ip  # noqa: E402
 from core.ids_ml import MLIDS  # noqa: E402
@@ -121,6 +122,17 @@ class SnifferDetectionPipeline:
             logger.exception("App-aware detection failed for packet")
 
         alerts = [self._build_alert_payload(packet, alert) for alert in raw_alerts]
+        if alerts and packet.get('capture_event_id'):
+            occurrences: dict[tuple[str, str], int] = defaultdict(int)
+            for alert in alerts:
+                rule, version = alert.get('detection_rule_key'), alert.get('detection_rule_version')
+                if not isinstance(rule, str) or not isinstance(version, str):
+                    continue
+                key = (rule, version)
+                identity = alert_occurrence_id(packet.get('capture_event_id'), rule, version, occurrences[key])
+                if identity is not None:
+                    alert['alert_event_id'] = identity
+                occurrences[key] += 1
         self._maybe_auto_block(settings, alerts)
         with self._health_lock:
             self._packets_analyzed += 1
@@ -180,6 +192,8 @@ class SnifferDetectionPipeline:
             logger.exception("Failed to enrich alert")
 
         payload = {
+            "detection_rule_key": alert.get("detection_rule_key"),
+            "detection_rule_version": alert.get("detection_rule_version"),
             "ts": packet.get("ts"),
             "src": packet.get("src"),
             "dst": packet.get("dst"),
@@ -355,6 +369,8 @@ class SnifferDetectionPipeline:
             return None
         return {
             "attack_type": "DNS Tunneling / Exfil Pattern",
+            "detection_rule_key": "app.dns_tunneling",
+            "detection_rule_version": "1",
             "severity": "high",
             "score": min(0.96, 0.74 + (len(samples) * 0.06)),
             "detail": f"Suspicious DNS query burst for {qname} (labels={len(labels)}, longest_label={longest_label}, count={len(samples)}).",
@@ -390,6 +406,8 @@ class SnifferDetectionPipeline:
         host = str(packet.get("http_host") or packet.get("dst") or "-")
         return {
             "attack_type": "Cleartext Auth Over HTTP",
+            "detection_rule_key": "app.cleartext_auth",
+            "detection_rule_version": "1",
             "severity": "medium",
             "score": 0.74,
             "detail": f"HTTP {method} request to sensitive path {path or '/'} on host {host} crossed a remote boundary without TLS.",
@@ -434,6 +452,8 @@ class SnifferDetectionPipeline:
         alpn = list(packet.get("tls_alpn") or packet.get("alpn") or [])
         return {
             "attack_type": "TLS Without SNI / Beacon Pattern",
+            "detection_rule_key": "app.tls_no_sni",
+            "detection_rule_version": "1",
             "severity": "medium",
             "score": 0.68,
             "detail": f"Repeated {app_protocol} sessions to remote port {port} without SNI were observed (count={len(samples)}, alpn={','.join(map(str, alpn)) or '-'}).",
@@ -465,6 +485,8 @@ class SnifferDetectionPipeline:
         method = str(packet.get("http_method") or "GET").upper()
         return {
             "attack_type": "Admin Panel Probe",
+            "detection_rule_key": "app.admin_probe",
+            "detection_rule_version": "1",
             "severity": "medium",
             "score": 0.67,
             "detail": f"Incoming HTTP {method} request targeted a likely admin surface {path or '/'} on host {host}.",

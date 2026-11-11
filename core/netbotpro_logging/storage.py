@@ -9,6 +9,7 @@ from typing import Any
 from .config import get_conn, is_persist_enabled
 from .contracts import HistoryWriteResult
 from core.capture.identity import valid_capture_event_id
+from core.alert_identity import valid_alert_event_id
 
 _DB_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
@@ -70,6 +71,9 @@ _PACKET_COLUMNS = (
 )
 
 _ALERT_COLUMNS = (
+    "alert_event_id",
+    "detection_rule_key",
+    "detection_rule_version",
     "ts",
     "src",
     "dst",
@@ -147,9 +151,10 @@ def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
     cursor = conn.executemany(
-        f"INSERT INTO alerts ({', '.join(_ALERT_COLUMNS)}) VALUES ({', '.join(['?'] * len(_ALERT_COLUMNS))})",
+        f"INSERT INTO alerts ({', '.join(_ALERT_COLUMNS)}) VALUES ({', '.join(['?'] * len(_ALERT_COLUMNS))}) ON CONFLICT(alert_event_id) WHERE alert_event_id IS NOT NULL DO NOTHING",
         [
-            tuple(row.get(column) for column in _ALERT_COLUMNS)
+            tuple(valid_alert_event_id(row.get(column)) if column == 'alert_event_id'
+                  else row.get(column) for column in _ALERT_COLUMNS)
             for row in rows
         ],
     )

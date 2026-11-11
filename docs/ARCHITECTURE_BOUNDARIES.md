@@ -63,6 +63,11 @@ explicit adapter category confirmation. This opt-in foundation is not yet wired
 to Capture or journal reclamation; see
 [ADR 0007](adr/0007-tracked-history-group-receipts.md).
 
+Versioned detector occurrence keys now protect retained identified alert rows
+on replay. Unknown provenance remains non-deduplicated; this does not checkpoint
+analysis state or change Capture acknowledgement. See
+[ADR 0008](adr/0008-versioned-alert-occurrence-keys.md).
+
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.
 2. Define batch schema, sequence, lifecycle, ownership, error and backpressure

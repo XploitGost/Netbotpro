@@ -260,6 +260,8 @@ class MLIDS:
         )
         return {
             "attack_type": "ML Anomaly / Robot Detection",
+            "detection_rule_key": "ml.anomaly",
+            "detection_rule_version": "1",
             "detail": detail,
             "score": float(score),
         }

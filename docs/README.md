@@ -20,6 +20,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [ADR 0005: stable journal packet identity](adr/0005-journal-packet-occurrence-identity.md)
 - [ADR 0006: explicit history write outcomes](adr/0006-explicit-history-write-outcomes.md)
 - [ADR 0007: tracked history-group receipts](adr/0007-tracked-history-group-receipts.md)
+- [ADR 0008: versioned alert occurrence keys](adr/0008-versioned-alert-occurrence-keys.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Screenshot provenance](SCREENSHOTS.md)

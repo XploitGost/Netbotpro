@@ -81,6 +81,7 @@ class PartialPersistenceRetryTests(unittest.TestCase):
             connection.execute(f'CREATE TABLE {table} (' +
                 ','.join(f'{column} TEXT' for column in columns) + ')')
         connection.execute('CREATE UNIQUE INDEX event_identity ON packets(capture_event_id) WHERE capture_event_id IS NOT NULL')
+        connection.execute('CREATE UNIQUE INDEX alert_identity ON alerts(alert_event_id) WHERE alert_event_id IS NOT NULL')
         flow_calls = []
         def flaky_flow(rows):
             flow_calls.append(rows)
