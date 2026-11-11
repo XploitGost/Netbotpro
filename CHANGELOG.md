@@ -4,6 +4,9 @@
 
 ### Added
 
+- Opt-in, bounded history-group receipts distinguish admission, confirmed commit,
+  rejection, eviction, skips and failure without changing normal Capture or
+  journal acknowledgement. Legacy returns cannot certify these handles (ADR 0007).
 - Explicit history commit/disabled/unavailable outcomes and typed batch processing
   versus skip counts prevent skipped or unavailable writes being reported as
   stored events; flush receipts retain skip visibility (ADR 0006).

@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from backend.app.bootstrap import ensure_project_root_on_path
 from backend.app.services.batch_persistence import BatchPersistenceWriter
+from backend.app.services.persistence_ticket import MAX_TRACKED_GROUP_EVENTS, PersistenceTicket
 from backend.app.services.persistence_contracts import (
     HistoryStorageUnavailable, PersistenceFlushReceipt, PersistenceWriteOutcome,
 )
@@ -69,7 +70,9 @@ class SnifferPersistence:
     def persist(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> None:
         if not is_persist_enabled():
             return
+        self._batch_writer.enqueue_many(self._history_events(packet, alerts))
 
+    def _history_events(self, packet: dict[str, Any], alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         packet_row = {
             "capture_id": packet.get("id"),
             "capture_event_id": packet.get("capture_event_id"),
@@ -261,7 +264,18 @@ class SnifferPersistence:
                 for alert_row in alert_rows
             ],
         ]
-        self._batch_writer.enqueue_many(events)
+        return events
+
+    def persist_batch_tracked(
+        self, records: list[tuple[dict[str, Any], list[dict[str, Any]]]]
+    ) -> PersistenceTicket:
+        """Submit one opt-in history write unit, not a per-packet disk wait."""
+        if len(records) > MAX_TRACKED_GROUP_EVENTS or not 1 <= sum(
+            1 + len(alerts) for _, alerts in records
+        ) <= MAX_TRACKED_GROUP_EVENTS:
+            raise ValueError('Tracked history batch size is outside the supported bound')
+        events = [event for packet, alerts in records for event in self._history_events(packet, alerts)]
+        return self._batch_writer.enqueue_many_tracked(events)
 
     def persist_flow(self, flow: dict[str, Any]) -> None:
         if self._flow_writer is not None:
@@ -366,7 +380,9 @@ class SnifferPersistence:
             if self._flow_writer is None:
                 skipped += len(flow_rows)
             events = len(packet_rows) + len(alert_rows) + len(flow_rows)
-            return PersistenceWriteOutcome(events - skipped, skipped, int(result.get('retries', 0)))
+            confirmed = (frozenset(kind for kind in grouped if kind in {'packet_record', 'alert_record'})
+                         if result.get('status') == 'committed' else frozenset())
+            return PersistenceWriteOutcome(events - skipped, skipped, int(result.get('retries', 0)), confirmed)
 
         return write
 

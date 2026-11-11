@@ -18,11 +18,16 @@ class PersistenceWriteOutcome:
     written_events: int
     skipped_events: int = 0
     storage_retries: int = 0
+    confirmed_types: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         for value in (self.written_events, self.skipped_events, self.storage_retries):
             if type(value) is not int or value < 0:
                 raise ValueError('Write outcome counts must be nonnegative integers')
+        if not isinstance(self.confirmed_types, frozenset) or any(
+            not isinstance(kind, str) for kind in self.confirmed_types
+        ):
+            raise ValueError('Confirmed categories must be a frozen set of names')
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.app.services.redaction import redact_sensitive_data
+from backend.app.services.persistence_ticket import PersistenceTicket
 from backend.app.services.persistence_contracts import (
     FlushStatus, PersistenceFlushReceipt, PersistenceWriteOutcome,
 )
@@ -82,6 +83,7 @@ class _FlushCommand:
 @dataclass(frozen=True)
 class _EventGroup:
     events: tuple[PersistenceEvent, ...]
+    ticket: PersistenceTicket | None = None
 
 
 class BatchPersistenceWriter:
@@ -231,6 +233,21 @@ class BatchPersistenceWriter:
 
     def enqueue_many(self, events: list[dict[str, Any]]) -> bool:
         """Enqueue related records as one bounded persistence work unit."""
+        return self._enqueue_many(events)
+
+    def enqueue_many_tracked(self, events: list[dict[str, Any]]) -> PersistenceTicket:
+        """Opt-in packet/alert write unit; admission alone never confirms commit."""
+        ticket = PersistenceTicket(len(events))
+        if any(item.get('type') not in {'packet_record', 'alert_record'} for item in events):
+            raise ValueError('Tracked groups support only packet and alert records')
+        if self._stop.is_set() or (self._enabled and not self._worker.is_alive()):
+            ticket._resolve('unavailable')
+            return ticket
+        self._enqueue_many(events, ticket)
+        return ticket
+
+    def _enqueue_many(self, events: list[dict[str, Any]],
+                      ticket: PersistenceTicket | None = None) -> bool:
         if not events:
             return False
         normalized = tuple(
@@ -254,9 +271,11 @@ class BatchPersistenceWriter:
             )
             for item in events
         )
-        group = _EventGroup(normalized)
+        if ticket is not None and len(normalized) != ticket.wait().events:
+            raise ValueError('Tracked group size changed during preparation')
+        group = _EventGroup(normalized, ticket)
         if not self._enabled:
-            return self._write_synchronously(normalized)
+            return self._write_synchronously(normalized, ticket=ticket)
         with self._lock:
             self._events_received += len(normalized)
         try:
@@ -426,6 +445,8 @@ class BatchPersistenceWriter:
                     dropped.completed.set()
                 else:
                     dropped_count = len(dropped.events) if isinstance(dropped, _EventGroup) else 1
+                    if isinstance(dropped, _EventGroup) and dropped.ticket is not None:
+                        dropped.ticket._resolve('dropped')
             except queue.Empty:
                 pass
             try:
@@ -437,6 +458,8 @@ class BatchPersistenceWriter:
             accepted = False
         if not accepted:
             dropped_count += len(event.events) if isinstance(event, _EventGroup) else 1
+            if isinstance(event, _EventGroup) and event.ticket is not None:
+                event.ticket._resolve('rejected')
         with self._lock:
             self._events_dropped += dropped_count
             self._last_drop_reason = reason
@@ -497,6 +520,10 @@ class BatchPersistenceWriter:
                     self._flush_due(force=True)
                     item.status = 'completed'
                     item.completed.set()
+                    continue
+                if isinstance(item, _EventGroup) and item.ticket is not None:
+                    self._write_synchronously(item.events, ticket=item.ticket, count_received=False)
+                    self._flush_due()
                     continue
                 events = item.events if isinstance(item, _EventGroup) else (item,)
                 immediate_types: set[str] = set()
@@ -605,6 +632,10 @@ class BatchPersistenceWriter:
                 if isinstance(result, PersistenceWriteOutcome):
                     if result.written_events + result.skipped_events != events:
                         raise ValueError('Write outcome does not account for the batch')
+                    if (not result.confirmed_types.issubset(grouped)
+                            or sum(len(grouped[kind]) for kind in result.confirmed_types)
+                            > result.written_events):
+                        raise ValueError('Confirmed categories exceed accounted writes')
                     return result
                 storage_retries = (
                     int(result.get("retries", 0)) if isinstance(result, dict) else 0
@@ -625,12 +656,15 @@ class BatchPersistenceWriter:
                 if self._stop.wait(delay):
                     raise
 
-    def _write_synchronously(self, events: tuple[PersistenceEvent, ...]) -> bool:
+    def _write_synchronously(self, events: tuple[PersistenceEvent, ...], *,
+                             ticket: PersistenceTicket | None = None,
+                             count_received: bool = True) -> bool:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for event in events:
             grouped[event.type].append(event.public())
-        with self._lock:
-            self._events_received += len(events)
+        if count_received:
+            with self._lock:
+                self._events_received += len(events)
         started = time.perf_counter()
         try:
             outcome = self._execute_with_retry(dict(grouped))
@@ -646,12 +680,19 @@ class BatchPersistenceWriter:
                     self._last_error = ""
                     self._consecutive_failures = 0
                 self._last_flush_at = datetime.now(timezone.utc).isoformat()
+            if ticket is not None:
+                status = ('skipped' if outcome.skipped_events else
+                          'committed' if set(grouped).issubset(outcome.confirmed_types)
+                          else 'unconfirmed')
+                ticket._resolve(status)
             return outcome.skipped_events == 0
         except Exception as exc:
             with self._lock:
                 self._events_failed += len(events)
                 self._last_error = type(exc).__name__
                 self._consecutive_failures += 1
+            if ticket is not None:
+                ticket._resolve('failed')
             return False
 
 
