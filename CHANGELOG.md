@@ -4,6 +4,12 @@
 
 ### Added
 
+- Supervised 5..30 minute candidate UI soak with bounded scratch storage, RSS,
+  active processes, logs and deadlines; interface-return and traffic checks.
+  A local 903-second run reconciled 48,771 packets and an observed VPN interface
+  cycle. Memory growth and periodic probe overhead remain profiling gates.
+- Interface API preflight reuses the provider's fresh enumeration snapshot,
+  avoiding duplicate discovery and mutation of provider-owned payloads.
 - Isolated Windows candidate builder with fresh packaged backend, short artifact
   paths, separate metadata-only profile and bounded build/live-test storage.
   A local 122-second packaged UI run reconciled 10,189 accepted/acknowledged/stored

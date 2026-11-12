@@ -77,3 +77,50 @@ other providers retain their existing fallback. The service no longer mutates th
 provider-owned payload when adding preflight. This avoids the second enumeration
 without a new stale cache or a slower route-refresh interval. Focused regressions
 cover single-snapshot readiness and compatibility.
+
+## Completed Local Run: 2026-11-12
+
+The fresh package from `08c68198cb6dce7e69800ff92cdc44f1e0706a9d` completed
+the corrected supervised run. Capture and final UI checks took 903 seconds;
+supervisor startup, checks and cleanup took 911.03 seconds in total.
+
+| Observation | Measured |
+| --- | ---: |
+| Accepted / acknowledged / retained SQLite rows | 48,771 / 48,771 / 48,771 |
+| Final / sampled peak journal pending | 0 / 3,866 |
+| Interface switches | 2 |
+| Departure, return and further confirmed traffic | Observed |
+| History failed / dropped writes | 0 / 0 |
+| Reported driver buffer drops | 0; final coverage complete |
+| Renderer errors | 0 |
+| Bounded API tail p95 | 22.11 ms |
+| Selection through investigation findings | 354 ms |
+| Stop | 675 ms |
+| Sampled scratch peak | 75,444,505 bytes |
+| Sampled aggregate process RSS peak | 1,134.74 MiB |
+| Sampled aggregate CPU, one-core basis | 28.12% |
+| Sampled active process peak | 10 |
+| Lifetime observed process identities | 126 |
+| Profile and supervisor workspace removed | Yes |
+
+The active-process guard stayed enabled. Most later identities were short-lived
+capture-backend probes (117 sampled identities), not 126 simultaneously live
+processes. Interface enumeration is now shared within one API response, but these
+periodic backend probes still exist; their CPU cost needs separate attribution.
+
+Aggregate RSS for samples with nine active processes increased from 950.77 MiB
+at 154.2 seconds to 1,049.82 MiB at 894.5 seconds (99.05 MiB). Shared pages are
+counted more than once; this is neither unique memory nor proof of a leak.
+Do not extrapolate a flat memory curve or several-hour stability from this run.
+Memory ownership, retained state/caches and probe overhead are follow-up gates.
+
+The user also exercised paused Auto-follow during capture. The harness returned
+to Live Monitor for its final selection and resumed follow before Stop. Its
+inspection check confirms finding-panel navigation, not exhaustive protocol
+decoding or absence of every handled HTTP error. No real packet screenshot or
+raw traffic report was exported, and the installed app remained unchanged.
+
+Windows CI additionally exposed a test-isolation race: build-guard unit tests
+mocked the shared `time.monotonic`, allowing other background threads to consume
+their finite fake-clock sequence. The mocks now replace only the candidate
+module's dependency references, leaving global clocks/process APIs unchanged.
