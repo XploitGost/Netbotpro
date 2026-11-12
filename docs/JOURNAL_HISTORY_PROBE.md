@@ -29,11 +29,19 @@ Use the project's installed Python dependencies on Windows:
 ```powershell
 python scripts/qa/journal_history_probe.py --duration 20 --rate 250
 python scripts/qa/journal_history_probe.py --duration 60 --live
+python scripts/qa/journal_history_probe.py --duration 1 --rate 64 --scenario locked
+python scripts/qa/journal_history_probe.py --duration 1 --rate 64 --scenario locked-reopen
+python scripts/qa/journal_history_probe.py --duration 1 --rate 64 --scenario late-commit
+python scripts/qa/journal_history_probe.py --duration 1 --rate 64 --scenario slow-stop
 ```
 
 Live mode honors capture preflight and requires a working capture driver and its
 permissions. It does not elevate privileges or bypass preflight. Non-Windows
 hosts report that DPAPI is required; they do not fall back to plaintext.
+Fault scenarios reject `--live` and operate only on synthetic input and scratch
+storage. Workers reject execution outside the supervised scratch workspace before
+loading application settings. See [ADR 0010](adr/0010-retained-journal-recovery-lifecycle.md)
+for exact fault injection, recovery semantics and limits.
 
 Success requires positive acknowledged traffic, equality of accepted, acknowledged
 and stored packet counts, drained journal, and no reported capture/history write
@@ -73,6 +81,8 @@ After that correction:
 
 These are short local observations, not production throughput guarantees. The
 installed desktop remains unchanged and history-confirmed acknowledgement remains
-opt-in. Route-change recovery, injected slow/failing storage and multi-hour UI
-soak remain promotion gates; no exactly-once state or universal lossless capture
+opt-in. The subsequent bounded storage-fault probes passed lock/replay, late-commit,
+service reopen and slow-Stop checks, exposing and fixing a stuck lifecycle gate.
+Real route-change recovery, broader storage failures and multi-hour UI soak
+remain promotion gates; no exactly-once state or universal lossless capture
 claim follows from these results.

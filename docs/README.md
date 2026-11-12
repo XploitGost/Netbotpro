@@ -22,6 +22,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [ADR 0007: tracked history-group receipts](adr/0007-tracked-history-group-receipts.md)
 - [ADR 0008: versioned alert occurrence keys](adr/0008-versioned-alert-occurrence-keys.md)
 - [ADR 0009: opt-in history-confirmed journal ack](adr/0009-opt-in-history-confirmed-journal-ack.md)
+- [ADR 0010: retained-journal recovery lifecycle](adr/0010-retained-journal-recovery-lifecycle.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Isolated journal/history probe and local evidence](JOURNAL_HISTORY_PROBE.md)

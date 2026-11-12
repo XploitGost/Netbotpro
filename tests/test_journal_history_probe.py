@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from scripts.qa.journal_history_probe import (
     isolated_environment, run_probe, stop_owned_tree, verify_counts, workspace_bytes,
+    validate_worker_workspace,
 )
 
 
@@ -34,9 +35,18 @@ class JournalHistoryProbeTests(unittest.TestCase):
 
     def test_probe_rejects_oversized_work_before_launch(self):
         for args in ({'duration': 0}, {'duration': 121}, {'duration': float('nan')},
-                     {'rate': 0}, {'rate': 501}, {'max_bytes': 0}, {'max_bytes': 65 * 1024**2}):
+                     {'rate': 0}, {'rate': 501}, {'max_bytes': 0}, {'max_bytes': 65 * 1024**2},
+                     {'scenario': 'unknown'}, {'scenario': 'locked', 'live': True}):
             with self.assertRaises(ValueError):
                 run_probe(**args)
+
+    def test_direct_worker_cannot_change_installed_settings(self):
+        with patch.dict(os.environ, NETBOT_PROBE_WORKSPACE=''):
+            with self.assertRaises(ValueError):
+                validate_worker_workspace()
+            from scripts.qa.journal_recovery_probe import recovery_worker
+            with self.assertRaises(ValueError):
+                recovery_worker(1, 'locked')
 
     def test_supervisor_kills_only_its_worker_tree_in_reverse_order(self):
         process, parent, first, last = Mock(pid=123), Mock(), Mock(), Mock()
@@ -62,3 +72,39 @@ class JournalHistoryProbeTests(unittest.TestCase):
         self.assertEqual(report['pending_final'], 0)
         self.assertTrue(report['temporary_workspace_removed'])
         self.assertLess(report['temporary_peak_bytes'], 64 * 1024**2)
+
+    def check_recovery(self, scenario):
+        report = run_probe(duration=1, rate=64, scenario=scenario)
+        self.assertTrue(report['ok'], report)
+        self.assertEqual(report['history_rows_final'], report['acknowledged_final'])
+        self.assertEqual(report['pending_final'], 0)
+        self.assertTrue(report['temporary_workspace_removed'])
+        return report
+
+    @unittest.skipUnless(os.name == 'nt', 'DPAPI requires Windows')
+    def test_real_sqlite_lock_preserves_and_recovers_original_occurrences(self):
+        report = self.check_recovery('locked')
+        self.assertEqual(report['acknowledged_before'], 0)
+        self.assertEqual(report['history_rows_after_release'], 0)
+        self.assertGreater(report['historical_failed_events'], 0)
+        self.assertGreater(report['first_batch_recovered'], 0)
+        self.assertEqual(report['distinct_occurrences'], report['history_rows_final'])
+
+    @unittest.skipUnless(os.name == 'nt', 'DPAPI requires Windows')
+    def test_late_commit_replay_is_unique_after_timeout(self):
+        report = self.check_recovery('late-commit')
+        self.assertEqual(report['acknowledged_before'], 0)
+        self.assertEqual(report['history_rows_before_release'], 0)
+        self.assertEqual(report['history_rows_after_release'], report['first_batch_recovered'])
+        self.assertEqual(report['distinct_occurrences'], report['history_rows_final'])
+
+    @unittest.skipUnless(os.name == 'nt', 'DPAPI requires Windows')
+    def test_new_service_reopens_retained_journal_after_old_workers_close(self):
+        report = self.check_recovery('locked-reopen')
+        self.assertTrue(report['service_reopened'])
+        self.assertGreater(report['historical_failed_events'], 0)
+        self.assertGreater(report['first_batch_recovered'], 0)
+
+    @unittest.skipUnless(os.name == 'nt', 'DPAPI requires Windows')
+    def test_slow_history_stop_waits_for_commit_and_drains(self):
+        self.assertTrue(self.check_recovery('slow-stop')['stop_waited_for_history'])
