@@ -17,6 +17,18 @@ class _PrivilegeChecker:
 
 
 class CaptureProviderTests(unittest.TestCase):
+    def test_snapshot_preflight_does_not_rediscover_interfaces(self):
+        def unexpected_discovery():
+            raise AssertionError('snapshot preflight must not enumerate twice')
+        provider = SystemCaptureProvider(interfaces_func=unexpected_discovery,
+            privilege_checker=_PrivilegeChecker(elevated=True), os_name_getter=lambda: 'linux',
+            scapy_checker=lambda: (True, 'ok'))
+        snapshot = {'items': [{'value': 'fixture'}], 'recommended': 'fixture', 'source': 'live'}
+        report = provider.preflight_for_interfaces(snapshot).to_dict()
+        self.assertTrue(report['ready'])
+        self.assertEqual(report['recommended_interface'], 'fixture')
+        self.assertEqual(snapshot, {'items': [{'value': 'fixture'}], 'recommended': 'fixture', 'source': 'live'})
+
     def test_capture_backend_warmup_is_opt_in(self):
         with patch("core.capture.system_provider.ensure_capture_backend") as ensure_capture_backend:
             SystemCaptureProvider(os_name_getter=lambda: "windows")

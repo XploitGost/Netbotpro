@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -10,27 +11,30 @@ from scripts.release import build_desktop_candidate as candidate
 class CandidateBuildGuardTests(unittest.TestCase):
     def test_repeated_builds_cannot_accumulate_unbounded_artifacts(self):
         with patch.object(candidate, 'folder_bytes', return_value=2 * candidate.GIB + 1), \
-             patch.object(candidate.shutil, 'disk_usage', return_value=SimpleNamespace(free=10 * candidate.GIB)):
+             patch.object(candidate, 'shutil', SimpleNamespace(disk_usage=lambda _: SimpleNamespace(free=10 * candidate.GIB))):
             with self.assertRaisesRegex(RuntimeError, 'cache_budget_exceeded'):
                 candidate.check_build_admission(Path.cwd())
 
     def test_admission_requires_free_disk_headroom(self):
-        with patch.object(candidate.shutil, 'disk_usage', return_value=SimpleNamespace(free=candidate.GIB)):
+        with patch.object(candidate, 'shutil', SimpleNamespace(disk_usage=lambda _: SimpleNamespace(free=candidate.GIB))):
             with self.assertRaisesRegex(RuntimeError, '5 GiB'):
                 candidate.check_build_admission(Path.cwd())
 
     def run_guard(self, process, *, size=0, clock=(0, 1)):
         owner = Mock()
         owner.children.return_value = []
+        real_clock = time.monotonic
+        process_api = SimpleNamespace(Process=Mock(return_value=owner), wait_procs=Mock(), NoSuchProcess=candidate.psutil.NoSuchProcess)
+        subprocess_api = SimpleNamespace(Popen=Mock(return_value=process), STDOUT=candidate.subprocess.STDOUT)
+        clock_api = SimpleNamespace(monotonic=Mock(side_effect=clock), sleep=Mock())
         with tempfile.TemporaryDirectory(prefix='netbot-candidate-unit-') as folder:
-            with patch.object(candidate.subprocess, 'Popen', return_value=process), \
-                 patch.object(candidate.psutil, 'Process', return_value=owner), \
-                 patch.object(candidate.psutil, 'wait_procs'), \
+            with patch.object(candidate, 'subprocess', subprocess_api), \
+                 patch.object(candidate, 'psutil', process_api), \
                  patch.object(candidate, 'folder_bytes', return_value=size), \
-                 patch.object(candidate.shutil, 'disk_usage', return_value=SimpleNamespace(free=10 * candidate.GIB)), \
-                 patch.object(candidate.time, 'monotonic', side_effect=clock), \
-                 patch.object(candidate.time, 'sleep'):
+                 patch.object(candidate, 'shutil', SimpleNamespace(disk_usage=lambda _: SimpleNamespace(free=10 * candidate.GIB))), \
+                 patch.object(candidate, 'time', clock_api):
                 try:
+                    self.assertIs(time.monotonic, real_clock)
                     candidate.guarded_run(['fixture-command'], Path(folder), Path(folder))
                 finally:
                     self.owner = owner

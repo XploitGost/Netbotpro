@@ -716,8 +716,9 @@ class SnifferService:
 
     def capture_interfaces(self) -> dict[str, Any]:
         payload = self._capture_provider.list_interfaces()
-        payload["preflight"] = self.capture_preflight()
-        return payload
+        from_snapshot = getattr(self._capture_provider, 'preflight_for_interfaces', None)
+        preflight = from_snapshot(payload).to_dict() if callable(from_snapshot) else self.capture_preflight()
+        return {**payload, 'preflight': preflight}
 
     def capture_preflight(self) -> dict[str, Any]:
         return self._capture_provider.preflight().to_dict()

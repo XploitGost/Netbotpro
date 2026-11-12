@@ -328,9 +328,11 @@ class SystemCaptureProvider(CaptureProvider):
         return self._resolve_func(candidate)
 
     def preflight(self) -> CapturePreflightReport:
+        return self.preflight_for_interfaces(self.list_interfaces())
+
+    def preflight_for_interfaces(self, interfaces: dict[str, Any]) -> CapturePreflightReport:
         os_name = str(self._os_name_getter() or "").strip().lower() or "unknown"
         supported = os_name in SUPPORTED_CAPTURE_SYSTEMS
-        interfaces = self.list_interfaces()
         if self._use_subprocess_interface_discovery:
             scapy_ok, scapy_detail = self._scapy_status_from_interfaces_payload(interfaces)
         else:
