@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { buildAuthHeaders } from "./useLocalAuth";
 import { getApiBase } from "../lib/runtimeConfig";
 
@@ -48,7 +49,10 @@ function inferDownloadFilename(exportPath, res) {
 
 export function useApiClient(localToken) {
   const apiBase = getApiBase();
+  return useMemo(() => createApiClient(apiBase, localToken), [apiBase, localToken]);
+}
 
+export function createApiClient(apiBase, localToken) {
   async function request(path, options = {}) {
     const res = await fetch(`${apiBase}${path}`, {
       ...options,

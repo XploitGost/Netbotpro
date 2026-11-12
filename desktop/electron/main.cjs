@@ -4,6 +4,8 @@ const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
 const { prepareBackendExit, stopChild, createExitCoordinator } = require("./backend-shutdown.cjs");
+const { frontendEntry } = require("./ui-entry.cjs");
+const FRONTEND_ENTRY = frontendEntry();
 
 const BACKEND_PORT = Number(process.env.NETBOT_PORT || 8765);
 const BACKEND_HOST = process.env.NETBOT_HOST || "127.0.0.1";
@@ -362,7 +364,7 @@ async function createWindow() {
     }
     await mainWindow.loadURL(devUrl);
   } else {
-    await mainWindow.loadFile(path.join(isPackagedApp() ? process.resourcesPath : repoRoot(), isPackagedApp() ? "frontend" : path.join("frontend", "dist"), "app.html"));
+    await mainWindow.loadFile(path.join(isPackagedApp() ? process.resourcesPath : repoRoot(), isPackagedApp() ? "frontend" : path.join("frontend", "dist"), FRONTEND_ENTRY));
   }
 
   mainWindow.on("closed", () => {

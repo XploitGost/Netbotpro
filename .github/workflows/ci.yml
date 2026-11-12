@@ -144,6 +144,7 @@ jobs:
           node --check main.cjs
           node --check preload.cjs
           node --test backend-shutdown.test.cjs
+          node --test ui-entry.test.cjs
           npx electron --version
       - name: Build and stage packaged backend
         run: |
@@ -158,4 +159,10 @@ jobs:
         working-directory: frontend/desktop-reference
         env:
           NETBOT_SMOKE_BACKEND_DIR: ${{ github.workspace }}/packaging/runtime/backend
+        run: node test-electron-runtime.mjs
+      - name: Run source-built desktop entry smoke
+        working-directory: frontend/desktop-reference
+        env:
+          NETBOT_SMOKE_BACKEND_DIR: ${{ github.workspace }}/packaging/runtime/backend
+          NETBOT_DESKTOP_UI: desktop
         run: node test-electron-runtime.mjs

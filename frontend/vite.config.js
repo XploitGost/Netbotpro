@@ -14,6 +14,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: "app.html",
+        desktop: "desktop.html",
       },
     },
   },

@@ -1,0 +1,58 @@
+import React,{useMemo,useState} from 'react';
+import {Search,Filter,ChevronLeft,ChevronRight,ArrowLeft,ArrowRight,Network,TriangleAlert,Settings,Server,CircleAlert,Info,CircleCheck,Globe,Clock,Pin,Snowflake,PanelRightOpen} from 'lucide-react';
+import {Inspector} from './LiveMonitor.jsx';
+import {packetTime,packetProtocol,packetRisk,packetInfo,orderedEvidence} from './monitorModel.js';
+import {investigationView,evidenceRows} from './investigateModel.js';
+
+function Tool({Icon,label,onClick,disabled=false,pressed}) {return <button type="button" className="lm-icon" title={label} aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}><Icon size={17}/></button>;}
+function Section({title,Icon,tone='',children,action}) {return <section className={`iv-section ${tone}`}><header><h2><Icon size={21}/>{title}</h2>{action}</header>{children}</section>;}
+function Bytes({dissection}) {
+ const [ascii,setAscii]=useState(false);
+ return <section className="iv-bytes"><div className="iv-tabs" role="tablist" aria-label="Packet bytes"><button role="tab" aria-selected={!ascii} onClick={()=>setAscii(false)}>Hex/Bytes</button><button role="tab" aria-selected={ascii} onClick={()=>setAscii(true)}>ASCII</button></div><pre>{dissection?.hex?.rows?.length?dissection.hex.rows.map(row=>`${row.offset}  ${ascii?row.ascii_redacted:row.hex}`).join('\n'):dissection?'No bytes exposed in metadata mode':'Loading byte evidence...'}</pre>{dissection?.hex?.warning&&<small>{dissection.hex.warning}</small>}</section>;
+}
+
+export function Investigate({api,packets=[],alerts=[],packetMeta={},alertMeta={},packet,alert,packetModel={},alertModel={},packetContext={},alertContext={},selectedPacketId,selectedAlertId,packetNavigation={},alertNavigation={},pinned={},actions,renderDetails,renderAdvancedInspector,renderIntelligence,renderFocus,focusedTarget,onClearFocusedTarget,onSelectPacket,onSelectAlert,onPaginatePackets,onPaginateAlerts,loading={},errors={}}) {
+ const [tab,setTab]=useState('packets'),[search,setSearch]=useState(''),[protocol,setProtocol]=useState(''),[riskFilter,setRiskFilter]=useState(''),[filters,setFilters]=useState(false),[inspectorClosed,setInspectorClosed]=useState(false),[showDetails,setShowDetails]=useState(false),[advanced,setAdvanced]=useState(false),[intelligence,setIntelligence]=useState(false);
+ const [mode,setMode]=useState(selectedAlertId?'alert':'packet');
+ const isAlert=mode==='alert'&&!!selectedAlertId;
+ const candidate=isAlert?alert:packet;
+ const id=isAlert?selectedAlertId:selectedPacketId;
+ const item=candidate&&String(candidate.id)===String(id)?candidate:null;
+ const model=item?(isAlert?alertModel:packetModel):{};
+ const originalNav=isAlert?alertNavigation:packetNavigation;
+ const navigationOrder=useMemo(()=>orderedEvidence(isAlert?alerts:packets),[isAlert,alerts,packets]);
+ const navigationIndex=navigationOrder.findIndex(({item:entry})=>String(entry.id)===String(id));
+ const navigate=offset=>{const entry=navigationOrder[navigationIndex+offset];if(entry)(isAlert?onSelectAlert:onSelectPacket)(entry.item,entry.index);};
+ const nav={...originalNav,canPrevious:navigationIndex>0,canNext:navigationIndex>=0&&navigationIndex<navigationOrder.length-1,onPrevious:()=>navigate(-1),onNext:()=>navigate(1)};
+ const context=isAlert?alertContext:packetContext;
+ const view=useMemo(()=>investigationView(item,model,context),[item,model,context]);
+ const pending=isAlert?loading.alertDetail:loading.packetDetail;
+ const error=isAlert?errors.alertDetail:errors.packetDetail;
+ const items=tab==='alerts'?alerts:tab==='pinned'?(pinned.kind==='alert'?alerts:packets).filter(entry=>String(entry.id)===String(pinned.id)):packets;
+ const rows=useMemo(()=>evidenceRows(items,search,protocol).filter(({item:entry})=>!riskFilter||packetRisk(entry)===riskFilter),[items,search,protocol,riskFilter]);
+ const meta=tab==='alerts'?alertMeta:packetMeta;
+ const total=tab==='pinned'?items.length:Math.max(items.length,Number(meta.total||0));
+ const paginate=tab==='alerts'?onPaginateAlerts:onPaginatePackets;
+ const protocols=[...new Set(items.map(packetProtocol).filter(Boolean))];
+ const choose=(entry,index)=>{const alertSelection=tab==='alerts'||tab==='pinned'&&pinned.kind==='alert';setMode(alertSelection?'alert':'packet');setInspectorClosed(false);(alertSelection?onSelectAlert:onSelectPacket)(entry,index);};
+ return <section className={`ref-investigate ${inspectorClosed?'iv-inspector-closed':''}`}>
+ <aside className="iv-queue lm-panel" aria-label="Evidence Queue"><header><h2>Evidence Queue <span>({total.toLocaleString('en-US')})</span></h2></header>
+ {focusedTarget?.ip&&tab==='packets'&&<p className="lm-focus">Focused endpoint: {focusedTarget.ip} <button type="button" onClick={onClearFocusedTarget}>Clear focus</button></p>}
+ <div className="iv-tabs" role="tablist" aria-label="Evidence types">{[['packets','Recent Packets'],['alerts','Alerts'],['pinned','Pinned']].map(([value,label])=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>{setTab(value);setProtocol('');}}>{label}</button>)}</div>
+ <form className="iv-search" onSubmit={event=>event.preventDefault()}><label className="lm-search"><Search size={16}/><input aria-label="Search evidence" placeholder="Search evidence..." value={search} onChange={event=>setSearch(event.target.value)}/></label><Tool Icon={Filter} label="Evidence filters" onClick={()=>setFilters(!filters)} pressed={filters}/><select aria-label="Evidence protocol" value={protocol} onChange={event=>setProtocol(event.target.value)}><option value="">All Protocols</option>{protocols.map(value=><option key={value}>{value}</option>)}</select></form>
+ {filters&&<div className="iv-filter"><select aria-label="Evidence risk" value={riskFilter} onChange={event=>setRiskFilter(event.target.value)}><option value="">All Risk</option>{['critical','high','medium','low'].map(value=><option key={value}>{value}</option>)}</select><button onClick={()=>{setSearch('');setProtocol('');setRiskFilter('');}}>Clear</button></div>}
+ <div className="iv-evidence-scroll"><table><colgroup><col style={{width:'25%'}}/><col style={{width:'53%'}}/><col style={{width:'22%'}}/></colgroup><thead><tr><th>Time</th><th>Summary</th><th>Risk</th></tr></thead><tbody>{rows.map(({item:entry,index})=><tr key={entry.id??index} tabIndex={0} aria-selected={String(entry.id)===String(id)} className={String(entry.id)===String(id)?'is-selected':''} onClick={()=>choose(entry,index)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();choose(entry,index);}}}><td>{packetTime(entry.ts??entry.timestamp)}</td><td><span title={`${entry.src} -> ${entry.dst}`}>{entry.src||'-'} &rarr; {entry.dst||'-'}</span><small title={packetInfo(entry)}>{packetProtocol(entry)} &nbsp;{entry.attack_type||packetInfo(entry)}</small></td><td><span className={`lm-risk ${packetRisk(entry)}`}>{packetRisk(entry).replace(/^./,c=>c.toUpperCase())}</span></td></tr>)}{!rows.length&&<tr><td colSpan={3} className="lm-empty">{tab==='pinned'?'No pinned evidence':search||protocol||riskFilter?'No matching evidence on this page':loading.packets?'Loading evidence...':focusedTarget?.ip&&tab==='packets'?'No packets match the focused endpoint':meta.offset?'No evidence on this page':'No evidence available'}</td></tr>}</tbody></table></div>
+ {tab!=='pinned'&&<footer className="iv-pager"><span>{rows.length} / {total.toLocaleString('en-US')}</span><Tool Icon={ChevronLeft} label="Previous evidence page" disabled={!meta.offset||loading.packets||loading.alerts} onClick={()=>paginate(-1)}/><Tool Icon={ChevronRight} label="Next evidence page" disabled={Number(meta.offset||0)+items.length>=total||loading.packets||loading.alerts} onClick={()=>paginate(1)}/></footer>}</aside>
+ <main className="iv-report lm-panel"><header><div><Tool Icon={ArrowLeft} label="Previous evidence" disabled={!nav.canPrevious} onClick={nav.onPrevious}/><Tool Icon={ArrowRight} label="Next evidence" disabled={!nav.canNext} onClick={nav.onNext}/></div><h1>{isAlert?'Alert Investigation':'Packet Investigation'}</h1><div><Tool Icon={Pin} label={nav.pinned?'Unpin evidence':'Pin evidence'} disabled={!nav.canPin} pressed={nav.pinned} onClick={nav.onPin}/><Tool Icon={Snowflake} label={nav.frozen?'Resume Live':'Freeze Live'} pressed={nav.frozen} onClick={nav.onFreeze}/>{inspectorClosed&&<Tool Icon={PanelRightOpen} label="Open technical inspector" onClick={()=>setInspectorClosed(false)}/>}</div></header>
+ <div className="iv-report-body">{error?<p className="lm-notice" role="alert">{error}</p>:!item||model.empty?<div className="iv-empty">{pending?'Loading investigation...':'Select evidence to investigate'}</div>:<>
+ <div className="iv-intro"><h2>{model.headline||item.attack_type||packetInfo(item)}</h2><p>{model.summaryText||packetInfo(item)}</p></div>
+ <div className="iv-stats">{[[Network,'Protocol',view.protocol,view.protocolHint],[TriangleAlert,'Risk',view.risk,''],[Settings,'Process',view.process,item.process_name?'Process identified':'No process identified'],[Server,'Destination Service',view.service,view.serviceHint]].map(([Icon,label,value,hint])=><section key={label}><span>{label}</span><div><Icon size={29}/><strong title={String(value)}>{value}</strong></div>{hint&&<small>{hint}</small>}</section>)}</div>
+ <Section title="Key Findings" Icon={CircleAlert} tone="iv-danger">{view.findings.length?<ul>{view.findings.slice(0,6).map((finding,index)=><li key={index}>{finding}</li>)}</ul>:<p>No additional findings in the available evidence.</p>}</Section>
+ <Section title="Why It Matters" Icon={Info} tone="iv-warning"><p>{view.why}</p></Section>
+ <Section title="Recommended Actions" Icon={CircleCheck} tone="iv-success" action={<details className="iv-actions"><summary>Take Action</summary><div>{actions}</div></details>}><ol><li>Review the flow and related alerts for this evidence.</li><li>Verify the process and destination service attribution.</li><li>Compare protocol details with the expected activity.</li></ol><button className="iv-link" onClick={()=>setShowDetails(!showDetails)}>{showDetails?'Hide detailed analysis':'Detailed analysis'}<ArrowRight size={15}/></button></Section>
+ <div className="iv-bottom"><Section title={`Related Entities (${view.entities.length})`} Icon={Network}>{view.entities.map((entity,index)=><button className="iv-entity" key={entity} onClick={()=>setSearch(entity)} title="Find related evidence"><Globe size={23}/><span><strong>{entity}</strong><small>{index===0?'Source endpoint':'Destination endpoint'}</small></span><ChevronRight size={16}/></button>)}</Section><Section title="Evidence Timeline" Icon={Clock}><ol className="iv-timeline">{view.timeline.map((entry,index)=><li key={index}><i/><time>{packetTime(entry.time)}</time><span>{entry.title}</span></li>)}</ol></Section></div>
+ {showDetails&&<div className="iv-legacy-details">{renderDetails()}</div>}
+ </>}</div></main>
+ {!inspectorClosed&&<Inspector api={api} packet={!isAlert?item:null} alert={isAlert?item:null} packetModel={model} heading="Technical Inspector" hideFooter evidenceOpen={false} loading={pending} error={error} onClose={()=>setInspectorClosed(true)} primaryContent={dissection=>!isAlert&&<Bytes dissection={dissection}/>} extraContent={<><details className="lm-fold" onToggle={event=>setAdvanced(event.currentTarget.open)}><summary>Follow Stream / Advanced Fields</summary>{advanced&&renderAdvancedInspector()}</details><details className="lm-fold" onToggle={event=>setIntelligence(event.currentTarget.open)}><summary>Protocol Intelligence</summary>{intelligence&&renderIntelligence()}</details><details className="lm-fold"><summary>Endpoint Focus</summary>{renderFocus()}</details></>}/>}
+ </section>;
+}

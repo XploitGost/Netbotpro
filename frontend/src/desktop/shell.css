@@ -1,0 +1,84 @@
+.desktop-shell {
+  --topbar-height: 56px;
+  --desktop-sidebar: 206px;
+  display: block;
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  animation: none;
+  color: #e5edf5;
+  background: #06141e;
+}
+.desktop-shell > .app-nav { position: fixed; inset: 0 auto 0 0; width: var(--desktop-sidebar); height: 100vh; margin: 0; z-index: 60; }
+.desktop-shell > .soc-topbar { position: fixed; top: 0; right: 0; left: var(--desktop-sidebar); height: var(--topbar-height); z-index: 20; }
+.desktop-shell > .desktop-main { min-width: 0; margin-left: var(--desktop-sidebar); padding: calc(var(--topbar-height) + 8px) 10px 10px; min-height: 100vh; }
+.desktop-shell > .app-nav { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 0; border: 0; border-right: 1px solid #17313e; border-radius: 0; background: #071823; }
+.desktop-shell .app-nav-copy { display: block; flex: none; padding: 22px 24px; min-height: 100px; border-bottom: 1px solid #17313e; }
+.desktop-shell .app-nav-copy strong { display: block; color: #00a9ed; font-size: 27px; white-space: nowrap; }
+.desktop-shell .app-nav-copy strong span { color: #e6edf4; }
+.desktop-shell .app-nav-copy small { display: block; color: #a4bfd0; font-size: 11px; margin-top: 4px; white-space: nowrap; }
+.desktop-shell .app-nav-actions { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; flex: 1; width: 100%; padding: 20px 0; gap: 0; overflow-y: auto; }
+.desktop-shell .nav-group, .desktop-shell .nav-group-items { display: flex; flex-direction: column; gap: 0; width: 100%; }
+.desktop-shell .nav-button { display: flex; align-items: center; justify-content: flex-start; gap: 20px; min-height: 54px; width: 100%; margin: 0; padding: 10px 18px; border: 0; border-left: 5px solid transparent; border-radius: 0; color: #a6c8df; background: transparent; box-shadow: none; transform: none; }
+.desktop-shell .nav-button[aria-current='page'] { color: #00c6ec; border-left-color: #00b9ef; background: #07394f; }
+.desktop-shell .nav-button-icon { display: flex; flex: none; }
+.desktop-shell .nav-button-copy { display: block; text-align: left; font-size: 12px; text-transform: uppercase; white-space: nowrap; }
+.desktop-shell .app-nav-footer { display: flex; align-items: flex-start; gap: 10px; margin: 0 24px; padding: 18px 0 24px; border-top: 1px solid #17313e; font-size: 11px; color: #a4bfd0; }
+.desktop-shell .app-nav-footer strong, .desktop-shell .app-nav-footer small { display: block; margin-bottom: 5px; overflow-wrap: anywhere; }
+.desktop-shell .app-nav-footer strong { color: #00d88c; }
+.desktop-shell .nav-signal-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #00d88c; margin-top: 4px; }
+.desktop-shell > .soc-topbar { display: flex; align-items: center; gap: 12px; padding: 0 12px; background: #061722; border-bottom: 1px solid #17313e; font-size: 12px; }
+.desktop-shell .soc-nav-toggle { display: none; }
+.desktop-shell .soc-topbar-section { display: flex; align-items: center; flex: none; gap: 8px; border-right: 1px solid #17313e; padding-right: 12px; white-space: nowrap; }
+.desktop-shell .soc-live-state strong { font-size: 12px; }
+.desktop-shell .soc-live-dot { display: inline-block; height: 12px; width: 12px; border-radius: 50%; background: #00d88c; }
+.desktop-shell .ref-adapter { display: flex; align-items: center; gap: 8px; color: #e5edf5; min-width: 0; }
+.desktop-shell .soc-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; white-space: nowrap; background: #073d32; border: 1px solid #006c54; border-radius: 4px; }
+.desktop-shell .soc-counter-state { color: #a4bfd0; }
+.desktop-shell .soc-counter-state strong { color: #e5edf5; }
+.desktop-shell .soc-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.desktop-shell .soc-topbar-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 90px; height: 34px; padding: 0 12px; border-radius: 4px; border: 1px solid #007f71; color: #f2f8fc; }
+.desktop-shell .soc-topbar-actions .soc-stop { border-color: #a02f3d; }
+.desktop-shell .soc-topbar-actions .soc-settings { min-width: 34px; padding: 0; background: transparent; border: 0; }
+.desktop-main > .workspace-header { background: transparent; border: 0; padding: 5px 12px 10px; margin: 0; }
+.desktop-main > .workspace-header h1 { font-size: 30px; margin: 0 0 4px; line-height: 1.2; }
+.desktop-main > .workspace-header p { margin: 0; }
+.desktop-main .ff-layout { height: calc(100vh - 75px); }
+.desktop-shell:has(.ff-layout) > .soc-topbar { left: var(--desktop-sidebar)!important; height: var(--topbar-height)!important; }
+.desktop-shell > .desktop-main:has(.ff-layout) { padding-top: calc(var(--topbar-height) + 8px)!important; }
+.desktop-auth, .desktop-error { display: flex; align-items: center; gap: 12px; padding: 10px; margin: 0 0 8px; border: 1px solid #3d6073; background: #0a202c; }
+.desktop-auth input { width: min(100%, 420px); }
+.desktop-error { color: #ffc3c3; border-color: #8b3f49; }
+.desktop-advanced { margin-top: 10px; padding: 8px 0; border-top: 1px solid #143040; }
+.desktop-advanced > summary { cursor: pointer; padding: 8px; }
+.desktop-shell, .desktop-shell * { letter-spacing: 0; box-sizing: border-box; }
+@media (max-width: 1200px) {
+  .desktop-main .ff-layout { height: auto; }
+}
+@media (max-width: 1000px) {
+  .desktop-shell { --desktop-sidebar: 0px; }
+  .desktop-shell > .app-nav { width: 206px; transform: translateX(-100%); }
+  .desktop-shell > .app-nav.is-mobile-open { transform: translateX(0); }
+  .desktop-shell .soc-nav-toggle { display: inline-flex; }
+  .desktop-main > .workspace-header h1 { font-size: 24px; }
+  .desktop-shell .soc-rate-state, .desktop-shell .soc-counter-state { display: none; }
+  .desktop-shell .soc-topbar { gap: 6px; }
+  .desktop-shell .soc-topbar-actions button { min-width: 58px; padding: 0 7px; }
+  .desktop-shell .soc-topbar-actions .soc-settings { min-width: 28px; }
+}
+@media (max-width: 600px) {
+  .desktop-shell { --topbar-height: 154px; }
+  .desktop-shell > .soc-topbar { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); grid-auto-rows: 30px; gap: 6px; padding: 8px; }
+  .desktop-shell .soc-nav-toggle { position: absolute; top: 8px; left: 8px; width: 30px; height: 30px; min-height: 30px; padding: 0; background: transparent; border: 0; border-radius: 4px; color: #b1d3ed; }
+  .desktop-shell .soc-live-state { grid-column: 1/3; grid-row: 1; padding-left: 33px; }
+  .desktop-shell .soc-status-pill { grid-column: 3; grid-row: 1; justify-content: center; font-size: 11px; padding: 0 4px; }
+  .desktop-shell .ref-adapter { grid-column: 1/-1; grid-row: 2; justify-content: flex-start; }
+  .desktop-shell .soc-rate-state { display: flex; grid-row: 3; padding: 0 4px; }
+  .desktop-shell .soc-rate-state:has(.ref-incoming) { grid-column: 1; }
+  .desktop-shell .soc-rate-state:has(.ref-outgoing) { grid-column: 2; }
+  .desktop-shell .soc-counter-state { display: flex; grid-column: 3; grid-row: 3; padding: 0; gap: 4px; font-size: 10px; }
+  .desktop-shell .soc-topbar-actions { grid-column: 1/-1; grid-row: 4; justify-content: flex-end; }
+  .desktop-shell .soc-topbar-actions button { height: 30px; min-height: 30px; }
+}

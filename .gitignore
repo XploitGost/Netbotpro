@@ -48,6 +48,7 @@ logs/
 *.pdf
 *.html
 !frontend/app.html
+!frontend/desktop.html
 !frontend/index.html
 *.bak
 *.save

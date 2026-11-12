@@ -30,6 +30,7 @@
     "files": [
       "main.cjs",
       "backend-shutdown.cjs",
+      "ui-entry.cjs",
       "preload.cjs",
       "package.json"
     ],

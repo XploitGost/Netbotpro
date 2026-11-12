@@ -10,10 +10,9 @@ import './fleet.css';
 import './endpoint-focus.css';
 import './docs-shell.css';
 import {capturedDissection} from './monitorModel.js';
+import {DesktopRuntime} from '../src/desktop/DesktopRuntime.jsx';
 
-// Compatibility globals used only by the historical overlay components.
-globalThis.Kf = () => true;
-globalThis.OriginalNetBotIcon = () => null;
+// Synthetic fixtures are confined to this documentation entry.
 const now = Date.now();
 const noop = () => {};
 const interfaces = [{name:'Ethernet Demo',value:'demo0',label:'Ethernet Demo',is_up:true,recommended:true}];
@@ -62,4 +61,4 @@ function App(){
       {page==='agents'&&<AgentsPanel agents={agents} selectedAgentId="DEMO-006" overview={{demo_data:true}} onRefresh={noop} onExportFleetSummary={noop} agentHealthHistory={Array.from({length:36},()=>({received_at:new Date(now).toISOString(),cpu_percent:18}))}/>}
     </main></div>;
 }
-createRoot(document.getElementById('root')).render(<App/>);
+createRoot(document.getElementById('root')).render(<DesktopRuntime fixtureMode><App/></DesktopRuntime>);

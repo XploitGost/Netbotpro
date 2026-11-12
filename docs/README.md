@@ -24,6 +24,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [ADR 0009: opt-in history-confirmed journal ack](adr/0009-opt-in-history-confirmed-journal-ack.md)
 - [ADR 0010: retained-journal recovery lifecycle](adr/0010-retained-journal-recovery-lifecycle.md)
 - [ADR 0011: validated capture-route confirmation](adr/0011-validated-capture-route-confirmation.md)
+- [ADR 0012: source-built desktop entry](adr/0012-source-built-desktop-entry.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Isolated journal/history probe and local evidence](JOURNAL_HISTORY_PROBE.md)
