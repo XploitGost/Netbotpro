@@ -78,6 +78,9 @@ try {
     last = await request('/sniffer/state');
     assert.equal(last.running, true, 'Capture unexpectedly stopped');
     assert.ok(!last.ipc_callback_errors, 'Capture callback failure');
+    assert.ok(!last.capture_error, 'Capture reported an error');
+    assert.ok(!last.capture_callback_errors, 'Driver callback failure');
+    assert.ok(!last.driver_stats?.buffer_dropped_reported, 'Driver reported drops during capture');
     pendingPeak = Math.max(pendingPeak, Number(last.journal_pending_records || 0));
     if (previousInterface && last.selected_iface && previousInterface !== last.selected_iface) interfaceChanges++;
     previousInterface = last.selected_iface || previousInterface;

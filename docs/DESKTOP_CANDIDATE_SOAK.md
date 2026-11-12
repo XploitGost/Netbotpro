@@ -22,8 +22,9 @@ not change VPN, routes or firewall rules and does not generate network traffic.
 - Sampled aggregate process RSS: 2 GiB; this sums shared pages across processes
   and is not unique physical-memory consumption.
 - Minimum free disk headroom: 2 GiB during execution, 3 GiB before starting.
-- At most 64 observed process identities. Only the owned test tree and observed
-  descendants can be terminated on a guard failure.
+- At most 64 concurrently retained live process identities. Exited helpers and
+  their CPU baselines are retired rather than exhausting a lifetime-count budget.
+  Only the owned test tree and observed live descendants can be terminated.
 
 These are sampled watchdogs, not OS-enforced quotas; brief overshoot is possible.
 On a guard failure the run fails, even if its earlier counters looked healthy.
@@ -58,3 +59,21 @@ policy, or complete validation of every OS/VPN transition.
 
 A missing driver counter remains unknown, not zero loss. A 15-minute success
 does not establish several-hour stability or exactly-once stateful analysis.
+
+## Initial Findings
+
+The first 900-second attempt was stopped by its supervisor at 433.73 seconds:
+the initial guard incorrectly counted 65 lifetime process identities rather than
+concurrent live processes. It is a failed run, not an application crash or a
+completed soak. Its last minute sample had 8,892 accepted/acknowledged records,
+zero pending, two observed interface changes with return and further confirmed
+traffic, no renderer error and no reported driver buffer drop. Scratch peak was
+30,762,289 bytes and was removed. Final Stop/SQLite reconciliation was not reached.
+
+Review also found duplicate interface discovery inside one `/interfaces` response:
+the service enumerated interfaces, then provider preflight enumerated them again.
+`SystemCaptureProvider.preflight_for_interfaces` now reuses the same fresh snapshot;
+other providers retain their existing fallback. The service no longer mutates the
+provider-owned payload when adding preflight. This avoids the second enumeration
+without a new stale cache or a slower route-refresh interval. Focused regressions
+cover single-snapshot readiness and compatibility.

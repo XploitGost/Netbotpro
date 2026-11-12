@@ -2,11 +2,23 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
 
-from scripts.qa.candidate_soak import MIB, budget_reason, read_reports, run_soak
+from scripts.qa.candidate_soak import MIB, budget_reason, read_reports, run_soak, retire_exited
 
 
 class CandidateSoakTests(unittest.TestCase):
+    def test_completed_helpers_do_not_exhaust_active_process_budget(self):
+        dead = Mock()
+        dead.is_running.return_value = False
+        alive = Mock()
+        alive.is_running.return_value = True
+        observed = {('dead', 1): dead, ('live', 2): alive}
+        cpu = {('dead', 1): 4, ('live', 2): 2}
+        retire_exited(observed, cpu)
+        self.assertEqual(observed, {('live', 2): alive})
+        self.assertEqual(cpu, {('live', 2): 2})
+
     def test_normal_sample_stays_within_budget(self):
         self.assertIsNone(budget_reason(elapsed=10, duration=900, storage=MIB, rss=MIB, free=4096*MIB, children=5, log_bytes=100))
 

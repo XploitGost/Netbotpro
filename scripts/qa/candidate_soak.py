@@ -56,6 +56,17 @@ def read_reports(log):
     return result
 
 
+def retire_exited(observed, previous_cpu):
+    for key, item in list(observed.items()):
+        try:
+            alive = item.is_running()
+        except psutil.NoSuchProcess:
+            alive = False
+        if not alive:
+            observed.pop(key, None)
+            previous_cpu.pop(key, None)
+
+
 def run_soak(executable, duration=900, require_vpn_cycle=False):
     if not isinstance(duration, int) or not 300 <= duration <= 1800:
         raise ValueError('Soak duration must be 300..1800 seconds')
@@ -85,6 +96,8 @@ def run_soak(executable, duration=900, require_vpn_cycle=False):
         previous_cpu = {}
         total_cpu = 0.0
         observed = {}
+        observed_total = active_peak = 0
+        roles = {}
         series = deque(maxlen=128)
         reported = 0
         reason = None
@@ -100,11 +113,26 @@ def run_soak(executable, duration=900, require_vpn_cycle=False):
                         items = [owner, *owner.children(recursive=True)]
                         for item in items:
                             try:
-                                observed[(item.pid, item.create_time())] = item
+                                key = (item.pid, item.create_time())
+                                if key not in observed:
+                                    observed_total += 1
+                                    command = item.cmdline()
+                                    name = item.name().lower()
+                                    role = ('interface_discovery' if '--capture-discovery-json' in command else
+                                            'capture_probe' if '--capture-backend-probe' in command else
+                                            'electron' if name == 'netbotpro candidate.exe' else
+                                            'backend' if name == 'netbotpro-backend.exe' else
+                                            'node' if name == 'node.exe' else 'other')
+                                    roles[role] = roles.get(role, 0) + 1
+                                observed[key] = item
+                            except psutil.NoSuchProcess:
+                                pass
+                        retire_exited(observed, previous_cpu)
+                        for key, item in list(observed.items()):
+                            try:
                                 rss += item.memory_info().rss
                                 times = item.cpu_times()
                                 cpu = times.user + times.system
-                                key = (item.pid, item.create_time())
                                 total_cpu += max(0, cpu - previous_cpu.get(key, cpu))
                                 previous_cpu[key] = cpu
                             except psutil.NoSuchProcess:
@@ -112,6 +140,7 @@ def run_soak(executable, duration=900, require_vpn_cycle=False):
                     except psutil.NoSuchProcess:
                         items = []
                     storage = workspace_bytes(folder)
+                    active_peak = max(active_peak, len(observed))
                     peak_storage, peak_rss = max(peak_storage, storage), max(peak_rss, rss)
                     reason = budget_reason(elapsed=elapsed, duration=duration, storage=storage, rss=rss,
                         free=shutil.disk_usage(folder).free, children=len(observed), log_bytes=log.stat().st_size)
@@ -123,7 +152,9 @@ def run_soak(executable, duration=900, require_vpn_cycle=False):
                     reported = len(rows)
                     if not series or elapsed - series[-1]['seconds'] >= 30:
                         sample = {'stage': 'resource_sample', 'seconds': round(elapsed, 1),
-                            'aggregate_process_rss_mb': round(rss / MIB, 2), 'temporary_mb': round(storage / MIB, 2)}
+                            'aggregate_process_rss_mb': round(rss / MIB, 2), 'temporary_mb': round(storage / MIB, 2),
+                            'active_processes': len(observed), 'observed_processes_total': observed_total,
+                            'sampled_process_roles': dict(roles)}
                         series.append(sample)
                         print(json.dumps(sample), flush=True)
                     time.sleep(1)
@@ -152,7 +183,8 @@ def run_soak(executable, duration=900, require_vpn_cycle=False):
                   'requested_seconds': duration, 'supervisor_seconds': round(elapsed, 2),
                   'temporary_peak_bytes': peak_storage, 'aggregate_process_peak_rss_mb': round(peak_rss / MIB, 2),
                   'sampled_aggregate_cpu_one_core_percent': round(100 * total_cpu / elapsed, 2),
-                  'observed_processes': len(observed), 'candidate': completed,
+                  'active_processes_peak': active_peak, 'observed_processes_total': observed_total,
+                  'sampled_process_roles': roles, 'candidate': completed,
                   'resource_samples': list(series)}
     report['temporary_workspace_removed'] = not folder.exists()
     return report

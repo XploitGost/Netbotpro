@@ -173,6 +173,23 @@ class SnifferServiceTests(unittest.TestCase):
         self.assertEqual(payload["recommended"], "eth0")
         self.assertEqual(payload["preflight"]["provider"], "fake")
 
+    def test_capture_interfaces_reuses_snapshot_when_provider_supports_it(self):
+        provider = _FakeCaptureProvider()
+        original = provider.list_interfaces()
+        seen = []
+        provider.list_interfaces = lambda: original
+        report = provider.preflight()
+        provider.preflight_for_interfaces = lambda payload: (seen.append(payload), report)[1]
+        provider.preflight = lambda: self.fail('snapshot provider must not run a second preflight discovery')
+        service = SnifferService(EventBus(), capture_provider=provider)
+        try:
+            payload = service.capture_interfaces()
+            self.assertIs(seen[0], original)
+            self.assertNotIn('preflight', original)
+            self.assertTrue(payload['preflight']['ready'])
+        finally:
+            service.close()
+
     def test_start_fails_fast_when_preflight_is_not_ready(self):
         service = SnifferService(
             EventBus(), capture_provider=_UnavailableCaptureProvider()
