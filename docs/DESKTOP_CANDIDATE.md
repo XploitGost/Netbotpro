@@ -31,6 +31,10 @@ retention manager. Do not repeatedly rebuild without reviewing disk usage.
 The candidate bootstrap selects `desktop.html`, sets its own user-data directory,
 and overrides history, flow, journal, cache and runtime paths within that profile.
 It rejects ordinary profile paths and inherited backend/dev-server overrides.
+It chooses a free loopback API port rather than inheriting the standard app's
+port; tests can explicitly reserve one with `NETBOT_CANDIDATE_PORT`. There is a
+small release-to-backend-bind race, so an unlikely startup collision remains
+possible. The profile and generated local authentication token remain separate.
 The default is `%APPDATA%/netbot-candidate-preview`; tests explicitly use a new
 `netbot-candidate-smoke-*` temporary profile instead.
 

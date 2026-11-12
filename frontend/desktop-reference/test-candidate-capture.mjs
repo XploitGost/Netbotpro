@@ -31,7 +31,7 @@ let app, ownerPid, report, peakBytes = 0;
 const requestDurations = [];
 try {
   app = await _electron.launch({ executablePath: executable, args: [], timeout: 45000,
-    env: { ...process.env, NETBOT_CANDIDATE_PROFILE: profile, NETBOT_PORT: String(port), NETBOT_HOST: '127.0.0.1', NETBOT_DISABLE_GPU: '1' } });
+    env: { ...process.env, NETBOT_CANDIDATE_PROFILE: profile, NETBOT_CANDIDATE_PORT: String(port), NETBOT_HOST: '127.0.0.1', NETBOT_DISABLE_GPU: '1' } });
   ownerPid = app.process().pid;
   const window = await app.firstWindow();
   const errors = [];

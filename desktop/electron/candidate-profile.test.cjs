@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { candidateEnvironment } = require('./candidate-profile.cjs');
+const { candidateEnvironment, candidatePort } = require('./candidate-profile.cjs');
 
 test('candidate storage paths stay in its dedicated profile', () => {
   const root = path.resolve('netbot-candidate-fixture');
@@ -17,4 +17,10 @@ test('candidate rejects relative and ordinary installed profiles', () => {
   for (const value of ['netbot-candidate-fixture', path.resolve('Netbotpro'), path.parse(process.cwd()).root]) {
     assert.throws(() => candidateEnvironment(value));
   }
+});
+test('candidate port defaults to ephemeral and validates explicit requests', () => {
+  assert.equal(candidatePort(), 0);
+  assert.equal(candidatePort(''), 0);
+  assert.equal(candidatePort('49152'), 49152);
+  for (const value of ['0', '-1', '65536', '8765/path', '1.5']) assert.throws(() => candidatePort(value));
 });

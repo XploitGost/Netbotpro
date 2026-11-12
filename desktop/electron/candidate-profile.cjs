@@ -15,4 +15,10 @@ function candidateEnvironment(profile) {
     NETBOT_RUNTIME_DIR: path.join(profile, 'runtime'), NETBOT_CACHE_DIR: path.join(profile, 'cache'),
   };
 }
-module.exports = { candidateEnvironment };
+function candidatePort(value) {
+  if (value === undefined || value === '') return 0;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid candidate port');
+  return port;
+}
+module.exports = { candidateEnvironment, candidatePort };
