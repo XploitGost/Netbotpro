@@ -155,6 +155,14 @@ jobs:
       - name: Build standard frontend for runtime smoke
         working-directory: frontend
         run: npm run build
+      - name: Test both source entries with synthetic browser transport
+        working-directory: frontend/desktop-reference
+        run: |
+          npx playwright install chromium
+          $env:NETBOT_CHROME_PATH = node --input-type=module -e "import { chromium } from 'playwright'; console.log(chromium.executablePath())"
+          node test-standard-live-follow.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node test-source-desktop.mjs
       - name: Run isolated Electron runtime smoke
         working-directory: frontend/desktop-reference
         env:
