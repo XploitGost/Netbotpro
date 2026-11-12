@@ -13,7 +13,8 @@ python scripts/release/build_desktop_candidate.py
 ```
 
 The builder creates a new revision/timestamp directory under
-`.runtime/desktop-candidates/`. It packages a fresh PyInstaller backend and both
+`%LOCALAPPDATA%/NetBotCandidates/` (a short path avoids legacy Windows path limits
+inside scientific-library bundles). It packages a fresh PyInstaller backend and both
 Vite entries, then builds an unpacked Electron candidate. It never copies the old
 security-build backend or stages over `packaging/runtime/backend` or an installed
 app. `candidate.json` records its source revision and executable path. Build

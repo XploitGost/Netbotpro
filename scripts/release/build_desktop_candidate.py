@@ -58,13 +58,16 @@ def guarded_run(command: list[str], cwd: Path, folder: Path) -> None:
 def main() -> None:
     if os.name != 'nt':
         raise RuntimeError('Windows candidate builder requires Windows')
-    if shutil.disk_usage(ROOT).free < 5 * GIB:
+    destination = Path(os.environ['LOCALAPPDATA']) / 'NetBotCandidates'
+    destination.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(destination).free < 5 * GIB:
         raise RuntimeError('At least 5 GiB free space is required')
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise RuntimeError('Commit candidate source changes before building an identifiable candidate')
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    folder = ROOT / '.runtime' / 'desktop-candidates' / f'{revision[:8]}-{stamp}'
+    # Deep scientific-library paths exceed legacy Windows limits under a long checkout.
+    folder = destination / f'{revision[:8]}-{stamp}'
     folder.mkdir(parents=True, exist_ok=False)
     guarded_run([sys.executable, '-m', 'PyInstaller', 'packaging/pyinstaller/netbotpro_backend.spec',
                  '--noconfirm', '--distpath', str(folder / 'backend-dist'), '--workpath', str(folder / 'work')], ROOT, folder)

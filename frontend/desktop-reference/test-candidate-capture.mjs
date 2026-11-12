@@ -46,6 +46,8 @@ try {
   await window.locator('nav.app-nav').getByRole('button', { name: 'Live Monitor', exact: true }).click();
   const bar = window.locator('header[aria-label="Capture status"]');
   await bar.getByRole('button', { name: 'Start', exact: true }).click({ timeout: 20000 });
+  await window.waitForFunction(() => { const stop = document.querySelector('.soc-stop'); return stop && !stop.disabled; }, null, { timeout: 20000 });
+  console.log(JSON.stringify({ stage: 'capture_started', durationSeconds: duration, isolatedCandidate: true }));
   const started = Date.now();
   let pendingPeak = 0, interfaceChanges = 0, previousInterface, last;
   while (Date.now() - started < duration * 1000) {
@@ -70,6 +72,7 @@ try {
   await window.waitForFunction(() => document.querySelector('.lm-follow input')?.checked);
   const stoppedAt = Date.now();
   await bar.getByRole('button', { name: 'Stop', exact: true }).click();
+  await window.waitForFunction(() => { const start = document.querySelector('.soc-start'); return start && !start.disabled; });
   let final;
   for (let attempt = 0; attempt < 30; attempt++) {
     final = await request('/sniffer/state');
@@ -86,6 +89,7 @@ try {
     driverBufferDroppedReported: capture.driver_stats?.buffer_dropped_reported ?? null,
     driverCoverageComplete: capture.driver_stats?.coverage_complete ?? null,
     stopMilliseconds: Date.now() - stoppedAt, rendererErrors: errors.length, profilePeakBytes: peakBytes };
+  console.log(JSON.stringify({ stage: 'capture_stopped', ...report }));
   assert.ok(report.acknowledged > 0, 'No history-confirmed traffic');
   assert.equal(report.accepted, report.acknowledged, 'Capture acknowledgement mismatch');
   assert.equal(report.pendingFinal, 0, 'Journal pending after Stop');
