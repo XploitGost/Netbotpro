@@ -236,7 +236,6 @@ function App() {
     managedLocalToken,
     canStartSniffer,
     liveFollow,
-    setLiveFollow,
     focusedTarget,
     timeline,
     sniffer,
@@ -280,6 +279,7 @@ function App() {
     freezeLiveFollow,
     clearFocusedTarget,
     resumeLiveFollow,
+    toggleLiveFollow,
   } = useDashboardController();
 
   const captureContext = useMemo(() => buildCaptureInspectionContext({
@@ -432,7 +432,7 @@ function App() {
           onPaginatePackets={paginatePackets}
           onSelectPacket={loadPacketDetail}
           onTrackTarget={handleTrackRow}
-          onToggleFollow={setLiveFollow}
+          onToggleFollow={toggleLiveFollow}
           pageSize={PAGE_SIZE}
         />
       </PageSection>
@@ -450,7 +450,7 @@ function App() {
           onPaginateAlerts={paginateAlerts}
           onSelectAlert={loadAlertDetail}
           onTrackTarget={handleTrackRow}
-          onToggleFollow={setLiveFollow}
+          onToggleFollow={toggleLiveFollow}
           pageSize={PAGE_SIZE}
         />
       </PageSection>

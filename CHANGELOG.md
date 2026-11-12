@@ -4,6 +4,12 @@
 
 ### Added
 
+- Validated capture-route confirmation rejects failed/empty bindings, requires a
+  stable profile/device/filter tuple and canonicalizes PPP address-filter order
+  (ADR 0011), with controlled handover regression coverage.
+- Standard frontend Resume refreshes filtered page zero before following, cancels
+  stale refreshes and bounds stalled requests. Controller and desktop/mobile browser
+  fixture checks cover pause/resume/failure; installed overlay remains unchanged.
 - Retained-journal lifecycle recovery separates stopped/closed resources from
   successful drain, preserves critical/replay status and requires a history reset
   barrier. Isolated SQLite-lock, service-reopen, late-commit and slow-Stop probes

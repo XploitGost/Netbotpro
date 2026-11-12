@@ -10,6 +10,7 @@ const TIMELINE_BUCKETS = 30;
 const TIMELINE_BUCKET_MS = 2_000;
 const HISTORY_CACHE_TTL_MS = 5_000;
 const DETAIL_CACHE_TTL_MS = 12_000;
+const LIVE_REFRESH_TIMEOUT_MS = 8_000;
 
 const defaultSettings = {
   iface: "iface=default",
@@ -250,6 +251,25 @@ export function useDashboardController() {
   const alertHistoryRequestRef = useRef(0);
   const packetDetailRequestRef = useRef(0);
   const alertDetailRequestRef = useRef(0);
+  const liveFollowRequestRef = useRef(0);
+  const pendingFollowRef = useRef(null);
+
+  function cancelFollowRefresh() {
+    liveFollowRequestRef.current += 1;
+    const pending = pendingFollowRef.current;
+    pendingFollowRef.current = null;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pending.controller.abort();
+    if (packetHistoryRequestRef.current === pending.packetRequest) {
+      packetHistoryRequestRef.current += 1;
+      setLoading("packets", false);
+    }
+    if (alertHistoryRequestRef.current === pending.alertRequest) {
+      alertHistoryRequestRef.current += 1;
+      setLoading("alerts", false);
+    }
+  }
 
   function clearHistoryCaches() {
     packetHistoryCacheRef.current.clear();
@@ -309,8 +329,16 @@ export function useDashboardController() {
   }, [alertMeta.offset]);
 
   useEffect(() => {
+    cancelFollowRefresh();
     setLocalTokenAccepted(false);
   }, [localToken]);
+
+  useEffect(() => () => {
+    liveFollowRequestRef.current += 1;
+    clearTimeout(pendingFollowRef.current?.timer);
+    pendingFollowRef.current?.controller.abort();
+    pendingFollowRef.current = null;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -406,7 +434,7 @@ export function useDashboardController() {
     };
   }, [localToken]);
 
-  async function loadPacketHistory(customQuery = packetQuery, offset = packetMeta.offset) {
+  async function loadPacketHistory(customQuery = packetQuery, offset = packetMeta.offset, options = {}) {
     const requestId = packetHistoryRequestRef.current + 1;
     packetHistoryRequestRef.current = requestId;
     const params = new URLSearchParams();
@@ -420,13 +448,13 @@ export function useDashboardController() {
     params.set("limit", String(PAGE_SIZE));
     params.set("offset", String(offset));
     const cacheKey = buildHistoryCacheKey(customQuery, offset);
-    const cached = readCache(packetHistoryCacheRef, cacheKey);
+    const cached = options.refresh ? null : readCache(packetHistoryCacheRef, cacheKey);
     try {
       if (!cached) {
         setLoading("packets", true);
       }
-      const data = cached || await api.getPackets(params);
-      if (packetHistoryRequestRef.current !== requestId) {
+      const data = cached || await api.getPackets(params, { signal: options.signal });
+      if (packetHistoryRequestRef.current !== requestId || (options.isCurrent && !options.isCurrent())) {
         return;
       }
       if (!cached) writeCache(packetHistoryCacheRef, cacheKey, data);
@@ -448,7 +476,7 @@ export function useDashboardController() {
     }
   }
 
-  async function loadAlertHistory(customQuery = alertQuery, offset = alertMeta.offset) {
+  async function loadAlertHistory(customQuery = alertQuery, offset = alertMeta.offset, options = {}) {
     const requestId = alertHistoryRequestRef.current + 1;
     alertHistoryRequestRef.current = requestId;
     const params = new URLSearchParams();
@@ -462,13 +490,13 @@ export function useDashboardController() {
     params.set("limit", String(PAGE_SIZE));
     params.set("offset", String(offset));
     const cacheKey = buildHistoryCacheKey(customQuery, offset);
-    const cached = readCache(alertHistoryCacheRef, cacheKey);
+    const cached = options.refresh ? null : readCache(alertHistoryCacheRef, cacheKey);
     try {
       if (!cached) {
         setLoading("alerts", true);
       }
-      const data = cached || await api.getAlerts(params);
-      if (alertHistoryRequestRef.current !== requestId) {
+      const data = cached || await api.getAlerts(params, { signal: options.signal });
+      if (alertHistoryRequestRef.current !== requestId || (options.isCurrent && !options.isCurrent())) {
         return;
       }
       if (!cached) writeCache(alertHistoryCacheRef, cacheKey, data);
@@ -792,7 +820,7 @@ export function useDashboardController() {
       };
     }
     setFocusedTarget(target);
-    setLiveFollow(false);
+    freezeLiveFollow();
     const nextPacketQuery = {
       ...packetQuery,
       src: target.role === "src" ? target.ip : "",
@@ -826,6 +854,7 @@ export function useDashboardController() {
     const snapshot = focusQuerySnapshotRef.current;
     focusQuerySnapshotRef.current = null;
     setFocusedTarget(null);
+    cancelFollowRefresh();
     setLiveFollow(true);
     setStatusMessage("Live follow restored");
     if (!snapshot) return;
@@ -865,7 +894,7 @@ export function useDashboardController() {
     };
     focusQuerySnapshotRef.current = null;
     setFocusedTarget(null);
-    setLiveFollow(false);
+    freezeLiveFollow();
     setActivePage("monitor");
     setPacketQuery(nextPacketQuery);
     setAlertQuery(nextAlertQuery);
@@ -877,14 +906,53 @@ export function useDashboardController() {
     }
   }
 
-  function resumeLiveFollow() {
-    setLiveFollow(true);
-    setStatusMessage("Live lists are following the newest traffic");
+  async function resumeLiveFollow() {
+    cancelFollowRefresh();
+    const requestId = liveFollowRequestRef.current;
+    const isCurrent = () => liveFollowRequestRef.current === requestId;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      if (!isCurrent()) return;
+      cancelFollowRefresh();
+      setError("Live traffic refresh timed out");
+      setStatusMessage("Live follow remains paused; refresh timed out");
+    }, LIVE_REFRESH_TIMEOUT_MS);
+    pendingFollowRef.current = { requestId, controller, timer,
+      packetRequest: packetHistoryRequestRef.current + 1,
+      alertRequest: alertHistoryRequestRef.current + 1 };
+    setLiveFollow(false);
+    setError("");
+    setStatusMessage("Refreshing newest traffic...");
+    try {
+      await Promise.all([
+        loadPacketHistory(packetQuery, 0, { refresh: true, isCurrent, signal: controller.signal }),
+        loadAlertHistory(alertQuery, 0, { refresh: true, isCurrent, signal: controller.signal }),
+      ]);
+      if (!isCurrent()) return;
+      setLiveFollow(true);
+      setStatusMessage("Live lists are following the newest traffic");
+    } catch (err) {
+      if (isCurrent()) {
+        cancelFollowRefresh();
+        setError(normalizeErrorMessage(err, "Unable to resume live traffic"));
+        setStatusMessage("Live follow remains paused; refresh failed");
+      }
+    } finally {
+      if (pendingFollowRef.current?.requestId === requestId) {
+        clearTimeout(timer);
+        pendingFollowRef.current = null;
+      }
+    }
   }
 
   function freezeLiveFollow() {
+    cancelFollowRefresh();
     setLiveFollow(false);
     setStatusMessage("Live lists are frozen for investigation");
+  }
+
+  function toggleLiveFollow(enabled) {
+    return enabled ? resumeLiveFollow() : freezeLiveFollow();
   }
 
   function toggleInspectionPin(kind) {
@@ -986,6 +1054,7 @@ export function useDashboardController() {
   }
 
   async function applyPacketFilters() {
+    cancelFollowRefresh();
     setError("");
     try {
       await loadPacketHistory(packetQuery, 0);
@@ -995,6 +1064,7 @@ export function useDashboardController() {
   }
 
   async function applyAlertFilters() {
+    cancelFollowRefresh();
     setError("");
     try {
       await loadAlertHistory(alertQuery, 0);
@@ -1138,9 +1208,10 @@ export function useDashboardController() {
   }
 
   async function paginatePackets(direction) {
+    cancelFollowRefresh();
     const nextOffset = Math.max(0, packetMeta.offset + direction * PAGE_SIZE);
     if (nextOffset >= packetMeta.total && direction > 0) return;
-    if (nextOffset > 0) setLiveFollow(false);
+    if (nextOffset > 0) freezeLiveFollow();
     try {
       await loadPacketHistory(packetQuery, nextOffset);
     } catch (err) {
@@ -1149,8 +1220,10 @@ export function useDashboardController() {
   }
 
   async function paginateAlerts(direction) {
+    cancelFollowRefresh();
     const nextOffset = Math.max(0, alertMeta.offset + direction * PAGE_SIZE);
     if (nextOffset >= alertMeta.total && direction > 0) return;
+    if (nextOffset > 0) freezeLiveFollow();
     try {
       await loadAlertHistory(alertQuery, nextOffset);
     } catch (err) {
@@ -1159,10 +1232,12 @@ export function useDashboardController() {
   }
 
   function handlePacketQueryChange(key, value) {
+    cancelFollowRefresh();
     setPacketQuery((current) => ({ ...current, [key]: value }));
   }
 
   function handleAlertQueryChange(key, value) {
+    cancelFollowRefresh();
     setAlertQuery((current) => ({ ...current, [key]: value }));
   }
 
@@ -1208,6 +1283,7 @@ export function useDashboardController() {
     onState: (message) => {
       clearHistoryCaches();
       if (message.type === "sniffer:reset") {
+        cancelFollowRefresh();
         mergeObservability(message.payload?.observability || {});
         setPackets([]);
         setAlerts([]);
@@ -1366,5 +1442,6 @@ export function useDashboardController() {
     freezeLiveFollow,
     clearFocusedTarget,
     resumeLiveFollow,
+    toggleLiveFollow,
   };
 }
