@@ -132,6 +132,14 @@ _ALERT_COLUMNS = (
 )
 
 
+def _serialize_alpn(value: Any) -> Any:
+    # History readers already accept comma-separated ALPN in this TEXT column.
+    if isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return ', '.join(items) if items else None
+    return value
+
+
 def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
@@ -139,7 +147,8 @@ def _insert_packets_no_commit(conn, rows: list[dict[str, Any]]) -> int:
         f"INSERT INTO packets ({', '.join(_PACKET_COLUMNS)}) VALUES ({', '.join(['?'] * len(_PACKET_COLUMNS))}) ON CONFLICT(capture_event_id) WHERE capture_event_id IS NOT NULL DO NOTHING",
         [
             tuple(valid_capture_event_id(row.get(column)) if column == 'capture_event_id' else
-                  (1 if row.get(column) else 0) if column == 'is_alert' else row.get(column)
+                  (1 if row.get(column) else 0) if column == 'is_alert' else
+                  _serialize_alpn(row.get(column)) if column == 'tls_alpn' else row.get(column)
                   for column in _PACKET_COLUMNS)
             for row in rows
         ],
@@ -154,6 +163,7 @@ def _insert_alerts_no_commit(conn, rows: list[dict[str, Any]]) -> int:
         f"INSERT INTO alerts ({', '.join(_ALERT_COLUMNS)}) VALUES ({', '.join(['?'] * len(_ALERT_COLUMNS))}) ON CONFLICT(alert_event_id) WHERE alert_event_id IS NOT NULL DO NOTHING",
         [
             tuple(valid_alert_event_id(row.get(column)) if column == 'alert_event_id'
+                  else _serialize_alpn(row.get(column)) if column == 'tls_alpn'
                   else row.get(column) for column in _ALERT_COLUMNS)
             for row in rows
         ],

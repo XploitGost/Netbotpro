@@ -4,6 +4,10 @@
 
 ### Added
 
+- Isolated, bounded Windows service probe for synthetic or explicit live
+  history-confirmed capture, with temporary-data cleanup and numeric-only reports.
+- ALPN list/tuple storage normalization for packet and alert history, fixing a
+  real-capture SQLite binding failure that prevented journal acknowledgement.
 - Experimental history-confirmed journal acknowledgement waits for one bounded
   packet/alert commit receipt before publication and journal reclamation, with
   failure/replay regression tests. Default callback policy and installed settings

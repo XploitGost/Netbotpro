@@ -56,7 +56,7 @@ class FakeCapture:
         self.iface = iface
         self.running = True
         for index in range(40):
-            self.callback({'sequence': index, 'src': '192.0.2.1'})
+            self.callback({'sequence': index, 'src': '192.0.2.1', 'tls_alpn': ['h2']})
     def stop(self):
         self.running = False
     def selected_iface(self):
@@ -222,6 +222,8 @@ class JournalHistoryDeliveryTests(unittest.TestCase):
             self.assertEqual(status['journal_pending_records'], 0)
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM packets').fetchone()[0], 40)
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM alerts').fetchone()[0], 40)
+            for table in ('packets', 'alerts'):
+                self.assertEqual(connection.execute(f'SELECT DISTINCT tls_alpn FROM {table}').fetchall(), [('h2',)])
             self.assertEqual(persistence.stats()['flush_batches'], 2)
 
     @unittest.skipUnless(os.name == 'nt', 'DPAPI journal requires Windows')
