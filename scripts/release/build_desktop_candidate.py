@@ -27,6 +27,13 @@ def folder_bytes(folder: Path) -> int:
     return total
 
 
+def check_build_admission(destination: Path) -> None:
+    if shutil.disk_usage(destination).free < 5 * GIB:
+        raise RuntimeError('At least 5 GiB free space is required')
+    if folder_bytes(destination) > 2 * GIB:
+        raise RuntimeError('candidate_cache_budget_exceeded; review existing artifacts before rebuilding')
+
+
 def guarded_run(command: list[str], cwd: Path, folder: Path) -> None:
     with (folder / 'build.log').open('ab') as log:
         process = subprocess.Popen(command, cwd=cwd, stdout=log, stderr=subprocess.STDOUT)
@@ -60,8 +67,7 @@ def main() -> None:
         raise RuntimeError('Windows candidate builder requires Windows')
     destination = Path(os.environ['LOCALAPPDATA']) / 'NetBotCandidates'
     destination.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(destination).free < 5 * GIB:
-        raise RuntimeError('At least 5 GiB free space is required')
+    check_build_admission(destination)
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise RuntimeError('Commit candidate source changes before building an identifiable candidate')
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()

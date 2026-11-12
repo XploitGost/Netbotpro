@@ -8,6 +8,17 @@ from scripts.release import build_desktop_candidate as candidate
 
 
 class CandidateBuildGuardTests(unittest.TestCase):
+    def test_repeated_builds_cannot_accumulate_unbounded_artifacts(self):
+        with patch.object(candidate, 'folder_bytes', return_value=2 * candidate.GIB + 1), \
+             patch.object(candidate.shutil, 'disk_usage', return_value=SimpleNamespace(free=10 * candidate.GIB)):
+            with self.assertRaisesRegex(RuntimeError, 'cache_budget_exceeded'):
+                candidate.check_build_admission(Path.cwd())
+
+    def test_admission_requires_free_disk_headroom(self):
+        with patch.object(candidate.shutil, 'disk_usage', return_value=SimpleNamespace(free=candidate.GIB)):
+            with self.assertRaisesRegex(RuntimeError, '5 GiB'):
+                candidate.check_build_admission(Path.cwd())
+
     def run_guard(self, process, *, size=0, clock=(0, 1)):
         owner = Mock()
         owner.children.return_value = []

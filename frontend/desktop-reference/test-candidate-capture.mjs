@@ -17,7 +17,7 @@ const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'netbot-candidate-smoke-
 const listener = net.createServer();
 await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
 const port = listener.address().port;
-await new Promise(resolve => listener.close(resolve));
+listener.unref();
 async function bytes(folder) {
   let total = 0;
   for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
@@ -30,17 +30,22 @@ async function bytes(folder) {
 let app, ownerPid, report, peakBytes = 0;
 const requestDurations = [];
 try {
+  const env = { ...process.env, NETBOT_CANDIDATE_PROFILE: profile, NETBOT_PORT: String(port), NETBOT_HOST: '127.0.0.1', NETBOT_DISABLE_GPU: '1' };
+  delete env.NETBOT_CANDIDATE_PORT;
   app = await _electron.launch({ executablePath: executable, args: [], timeout: 45000,
-    env: { ...process.env, NETBOT_CANDIDATE_PROFILE: profile, NETBOT_CANDIDATE_PORT: String(port), NETBOT_HOST: '127.0.0.1', NETBOT_DISABLE_GPU: '1' } });
+    env });
   ownerPid = app.process().pid;
   const window = await app.firstWindow();
   const errors = [];
   window.on('pageerror', error => errors.push(error.name));
   await window.getByRole('heading', { name: 'Command Center', exact: true }).waitFor({ timeout: 45000 });
   const runtime = await window.evaluate(() => window.netbotproDesktop);
+  const apiBase = new URL(runtime.apiBase);
+  assert.equal(apiBase.hostname, '127.0.0.1');
+  assert.notEqual(apiBase.port, String(port), 'Candidate reused the deliberately occupied inherited API port');
   const request = async (endpoint, options = {}) => {
     const requestedAt = Date.now();
-    const result = await fetch(`http://127.0.0.1:${port}/api${endpoint}`, { ...options,
+    const result = await fetch(`${runtime.apiBase}${endpoint}`, { ...options,
       headers: { 'X-NetBot-Token': runtime.localToken, ...options.headers }, signal: AbortSignal.timeout(10000) });
     assert.ok(result.ok, `Candidate API status ${result.status}`);
     const body = await result.json();
@@ -112,7 +117,7 @@ try {
   assert.equal(final.running, false, 'Capture did not stop');
   const capture = final.observability?.capture || final;
   const persistence = final.observability?.persistence || {};
-  report = { live: true, packagedCandidate: true, durationSeconds: Math.round((Date.now() - started) / 1000),
+  report = { live: true, packagedCandidate: true, apiPortIsolated: true, durationSeconds: Math.round((Date.now() - started) / 1000),
     accepted: capture.ipc_accepted, acknowledged: capture.journal_acknowledged_records,
     pendingFinal: capture.journal_pending_records, pendingPeak, interfaceChanges, routeSwitches: capture.route_switches,
     historyFailed: persistence.failed_writes, historyDropped: persistence.dropped_writes,
@@ -145,5 +150,6 @@ try {
   assert.equal(path.dirname(profile), path.resolve(os.tmpdir()));
   assert.ok(path.basename(profile).startsWith('netbot-candidate-smoke-'));
   await fs.rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  await new Promise(resolve => listener.close(resolve));
 }
 console.log(JSON.stringify({ ...report, temporaryProfileRemoved: true }));

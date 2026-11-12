@@ -23,8 +23,10 @@ dependencies must already exist; the builder does not install global software.
 Build steps have 15-minute deadlines and a sampled 3 GiB workspace budget.
 Starting requires 5 GiB free space, and the build stops below 2 GiB free. Sampling
 can overshoot briefly. Failed artifacts are retained for diagnosis, not deleted
-automatically. Each build creates a new directory; this is not an unlimited
-retention manager. Do not repeatedly rebuild without reviewing disk usage.
+automatically. New builds are refused once retained candidate artifacts exceed
+2 GiB, preventing repeated test builds from accumulating indefinitely. A newly
+admitted build can still add up to its own sampled 3 GiB budget. Existing artifacts
+are not silently deleted; review their ownership before any manual cleanup.
 
 ## Candidate Profile
 
@@ -112,3 +114,14 @@ no interface changes, so it does not close the full VPN-return/long-soak gate.
 
 No installed application or installed profile was replaced. Only numeric
 summaries were exported; real traffic screenshots and raw records were not kept.
+
+The subsequent candidate from revision
+`8a3c459b7734ef05e30dcfb2d9b864a0c9c505c2` also passed a 31-second real capture
+with a deliberately occupied inherited API port. Its bootstrap chose another
+loopback port, and all 11,705 packets were accepted, acknowledged and stored.
+Final pending was zero, sampled peak pending was 3,533, history failures/drops
+and renderer errors were zero, and final driver coverage reported zero buffer
+drops. Sampled API p95 was 51 ms, selection/investigation 218 ms, Stop 584 ms,
+and temporary profile peak 26,005,043 bytes. The larger transient backlog is
+retained as an observation, not described as zero queue pressure. This run had
+no interface switch and does not close the full VPN-return gate.
