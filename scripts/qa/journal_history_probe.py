@@ -75,6 +75,7 @@ class FixtureProvider:
 def isolated_environment(folder: Path, rate: int) -> dict[str, str]:
     env = dict(os.environ)
     env.update({
+        'NETBOT_PROBE_WORKSPACE': str(folder),
         'NETBOT_DATA_DIR': str(folder / 'data'),
         'NETBOT_LOG_DIR': str(folder / 'logs'),
         'NETBOT_CONFIG_DIR': str(folder / 'config'),
@@ -86,6 +87,20 @@ def isolated_environment(folder: Path, rate: int) -> dict[str, str]:
         'NETBOT_STABILITY_RECORDING': '0', 'NETBOT_PROFILE_STAGES': '0',
     })
     return env
+
+
+def validate_worker_workspace() -> None:
+    root = os.environ.get('NETBOT_PROBE_WORKSPACE')
+    if not root:
+        raise ValueError('Probe worker requires a supervised scratch workspace')
+    folder = Path(root).resolve()
+    if folder != Path.cwd().resolve() or not folder.name.startswith('netbot-history-probe-'):
+        raise ValueError('Probe worker must run inside its disposable workspace')
+    for key in ('NETBOT_DB_PATH', 'NETBOT_FLOW_DB_PATH', 'NETBOT_CAPTURE_JOURNAL_PATH',
+                'NETBOT_DATA_DIR', 'NETBOT_LOG_DIR', 'NETBOT_CONFIG_DIR'):
+        value = os.environ.get(key)
+        if not value or not Path(value).resolve().is_relative_to(folder):
+            raise ValueError('Probe storage must remain inside its disposable workspace')
 
 
 def verify_counts(capture: dict, persistence: dict, rows: int) -> list[str]:
@@ -110,7 +125,11 @@ def verify_counts(capture: dict, persistence: dict, rows: int) -> list[str]:
     return reasons
 
 
-def worker(duration: float, live: bool) -> dict:
+def worker(duration: float, live: bool, scenario: str = 'capture') -> dict:
+    validate_worker_workspace()
+    if scenario != 'capture':
+        from scripts.qa.journal_recovery_probe import recovery_worker
+        return recovery_worker(duration, scenario)
     from backend.app.services.settings_service import update_settings
     update_settings({'persist_logs': True, 'auto_block': False,
                      'payload_capture_enabled': False, 'capture_mode': 'metadata',
@@ -240,9 +259,11 @@ def workspace_bytes(folder: Path) -> int:
 
 
 def run_probe(duration: float = 5, *, live: bool = False, rate: int = 100,
-              max_bytes: int = 64 * 1024 * 1024) -> dict:
+              max_bytes: int = 64 * 1024 * 1024, scenario: str = 'capture') -> dict:
     if not 1 <= duration <= 120 or not 1 <= rate <= 500 or not 1024 * 1024 <= max_bytes <= 64 * 1024 * 1024:
         raise ValueError('Probe bounds: 1..120 seconds, 1..500 events/sec, 1..64 MiB')
+    if scenario not in {'capture', 'locked', 'locked-reopen', 'late-commit', 'slow-stop'} or (live and scenario != 'capture'):
+        raise ValueError('Recovery scenarios require the synthetic capture source')
     if os.name != 'nt':
         return {'ok': False, 'reasons': ['windows_dpapi_required']}
     if psutil.disk_usage(tempfile.gettempdir()).free < 512 * 1024**2:
@@ -250,7 +271,7 @@ def run_probe(duration: float = 5, *, live: bool = False, rate: int = 100,
     with tempfile.TemporaryDirectory(prefix='netbot-history-probe-') as temporary:
         folder = Path(temporary)
         process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), '--worker', '--duration', str(duration)]
+            [sys.executable, str(Path(__file__).resolve()), '--worker', '--duration', str(duration), '--scenario', scenario]
             + (['--live'] if live else []), cwd=folder,
             env=isolated_environment(folder, rate), stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True,
@@ -309,10 +330,12 @@ def main() -> int:
     parser.add_argument('--duration', type=float, default=5)
     parser.add_argument('--rate', type=int, default=100)
     parser.add_argument('--live', action='store_true')
+    parser.add_argument('--scenario', choices=('capture', 'locked', 'locked-reopen', 'late-commit', 'slow-stop'), default='capture')
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     try:
-        report = worker(args.duration, args.live) if args.worker else run_probe(args.duration, live=args.live, rate=args.rate)
+        report = (worker(args.duration, args.live, args.scenario) if args.worker else
+                  run_probe(args.duration, live=args.live, rate=args.rate, scenario=args.scenario))
     except Exception as exc:
         report = {'ok': False, 'reasons': ['probe_exception'], 'error_type': type(exc).__name__}
     print(json.dumps(report, sort_keys=True))

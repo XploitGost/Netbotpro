@@ -75,6 +75,12 @@ second history enqueue, then permits journal acknowledgement. The default remain
 performance validation remains required. See
 [ADR 0009](adr/0009-opt-in-history-confirmed-journal-ack.md).
 
+Retained-journal failures now distinguish stopped/closed resources from complete
+history drain. Stop may release the former with critical status and a replay
+marker, allowing an explicit Start to reopen the journal after a writer barrier.
+Active consumers/producers remain blocked. See
+[ADR 0010](adr/0010-retained-journal-recovery-lifecycle.md).
+
 1. Establish one reproducible source/build path. Integrate the preserved desktop
    components into the standard frontend before removing the compatibility overlay.
 2. Define batch schema, sequence, lifecycle, ownership, error and backpressure

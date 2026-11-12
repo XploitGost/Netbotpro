@@ -454,9 +454,14 @@ class SnifferService:
             try:
                 engine.stop()
             except Exception as exc:
-                if not isinstance(engine, ProcessCaptureSession) or not engine.shutdown_ready():
+                if not isinstance(engine, ProcessCaptureSession):
                     raise CaptureStopUnavailableError('Capture driver did not stop; retry stop before resetting') from exc
-                logger.warning('Capture failed but its process and accepted metadata have drained')
+                if engine.shutdown_ready():
+                    logger.warning('Capture failed but its process and accepted metadata have drained')
+                elif engine.recovery_ready():
+                    logger.warning('Capture stopped with closed retained journal; replay is required')
+                else:
+                    raise CaptureStopUnavailableError('Capture driver did not stop; retry stop before resetting') from exc
             status_reader = getattr(engine, 'capture_status', None)
             final_status = status_reader() if callable(status_reader) else None
             with self._lock:
@@ -563,8 +568,8 @@ class SnifferService:
                 raise SessionResetUnavailableError('Stop capture before resetting the session')
         if not self.drain_packet_queue():
             raise SessionResetUnavailableError('Pending packets must finish before resetting the session')
-        if self._deferred_flow_snapshots and not self._persistence.flush():
-            raise SessionResetUnavailableError("Pending flow snapshots must be saved before reset")
+        if (self._deferred_flow_snapshots or self._history_delivery is not None) and not self._persistence.flush():
+            raise SessionResetUnavailableError("Pending history or flow writes must settle before reset")
         self._state.reset()
         self._final_capture_status = None
         self._detection_pipeline.reset_signature_context()

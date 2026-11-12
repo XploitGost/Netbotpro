@@ -368,6 +368,7 @@ class ProcessCaptureSession:
                         journal_backlog_warning_records=self._capacity if self._journal_path else None,
                         journal_acknowledged_records=self._journal_acknowledged if self._journal_path else None,
                         journal_failure_stage=self._journal_failure_stage,
+                        journal_retained_for_replay=self.recovery_ready(),
                         journal_completion_required=self._complete_batch is not None,
                         ipc_delivered=self._delivered, ipc_callback_errors=self._callback_errors)
 
@@ -377,3 +378,17 @@ class ProcessCaptureSession:
         status = self.capture_status()
         return status.get('ipc_pending') == 0 and (
             not self._journal_path or status.get('journal_pending_records') == 0)
+
+    def recovery_ready(self):
+        """Resources stopped/closed with retained journal, NOT successful drain.
+
+        A new session may reopen the same journal after storage has recovered.
+        Never release an active producer, consumer or journal connection.
+        """
+        pending = self._journal_snapshot.get('journal_pending_records')
+        return bool(self._journal_path and self._journal_failure_stage in {
+                        'preparation', 'analysis', 'completion', 'acknowledgement'}
+                    and type(pending) is int and pending > 0
+                    and self._closed and self._journal is None
+                    and self._process is not None and not self._process.is_alive()
+                    and self._complete.is_set())

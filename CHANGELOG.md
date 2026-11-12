@@ -4,6 +4,10 @@
 
 ### Added
 
+- Retained-journal lifecycle recovery separates stopped/closed resources from
+  successful drain, preserves critical/replay status and requires a history reset
+  barrier. Isolated SQLite-lock, service-reopen, late-commit and slow-Stop probes
+  cover the previously stuck recovery path (ADR 0010).
 - Isolated, bounded Windows service probe for synthetic or explicit live
   history-confirmed capture, with temporary-data cleanup and numeric-only reports.
 - ALPN list/tuple storage normalization for packet and alert history, fixing a
