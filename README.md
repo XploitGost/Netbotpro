@@ -18,10 +18,12 @@ does not establish zero packet loss, unlimited capacity or four-hour stability.
 
 Recent work includes capture recovery, bounded pipeline stages, flow-detail
 compression, domain evidence, endpoint navigation and local-sensor telemetry.
-The newer desktop sources are preserved in
-[`frontend/desktop-reference`](frontend/desktop-reference/README.md), but **are
-not yet fully integrated into the standard frontend build**. A clean-checkout
-build does not reproduce every installed experimental UI change.
+The desktop components now live in `frontend/src/desktop` and build as an
+experimental `desktop.html` entry alongside the standard `app.html`, sharing
+the same controller and API. Compiled-baseline patching is retired. See the
+[build and validation notes](frontend/desktop-reference/README.md).
+The installed application is unchanged; parity with every historical binary-only
+patch and long-soak validation remain promotion gates.
 
 ## Screenshots
 

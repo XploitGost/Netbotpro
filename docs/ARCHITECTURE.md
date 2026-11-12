@@ -14,7 +14,7 @@ separate; this document does not claim the refactor is complete.
 | Persistence | History repository, batch writer | Redacted history, bounded batching, retries and drain |
 | Read models | Ring, view batcher, event aggregator | Bounded UI/query context, separate from durable history |
 | Fleet | Registry/history, `local_sensor.py`, `agent/` | Read-only summary telemetry and lifecycle |
-| UI | `frontend/src/`, preserved `frontend/desktop-reference/` | Rendering, selection, navigation and filters |
+| UI | `frontend/src/`, canonical desktop views in `frontend/src/desktop/` | Rendering, selection, navigation and filters |
 
 ## Current Logical Data Path
 
@@ -169,11 +169,12 @@ boundary once per full Python packet dictionary is not the proposed design.
 
 ## Frontend And Desktop
 
-The standard React source is the reproducible frontend entry point. Newer desktop
-components are preserved under `frontend/desktop-reference/`, whose historical
-build patches compiled baseline symbols. That compatibility path is not a complete
-clean-checkout release build. Integration into explicit controller/API contracts
-must precede removal of the overlay.
+One Vite build produces the standard `app.html` and experimental `desktop.html`
+entries. Canonical desktop components in `frontend/src/desktop` use the shared
+workspace controller and authenticated API. Compatibility re-exports and synthetic
+documentation tools remain under `frontend/desktop-reference`; its compiled-bundle
+patcher is retired. Electron defaults to the standard entry. Installed promotion
+and live-soak validation remain separate gates; see ADR 0012.
 
 Electron uses context isolation, sandboxing and disabled renderer Node integration.
 Preload exposes runtime configuration, not arbitrary filesystem/process access.

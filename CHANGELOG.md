@@ -4,6 +4,10 @@
 
 ### Added
 
+- Source-built experimental desktop entry with canonical components, a shared
+  controller and stable API identity. Retired compiled-bundle patching; isolated
+  Electron and desktop/mobile fixture checks cover navigation and selection.
+  Standard entry and installed application remain unchanged (ADR 0012).
 - Validated capture-route confirmation rejects failed/empty bindings, requires a
   stable profile/device/filter tuple and canonicalizes PPP address-filter order
   (ADR 0011), with controlled handover regression coverage.

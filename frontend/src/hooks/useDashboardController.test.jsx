@@ -17,6 +17,7 @@ beforeEach(() => {
   fixture.api = Object.fromEntries([
     "getStatus", "getDashboard", "getSettings", "getInterfaces", "getAgents", "getAgentsOverview",
     "getAgentAlertsSummary", "getAgentRiskSummary", "getMonitoringMetrics", "getReports", "getPackets", "getAlerts",
+    "getPacketDetail", "getPacketContext", "getAlertDetail", "getAlertContext",
   ].map((key) => [key, vi.fn().mockResolvedValue({})]));
   fixture.api.getStatus.mockResolvedValue({ local_token_required: false });
   fixture.api.getDashboard.mockResolvedValue({ state: { packet_count: 100 }, recent_packets: page("initial").items, recent_alerts: [] });
@@ -33,6 +34,23 @@ async function controller() {
 }
 
 describe("dashboard live-follow continuity", () => {
+  it("supports a desktop default without changing the standard default", async () => {
+    const { result } = renderHook(() => useDashboardController({ defaultPage: "command" }));
+    await waitFor(() => expect(result.current.loadingState.bootstrap).toBe(false));
+    expect(result.current.activePage).toBe("command");
+    expect(result.current.localTokenAccepted).toBe(true);
+  });
+
+  it("selects monitor evidence in place when navigation is disabled", async () => {
+    const { result } = await controller();
+    fixture.api.getPacketDetail.mockResolvedValue(page("detail").items[0]);
+    await act(async () => result.current.loadPacketDetail(page("detail").items[0], 0, { navigate: false }));
+    expect(result.current.activePage).toBe("monitor");
+    expect(result.current.selectedPacketId).toBe("detail");
+    await act(async () => result.current.loadPacketDetail(page("detail").items[0], 0));
+    expect(result.current.activePage).toBe("inspect");
+  });
+
   it("keeps a paused list stable while traffic counters continue", async () => {
     const { result } = await controller();
     act(() => result.current.freezeLiveFollow());

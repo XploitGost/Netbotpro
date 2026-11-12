@@ -81,8 +81,9 @@ marker, allowing an explicit Start to reopen the journal after a writer barrier.
 Active consumers/producers remain blocked. See
 [ADR 0010](adr/0010-retained-journal-recovery-lifecycle.md).
 
-1. Establish one reproducible source/build path. Integrate the preserved desktop
-   components into the standard frontend before removing the compatibility overlay.
+1. Desktop components now have a source-built experimental entry sharing the
+   standard controller. The compiled-bundle patcher is retired; installed default
+   promotion remains gated on live validation (ADR 0012).
 2. Define batch schema, sequence, lifecycle, ownership, error and backpressure
    contracts. Keep runtime and UI queues separate from durable acknowledgement.
 3. Separate capture orchestration, analysis state, persistence and read models
@@ -98,4 +99,5 @@ Flow detail compression is lossless and reduces retained fixture state, but its
 hot target is not a global memory cap. Active flows and ID catalogs still need
 retention design. Short smoke tests do not establish four-hour stability or prove
 absence of hardware packet loss. ML alert calibration, crash-atomic persistence
-and the complete desktop source migration require further validation.
+and installed desktop promotion require further validation. See
+[ADR 0012](adr/0012-source-built-desktop-entry.md) for the source entry and limits.

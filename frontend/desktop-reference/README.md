@@ -1,29 +1,31 @@
-# Desktop UI source checkpoint
+# Desktop contracts and documentation harness
 
-This directory preserves the authored Command Center, Live Monitor, Investigate,
-Fleet, navigation, styles and pure model tests used by the desktop UI work.
-It is not yet the canonical frontend entry point. The normal React application
-and its build remain in the parent directory.
+Canonical components and models now live in `../src/desktop/`. Matching files
+here re-export that source for model contracts and documentation tools; they
+are not a second implementation.
 
-Run the model tests with `node --test *Model.test.mjs` from this directory.
-Dependencies can be installed with `npm ci`.
+From the parent frontend directory, `npm ci` and `npm run build` build both
+`app.html` (standard default) and `desktop.html` (experimental desktop UI).
+`node desktop-reference/build.mjs` delegates to the same Vite build. The old
+compiled-bundle patcher and historical-baseline requirement are retired.
+No installed application is overwritten by these commands.
 
-The standalone documentation harness (`docs-preview.jsx`, `capture-docs.mjs`,
-`docs-shell.css`) renders these components with synthetic fixtures and a
-preview-only host layout. See `../../docs/SCREENSHOTS.md`. It does not require
-the historical compiled baseline and is not a production shell implementation.
+The Electron setting `NETBOT_DESKTOP_UI=desktop` explicitly chooses the new
+entry. Unset or `standard` preserves `app.html`. Both share the real controller
+and authenticated API. The desktop entry does not use the old DOM bridge or
+documentation fixtures. See [ADR 0012](../../docs/adr/0012-source-built-desktop-entry.md).
 
-## Transitional build limitation
+Run model tests with `node --test *Model.test.mjs` here. After `npm ci` here,
+`node test-source-desktop.mjs` checks the built desktop entry using synthetic
+HTTP/WebSocket transport and headless Chrome. Four bounded synthetic screenshots
+are written under `.runtime/source-desktop-check/`. The standard entry has its
+own `test-standard-live-follow.mjs` regression script.
 
-`build.mjs` is a historical compatibility overlay: it patches named boundaries
-inside a specific prebuilt desktop JavaScript bundle, including
-`assets/index-B8rp-3mx.js`. It requires the matching baseline, not an arbitrary
-new build of the parent frontend. Supply that baseline through
-`NETBOT_DESKTOP_FRONTEND` on first build; the script copies it to `.baseline`.
-Generated files and the baseline are intentionally not committed. Do not treat
-this as a clean-checkout release build or install its output automatically.
-Later installed UI patches are not all represented by this original build script.
+`test-electron-runtime.mjs` uses a temporary profile and isolated database paths.
+CI supplies `NETBOT_SMOKE_BACKEND_DIR` for its freshly packaged backend. Local
+source tests can instead set `NETBOT_SMOKE_PYTHON_BIN` to a Python executable
+with repository requirements. This verifies startup, IPC isolation and normal
+drain, not driver capture or long-soak stability.
 
-The architecture migration must move these components into the normal source
-entry point and replace compiled-bundle edits with explicit props, controller
-contracts and tests. Publishing this checkpoint does not complete that migration.
+`docs-preview.jsx`, `capture-docs.mjs` and `docs-shell.css` remain a synthetic,
+preview-only documentation harness. See `../../docs/SCREENSHOTS.md`.

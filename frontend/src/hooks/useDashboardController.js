@@ -5,7 +5,7 @@ import { useLiveEvents } from "./useLiveEvents";
 import { getPeerInfo, isPrivateIp } from "../lib/networkView";
 
 export const PAGE_SIZE = 25;
-const VALID_PAGES = new Set(["monitor", "inspect", "flows", "incidents", "agents", "settings", "traceroute", "exports", "reports", "offline"]);
+const VALID_PAGES = new Set(["command", "monitor", "inspect", "flows", "incidents", "agents", "settings", "traceroute", "exports", "reports", "offline"]);
 const TIMELINE_BUCKETS = 30;
 const TIMELINE_BUCKET_MS = 2_000;
 const HISTORY_CACHE_TTL_MS = 5_000;
@@ -31,15 +31,15 @@ const defaultSettings = {
   forensic_confirmed: false,
 };
 
-function initialActivePage() {
+function initialActivePage(defaultPage = "monitor") {
   if (typeof window === "undefined") {
-    return "monitor";
+    return defaultPage;
   }
   try {
     const page = new URLSearchParams(window.location.search).get("page") || "";
-    return VALID_PAGES.has(page) ? page : "monitor";
+    return VALID_PAGES.has(page) ? page : defaultPage;
   } catch {
-    return "monitor";
+    return defaultPage;
   }
 }
 
@@ -175,10 +175,10 @@ function normalizeErrorMessage(error, fallback = "Request failed") {
   return text.replace(/^Error:\s*/i, "").trim() || fallback;
 }
 
-export function useDashboardController() {
+export function useDashboardController({defaultPage = "monitor", onPacketBatch, onCaptureReset} = {}) {
   const { localToken, setLocalToken, managedLocalToken } = useLocalAuth();
   const api = useApiClient(localToken);
-  const [activePage, setActivePage] = useState(initialActivePage);
+  const [activePage, setActivePage] = useState(() => initialActivePage(defaultPage));
   const [dashboard, setDashboard] = useState(null);
   const [packets, setPackets] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -646,11 +646,11 @@ export function useDashboardController() {
     }
   }
 
-  async function loadPacketDetail(packet, index) {
+  async function loadPacketDetail(packet, index, options = {}) {
     const requestId = packetDetailRequestRef.current + 1;
     packetDetailRequestRef.current = requestId;
     try {
-      setActivePage("inspect");
+      if (options.navigate !== false) setActivePage("inspect");
       const packetId = getPacketId(packet, index, packetMeta.offset);
       setSelectedPacketId(packetId);
       setSelectedPacketContext(null);
@@ -685,11 +685,11 @@ export function useDashboardController() {
     }
   }
 
-  async function loadAlertDetail(alert, index) {
+  async function loadAlertDetail(alert, index, options = {}) {
     const requestId = alertDetailRequestRef.current + 1;
     alertDetailRequestRef.current = requestId;
     try {
-      setActivePage("inspect");
+      if (options.navigate !== false) setActivePage("inspect");
       const alertId = getAlertId(alert, index, alertMeta.offset);
       setSelectedAlertId(alertId);
       setSelectedAlertContext(null);
@@ -1249,6 +1249,7 @@ export function useDashboardController() {
     enabled: !localTokenRequired || localTokenAccepted,
     localToken,
     onPacketsBatch: (messages) => {
+      onPacketBatch?.(messages);
       clearHistoryCaches();
       setTimeline((current) => appendBatchToTimeline(current, "packet", messages));
       const matching = messages.map((message) => message.payload).filter((packet) => matchesLivePacketQuery(packet, packetQuery));
@@ -1283,6 +1284,7 @@ export function useDashboardController() {
     onState: (message) => {
       clearHistoryCaches();
       if (message.type === "sniffer:reset") {
+        onCaptureReset?.();
         cancelFollowRefresh();
         mergeObservability(message.payload?.observability || {});
         setPackets([]);
@@ -1394,6 +1396,7 @@ export function useDashboardController() {
     error,
     loadingState,
     localTokenRequired,
+    localTokenAccepted,
     managedLocalToken,
     canStartSniffer,
     liveFollow,

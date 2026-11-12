@@ -181,7 +181,7 @@ function createInvestigationExportPayload({ kind, id, model }) {
   };
 }
 
-function App() {
+export function DashboardWorkspace({ controller, desktopViews }) {
   const {
     localToken,
     api,
@@ -280,7 +280,7 @@ function App() {
     clearFocusedTarget,
     resumeLiveFollow,
     toggleLiveFollow,
-  } = useDashboardController();
+  } = controller;
 
   const captureContext = useMemo(() => buildCaptureInspectionContext({
     packetMeta,
@@ -668,6 +668,7 @@ function App() {
   );
 
   const currentPage = {
+    command: monitorPage,
     monitor: monitorPage,
     inspect: inspectPage,
     flows: flowsPage,
@@ -679,6 +680,46 @@ function App() {
     reports: reportsPage,
     offline: offlinePage,
   }[activePage];
+
+  if (desktopViews) {
+    const { CommandCenter, LiveMonitor: DesktopMonitor, Investigate: DesktopInvestigate, Fleet: DesktopFleet, Shell: DesktopShell } = desktopViews;
+    const ready = controller.localTokenAccepted && !loadingState.bootstrap;
+    const content = {
+      command: <><header className="workspace-header"><h1>Command Center</h1><p>Operational Overview</p></header>
+        <CommandCenter api={api} dashboardState={ready ? "success" : "loading"} agentsState={ready ? "success" : "loading"}
+          sniffer={sniffer} timeline={timeline} alerts={alerts} agents={agents} observability={observability} onNavigate={setActivePage} /></>,
+      monitor: <DesktopMonitor api={api} packets={packets} alerts={alerts} packetMeta={packetMeta} alertMeta={alertMeta}
+        packetQuery={packetQuery} alertQuery={alertQuery} packet={selectedPacket} alert={selectedAlert}
+        packetModel={packetInspection} selectedPacketId={selectedPacketId} selectedAlertId={selectedAlertId}
+        sniffer={sniffer} timeline={timeline} interfaces={interfaces} settings={settings} liveFollow={liveFollow}
+        focusedTarget={focusedTarget} isLoading={loadingState} resourceState={ready ? "success" : "loading"}
+        onPacketQueryChange={handlePacketQueryChange} onApplyPacketFilters={applyPacketFilters} onPaginatePackets={paginatePackets}
+        onSelectPacket={loadPacketDetail} onTrackTarget={handleTrackRow} onClearFocusedTarget={clearFocusedTarget}
+        onToggleFollow={toggleLiveFollow} onAlertQueryChange={handleAlertQueryChange} onApplyAlertFilters={applyAlertFilters}
+        onPaginateAlerts={paginateAlerts} onSelectAlert={loadAlertDetail} pageSize={PAGE_SIZE} onNavigate={setActivePage}
+        packetDetailLoading={loadingState.packetDetail} />,
+      inspect: <DesktopInvestigate api={api} packets={packets} alerts={alerts} packetMeta={packetMeta} alertMeta={alertMeta}
+        packet={selectedPacket} alert={selectedAlert} packetModel={packetInspection} alertModel={alertInspection}
+        packetContext={packetInspectionContext} alertContext={alertInspectionContext} selectedPacketId={selectedPacketId}
+        selectedAlertId={selectedAlertId} packetNavigation={packetNavigation} alertNavigation={alertNavigation}
+        pinned={inspectionPinned} actions={inspectActions} onSelectPacket={loadPacketDetail} onSelectAlert={loadAlertDetail}
+        onPaginatePackets={paginatePackets} onPaginateAlerts={paginateAlerts} loading={loadingState}
+        focusedTarget={focusedTarget} onClearFocusedTarget={clearFocusedTarget}
+        renderDetails={() => <DetailPanel title={selectedAlertId ? "Alert Detail" : "Packet Detail"}
+          model={selectedAlertId ? alertInspection : packetInspection} selectionKey={selectedAlertId || selectedPacketId}
+          navigation={selectedAlertId ? alertNavigation : packetNavigation} />}
+        renderAdvancedInspector={() => <DeepPacketPanel api={api} packetId={selectedPacketId} />}
+        renderIntelligence={() => <ProtocolIntelligencePanel api={api} />}
+        renderFocus={() => <FocusedIpPanel focusedTarget={focusedTarget} focusedPacketCount={focusedPacketCount}
+          focusedAlerts={focusedAlerts} liveFollow={liveFollow} onClearFocusedTarget={clearFocusedTarget} onResumeLive={resumeLiveFollow} />} />,
+      agents: <><DesktopFleet agents={agents} overview={agentOverview} selectedAgentId={selectedAgentId}
+        onSelectAgent={selectAgent} onRefresh={() => loadAgents(selectedAgentId)} onExportFleetSummary={exportAgentFleetSummary}
+        isLoading={loadingState.agents} error={agentError} agentHealthHistory={agentHealthHistory}
+        agentAlertsHistory={agentAlertsHistory} historyRange={agentHistoryRange} />
+        <details className="desktop-advanced"><summary>Extended agent telemetry</summary>{agentsPage}</details></>,
+    }[activePage];
+    return <DesktopShell controller={controller}>{content || <><WorkspaceHeader activePage={activePage} onNavigate={setActivePage} />{currentPage}</>}</DesktopShell>;
+  }
 
   return (
     <main className="shell">
@@ -728,4 +769,6 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return <DashboardWorkspace controller={useDashboardController()} />;
+}
