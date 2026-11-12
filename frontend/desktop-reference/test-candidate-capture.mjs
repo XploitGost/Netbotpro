@@ -28,6 +28,7 @@ async function bytes(folder) {
   return total;
 }
 let app, ownerPid, report, peakBytes = 0;
+const requestDurations = [];
 try {
   app = await _electron.launch({ executablePath: executable, args: [], timeout: 45000,
     env: { ...process.env, NETBOT_CANDIDATE_PROFILE: profile, NETBOT_PORT: String(port), NETBOT_HOST: '127.0.0.1', NETBOT_DISABLE_GPU: '1' } });
@@ -38,10 +39,14 @@ try {
   await window.getByRole('heading', { name: 'Command Center', exact: true }).waitFor({ timeout: 45000 });
   const runtime = await window.evaluate(() => window.netbotproDesktop);
   const request = async (endpoint, options = {}) => {
+    const requestedAt = Date.now();
     const result = await fetch(`http://127.0.0.1:${port}/api${endpoint}`, { ...options,
       headers: { 'X-NetBot-Token': runtime.localToken, ...options.headers }, signal: AbortSignal.timeout(10000) });
     assert.ok(result.ok, `Candidate API status ${result.status}`);
-    return result.json();
+    const body = await result.json();
+    requestDurations.push(Date.now() - requestedAt);
+    if (requestDurations.length > 256) requestDurations.shift();
+    return body;
   };
   await window.locator('nav.app-nav').getByRole('button', { name: 'Live Monitor', exact: true }).click();
   const bar = window.locator('header[aria-label="Capture status"]');
@@ -49,7 +54,7 @@ try {
   await window.waitForFunction(() => { const stop = document.querySelector('.soc-stop'); return stop && !stop.disabled; }, null, { timeout: 20000 });
   console.log(JSON.stringify({ stage: 'capture_started', durationSeconds: duration, isolatedCandidate: true }));
   const started = Date.now();
-  let pendingPeak = 0, interfaceChanges = 0, previousInterface, last;
+  let pendingPeak = 0, interfaceChanges = 0, previousInterface, last, nextSample = 0;
   while (Date.now() - started < duration * 1000) {
     last = await request('/sniffer/state');
     assert.equal(last.running, true, 'Capture unexpectedly stopped');
@@ -57,14 +62,39 @@ try {
     pendingPeak = Math.max(pendingPeak, Number(last.journal_pending_records || 0));
     if (previousInterface && last.selected_iface && previousInterface !== last.selected_iface) interfaceChanges++;
     previousInterface = last.selected_iface || previousInterface;
+    if (Date.now() - started >= nextSample) {
+      const history = await request('/packets?limit=25&offset=0&only_remote=false');
+      const remote = await request('/packets?limit=1&offset=0&only_remote=true');
+      const ui = await window.evaluate(() => ({ activePage: document.querySelector('nav [aria-current="page"]')?.dataset.navId,
+        follow: document.querySelector('.lm-follow input')?.checked,
+        streamLabel: document.querySelector('.app-nav-footer small:last-child')?.textContent }));
+      console.log(JSON.stringify({ stage: 'capture_sample', seconds: Math.round((Date.now() - started) / 1000),
+        accepted: last.ipc_accepted, acknowledged: last.journal_acknowledged_records,
+        pending: last.journal_pending_records, historyTotal: history.total, historyItems: history.items?.length, remoteTotal: remote.total,
+        ui, websocketClients: last.observability?.event_bus?.subscribers,
+        uiRows: await window.locator('.lm-packets tbody tr[tabindex]').count(), rendererErrors: errors.length,
+        interfaceChanges, routeSwitches: last.route_switches, captureError: !!last.capture_error,
+        routeWarning: !!last.route_warning, health: last.health, controlSampleAgeSeconds: last.control_sample_age_seconds,
+        driverBufferDroppedReported: last.driver_stats?.buffer_dropped_reported ?? null }));
+      nextSample += 15000;
+      if (ui.activePage === 'monitor' && history.total > 0 && await window.locator('.lm-packets tbody tr[tabindex]').count() === 0) {
+        await window.bringToFront();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log(JSON.stringify({ stage: 'foreground_check', uiRows: await window.locator('.lm-packets tbody tr[tabindex]').count() }));
+      }
+    }
     peakBytes = Math.max(peakBytes, await bytes(profile));
     assert.ok(peakBytes < 128 * 1024**2, 'Candidate storage budget exceeded');
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
+  await window.locator('nav.app-nav').getByRole('button', { name: 'Live Monitor', exact: true }).click();
+  await window.getByRole('heading', { name: 'Live Monitor', exact: true }).waitFor();
   const panel = window.locator('.lm-packets');
+  const selectionStarted = Date.now();
   await panel.locator('tbody tr[tabindex]').first().locator('td').first().click({ timeout: 10000 });
   await window.getByRole('button', { name: 'Open in Investigate', exact: true }).click();
   await window.getByRole('heading', { name: 'Key Findings', exact: true }).waitFor({ timeout: 15000 });
+  const selectionMilliseconds = Date.now() - selectionStarted;
   await window.locator('nav.app-nav').getByRole('button', { name: 'Live Monitor', exact: true }).click();
   const follow = panel.getByRole('switch', { name: 'Auto-follow' });
   if (await follow.isChecked()) await follow.click();
@@ -84,11 +114,13 @@ try {
   const persistence = final.observability?.persistence || {};
   report = { live: true, packagedCandidate: true, durationSeconds: Math.round((Date.now() - started) / 1000),
     accepted: capture.ipc_accepted, acknowledged: capture.journal_acknowledged_records,
-    pendingFinal: capture.journal_pending_records, pendingPeak, interfaceChanges,
+    pendingFinal: capture.journal_pending_records, pendingPeak, interfaceChanges, routeSwitches: capture.route_switches,
     historyFailed: persistence.failed_writes, historyDropped: persistence.dropped_writes,
     driverBufferDroppedReported: capture.driver_stats?.buffer_dropped_reported ?? null,
     driverCoverageComplete: capture.driver_stats?.coverage_complete ?? null,
-    stopMilliseconds: Date.now() - stoppedAt, rendererErrors: errors.length, profilePeakBytes: peakBytes };
+    stopMilliseconds: Date.now() - stoppedAt, selectionMilliseconds,
+    sampledApiP95Milliseconds: requestDurations.toSorted((a, b) => a - b)[Math.max(0, Math.ceil(requestDurations.length * .95) - 1)],
+    rendererErrors: errors.length, profilePeakBytes: peakBytes };
   console.log(JSON.stringify({ stage: 'capture_stopped', ...report }));
   assert.ok(report.acknowledged > 0, 'No history-confirmed traffic');
   assert.equal(report.accepted, report.acknowledged, 'Capture acknowledgement mismatch');

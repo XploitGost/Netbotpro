@@ -65,3 +65,46 @@ An interface-change count does not prove a complete VPN-return scenario. Such a
 scenario requires an actual user-approved route change while capture is active.
 Missing driver statistics remain unknown, not proof of zero wire loss. A short
 successful capture does not establish multi-hour stability.
+
+## Local Evidence: 2026-11-12
+
+The independently built candidate used source revision
+`a9512a398dde95622ed7c7ae5b2db18669e45023`, a fresh packaged backend and Electron
+45.2.3. The complete build workspace, including intermediate files, was
+857,832,152 bytes. An initial long-checkout build exposed a Windows path-length
+failure while copying a scientific-library binary; the short candidate root
+resolved it without changing OS settings or using an old packaged backend.
+
+The final live run used the improved page-aware test harness:
+
+| Observation | Measured |
+| --- | ---: |
+| Capture plus UI checks | 122 seconds |
+| Accepted / acknowledged / SQLite packet rows | 10,189 / 10,189 / 10,189 |
+| Final journal pending | 0 |
+| Sampled peak pending | 128 |
+| Failed / dropped history writes | 0 / 0 |
+| Reported driver buffer drops | 0; final statistics coverage complete |
+| Renderer errors | 0 |
+| Sampled local API p95 | 40 ms |
+| Packet selection through investigation findings | 175 ms |
+| Stop completion | 473 ms |
+| Sampled temporary profile peak | 28,535,468 bytes |
+| Acknowledged app shutdown and temporary-profile removal | Passed |
+
+These API and selection samples include test overhead and are not controlled
+throughput/latency benchmarks. Memory/CPU and multi-hour growth still need
+dedicated profiling. Driver counters do not prove zero wire loss.
+
+In a separate 22-second run with one observed interface change, all 1,170
+accepted packets were acknowledged and stored, final pending was zero, and UI
+checks passed. A longer transition observation recorded two interface switches
+with positive progressing capture counters, but its UI check failed because the
+test assumed Live Monitor stayed selected while another page was active.
+The harness now explicitly navigates back before selecting a packet and records
+the active page with numeric samples. That failed UI assertion is not counted as
+a successful complete VPN-return acceptance run. The final 122-second run had
+no interface changes, so it does not close the full VPN-return/long-soak gate.
+
+No installed application or installed profile was replaced. Only numeric
+summaries were exported; real traffic screenshots and raw records were not kept.
