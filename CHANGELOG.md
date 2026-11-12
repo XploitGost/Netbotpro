@@ -4,6 +4,10 @@
 
 ### Added
 
+- Isolated Windows candidate builder with fresh packaged backend, short artifact
+  paths, separate metadata-only profile and bounded build/live-test storage.
+  A local 122-second packaged UI run reconciled 10,189 accepted/acknowledged/stored
+  packets; complete VPN-return and multi-hour acceptance remain open gates.
 - Source-built experimental desktop entry with canonical components, a shared
   controller and stable API identity. Retired compiled-bundle patching; isolated
   Electron and desktop/mobile fixture checks cover navigation and selection.

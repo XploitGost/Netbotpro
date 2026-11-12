@@ -145,6 +145,7 @@ jobs:
           node --check preload.cjs
           node --test backend-shutdown.test.cjs
           node --test ui-entry.test.cjs
+          node --test candidate-profile.test.cjs
           npx electron --version
       - name: Build and stage packaged backend
         run: |
