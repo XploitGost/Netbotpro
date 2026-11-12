@@ -23,9 +23,11 @@ describe their own release, not the current branch or installed desktop overlay.
 - [ADR 0008: versioned alert occurrence keys](adr/0008-versioned-alert-occurrence-keys.md)
 - [ADR 0009: opt-in history-confirmed journal ack](adr/0009-opt-in-history-confirmed-journal-ack.md)
 - [ADR 0010: retained-journal recovery lifecycle](adr/0010-retained-journal-recovery-lifecycle.md)
+- [ADR 0011: validated capture-route confirmation](adr/0011-validated-capture-route-confirmation.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
 - [Isolated journal/history probe and local evidence](JOURNAL_HISTORY_PROBE.md)
+- [Standard frontend live-follow continuity](LIVE_FOLLOW_VALIDATION.md)
 - [Screenshot provenance](SCREENSHOTS.md)
 - [Repository and GitHub maintenance](REPOSITORY_MAINTENANCE.md)
 

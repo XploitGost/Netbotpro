@@ -8,6 +8,7 @@ from core.netbotpro_sniffer_core.interfaces import (
     list_capture_interfaces,
     recommended_interface_name,
     resolve_capture_interface,
+    capture_target,
 )
 
 
@@ -51,6 +52,17 @@ FAKE_MIXED_INTERFACES = [
 
 
 class CaptureInterfacesTests(unittest.TestCase):
+    def test_ras_filter_is_stable_when_address_inventory_reorders_or_repeats(self):
+        item = {'value': 'ras:fixture', 'capture_device': 'wan4',
+                'capture_device_ipv6': 'wan6',
+                'capture_ips': ['2001:db8::2', '192.0.2.10', '192.0.2.10']}
+        with patch('core.netbotpro_sniffer_core.interfaces._scapy_interfaces', return_value=[item]):
+            first = capture_target('ras:fixture')
+            item['capture_ips'] = ['192.0.2.10', '2001:db8::2']
+            second = capture_target('ras:fixture')
+        self.assertEqual(first, second)
+        self.assertEqual(first, (['wan4', 'wan6'], 'host 192.0.2.10 or host 2001:db8::2'))
+
     def test_inventory_reuses_one_snapshot_for_selection_and_label(self):
         items = [dict(item) for item in FAKE_INTERFACES]
         with patch('core.netbotpro_sniffer_core.interfaces._scapy_interfaces', return_value=items) as scan, \

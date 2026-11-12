@@ -54,7 +54,7 @@ class NetSniffer:
         self._auto_interface = True
         self._route_warning = ""
         self._route_switches = 0
-        self._route_candidate: str | None = None
+        self._route_candidate: tuple[Any, ...] | None = None
         self._route_candidate_hits = 0
         self._driver_stats = DriverStats()
         self._pcap_binding = None
@@ -211,21 +211,22 @@ class NetSniffer:
     def _apply_capture_observation(self, current, observation):
         selected, target, capture_filter, error = observation
         try:
+            if error or not selected or not target:
+                with self._lock:
+                    self._route_warning = error or 'Waiting for capture adapter: target unavailable'
+                self._route_candidate, self._route_candidate_hits = None, 0
+                return current, False
             # Two consecutive observations avoid following a transient VPN route.
             if self._auto_interface and selected and selected != self.selected_iface():
-                if selected != self._route_candidate:
-                    self._route_candidate, self._route_candidate_hits = selected, 1
+                candidate = (selected, tuple(target) if isinstance(target, list) else target, capture_filter)
+                if candidate != self._route_candidate:
+                    self._route_candidate, self._route_candidate_hits = candidate, 1
                 else:
                     self._route_candidate_hits += 1
                 if self._route_candidate_hits < 2:
-                    return current, True
+                    return current, not bool(self._route_warning)
             else:
                 self._route_candidate, self._route_candidate_hits = None, 0
-            if error:
-                with self._lock:
-                    self._route_warning = error
-                self._route_candidate, self._route_candidate_hits = None, 0
-                return current, False
             changed = selected != self._iface or target != current or capture_filter != self._capture_filter
             if changed:
                 self._close_binding()

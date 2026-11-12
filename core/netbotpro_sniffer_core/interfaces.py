@@ -232,7 +232,8 @@ def capture_target(candidate: str | None) -> tuple[str | list[str] | None, str |
     if str(candidate or "").startswith("ras:"):
         for item in _scapy_interfaces():
             if item["value"] == candidate and item.get("capture_device"):
-                ips = [ipaddress.ip_address(ip) for ip in item["capture_ips"]]
+                ips = sorted({ipaddress.ip_address(ip) for ip in item["capture_ips"]},
+                             key=lambda ip: (ip.version, int(ip), str(ip)))
                 devices = [str(item["capture_device"])] if any(ip.version == 4 for ip in ips) else []
                 if any(ip.version == 6 for ip in ips):
                     if not item.get("capture_device_ipv6"):
