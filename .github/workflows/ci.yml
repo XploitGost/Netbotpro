@@ -146,6 +146,7 @@ jobs:
           node --test backend-shutdown.test.cjs
           node --test ui-entry.test.cjs
           node --test candidate-profile.test.cjs
+          node --test ../../frontend/desktop-reference/candidate-soak-policy.test.cjs ../../frontend/desktop-reference/candidate-cycle.test.cjs
           npx electron --version
       - name: Build and stage packaged backend
         run: |
