@@ -24,6 +24,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [ADR 0009: opt-in history-confirmed journal ack](adr/0009-opt-in-history-confirmed-journal-ack.md)
 - [Roadmap and acceptance gates](ROADMAP.md)
 - [Validation and CPU measurement](VALIDATION.md)
+- [Isolated journal/history probe and local evidence](JOURNAL_HISTORY_PROBE.md)
 - [Screenshot provenance](SCREENSHOTS.md)
 - [Repository and GitHub maintenance](REPOSITORY_MAINTENANCE.md)
 
