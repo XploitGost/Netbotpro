@@ -29,6 +29,7 @@ describe their own release, not the current branch or installed desktop overlay.
 - [Validation and CPU measurement](VALIDATION.md)
 - [Isolated journal/history probe and local evidence](JOURNAL_HISTORY_PROBE.md)
 - [Standard frontend live-follow continuity](LIVE_FOLLOW_VALIDATION.md)
+- [Isolated Windows desktop candidate](DESKTOP_CANDIDATE.md)
 - [Screenshot provenance](SCREENSHOTS.md)
 - [Repository and GitHub maintenance](REPOSITORY_MAINTENANCE.md)
 
